@@ -534,6 +534,22 @@ dbVersion=2
 EOF
     chown user:user /home/user/.config/baloofilerc
     chmod 600 /home/user/.config/baloofilerc
+    # Portal backends inherit KWin's KGSL/legacy-ION environment from the Plasma
+    # session and crash-loop on this 4.4 kernel. The document portal also starts a
+    # FUSE helper which can spin at 100% CPU after mount failure. This dedicated
+    # image uses native KDE dialogs and Anland's direct audio/input bridges, so
+    # disable portal D-Bus activation deterministically.
+    for service in \
+        org.freedesktop.portal.Desktop \
+        org.freedesktop.portal.Documents \
+        org.freedesktop.impl.portal.desktop.kde \
+        org.freedesktop.impl.portal.desktop.kwallet; do
+        cat >"/usr/share/dbus-1/services/${service}.service" <<EOF
+[D-BUS Service]
+Name=${service}
+Exec=/bin/false
+EOF
+    done
     cat >/home/user/.config/fcitx5/profile <<'EOF'
 [Groups/0]
 Name=默认
@@ -571,6 +587,7 @@ input=fcitx5-pinyin,maliit
 locale=zh_CN.UTF-8
 default_user=user
 snap=disabled
+portal=disabled
 EOF
 fi
 rm -rf /tmp/mi-pad4

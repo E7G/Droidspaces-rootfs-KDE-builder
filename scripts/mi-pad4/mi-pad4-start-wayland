@@ -30,6 +30,7 @@ export QT_QUICK_CONTROLS_MOBILE=true
 # on the 4.4 kernel; its document FUSE helper can then spin forever. Native KDE
 # dialogs work without it and save memory/CPU on this 4 GB tablet.
 export PLASMA_INTEGRATION_USE_PORTAL=0
+export GTK_USE_PORTAL=0
 export MALLOC_ARENA_MAX=2
 export PLASMA_PLATFORM=phone:handset
 export PLASMA_DEFAULT_SHELL=org.kde.plasma.mobileshell
