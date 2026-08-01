@@ -26,10 +26,12 @@ fetch_archive "$DESKTOP_URL" "$DESKTOP_SHA256" plasma-desktop.tar.xz
 fetch_archive "$WORKSPACE_URL" "$WORKSPACE_SHA256" plasma-workspace.tar.xz
 
 install_applet_payload() {
-    local source="$1" destination="$2" item name
+    local source="$1" destination="$2" package_type="${3:-Plasma/Applet}" item name
     rm -rf "$destination"
     install -d "$destination/ui"
     cp -a "$source/metadata.json" "$destination/metadata.json"
+    sed -i "2i\\    \"KPackageStructure\": \"$package_type\"," \
+        "$destination/metadata.json"
 
     # plasma_add_applet installs QML under ui/.  The source tree uses either
     # the applet root or a qml/ subdirectory, so normalize it here instead of
@@ -73,7 +75,7 @@ install_applet_payload "$workspace_root/applets/systemtray" \
     /usr/share/plasma/plasmoids/org.kde.plasma.systemtray
 
 install_applet_payload "$desktop_root/containments/panel" \
-    /usr/share/plasma/containments/org.kde.panel
+    /usr/share/plasma/containments/org.kde.panel Plasma/Containment
 
 test -f /usr/share/plasma/plasmoids/org.kde.plasma.kickoff/ui/main.qml
 test -f /usr/share/plasma/plasmoids/org.kde.plasma.taskmanager/ui/main.qml
