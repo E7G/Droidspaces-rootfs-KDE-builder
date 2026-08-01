@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       rootfs_target:
-        description: RootFS target. Arch is attempted first; Ubuntu is the Wayland fallback.
+        description: Ubuntu 26 supports Anland/Wayland. Arch currently supports X11 only.
         required: true
         type: choice
-        default: Arch-KDE
+        default: Ubuntu-26-KDE
         options:
           - Arch-KDE
           - Ubuntu-26-KDE
@@ -79,7 +79,7 @@ jobs:
           retention-days: 14
 
   build-ubuntu:
-    name: Build Ubuntu 26 Wayland fallback
+    name: Build Ubuntu 26 Anland Wayland
     needs: build-arch
     if: ${{ always() && (inputs.rootfs_target == 'Ubuntu-26-KDE' || needs.build-arch.result == 'failure') }}
     runs-on: ubuntu-24.04-arm
@@ -170,6 +170,7 @@ jobs:
             Xiaomi Mi Pad 4 / aarch64 Droidspaces RootFS.
 
             Kernel profile: 4.4 with KSU/ReKSU, VGEM, DRM and KGSL.
-            Arch KDE is attempted first. Ubuntu 26 KDE Wayland is built automatically when Arch fails.
+            Selected target: ${{ inputs.rootfs_target }}.
+            Ubuntu 26 uses the patched Anland/KWin Wayland stack; Arch is retained only as an explicit X11 option.
             The image includes systemd 257 compatibility, KGSL/legacy ION shim, and disabled KDE screen locking.
           files: release_assets/*
