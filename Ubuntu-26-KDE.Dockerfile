@@ -35,6 +35,7 @@ RUN printf '%s\n' \
 COPY scripts/download-firmware /usr/local/bin/
 COPY scripts/nosnap.sh /usr/local/sbin/nosnap
 COPY scripts/systemd257.sh /usr/local/sbin/systemd257
+COPY scripts/ion-legacy-shim.c /tmp/ion-legacy-shim.c
 
 # 将自定义的 bashrc 脚本复制到根文件系统的 profile 目录
 COPY scripts/bashrc.sh /etc/profile.d/ds-aliases.sh
@@ -67,7 +68,7 @@ RUN apt-get update && \
     # 核心工具组件
     bash jq dialog coreutils file findutils grep sed gawk curl wget ca-certificates locales bash-completion udev dbus systemd-sysv systemd-resolved fastfetch \
     # 用户请求的基础开发/编辑工具
-    git nano sudo \
+    git nano sudo gcc \
     # 网络与 SSH 工具
     openssh-server net-tools iptables iputils-ping iproute2 dnsutils \
     # 用于系统监控的 procps 进程工具
@@ -189,6 +190,14 @@ RUN sed -i '/en_US.UTF-8/s/^# //' /etc/locale.gen && \
 # 为所有 Ubuntu RootFS 安装 Droidspaces USB Manager
 RUN /usr/local/sbin/install-droidspaces-usb-manager --user "${USERNAME}"
 
+# Qualcomm KGSL on the Mi Pad 4 uses the legacy Android 4.4 ION ABI.
+RUN mkdir -p /usr/local/lib /usr/local/share/droidspaces && \
+    gcc -shared -fPIC -O2 -o /usr/local/lib/libion-legacy-shim.so \
+        /tmp/ion-legacy-shim.c -ldl && \
+    printf '%s\n' 'xiaomi-mi-pad-4' 'kernel=4.4' 'gpu=kgsl' 'ion=legacy' \
+        > /usr/local/share/droidspaces/kernel-profile && \
+    rm -f /tmp/ion-legacy-shim.c
+
 
 # 添加环境变量
 RUN cat <<'EOF' > /etc/environment
@@ -206,6 +215,7 @@ RUN if [ "$ENABLE_anland_kde_ARG" != "true" ] ; then \
         echo "MESA_LOADER_DRIVER_OVERRIDE=kgsl" >> /etc/environment; \
         echo "GALLIUM_DRIVER=kgsl" >> /etc/environment; \
         echo "FD_FORCE_KGSL=1" >> /etc/environment; \
+        echo "LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so" >> /etc/environment; \
     fi
 
 # 修复骁龙8 Gen 2 设备在 Wayland 下的花屏问题
@@ -256,6 +266,7 @@ fi
         cat <<'EOF' >> /etc/environment
 MESA_LOADER_DRIVER_OVERRIDE=kgsl
 TU_DEBUG=noconform
+LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so
 EOF
     fi
 
@@ -265,6 +276,11 @@ EOF
     cat <<'EOF' > /home/${USERNAME}/.config/kwinrc
 [Compositing]
 Enabled=false
+EOF
+    cat <<'EOF' > /home/${USERNAME}/.config/kscreenlockerrc
+[Daemon]
+Autolock=false
+LockOnResume=false
 EOF
     fi
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}

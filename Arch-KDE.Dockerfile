@@ -20,6 +20,7 @@ ARG USERNAME
 
 COPY scripts/install-usb-manager.sh /usr/local/sbin/install-droidspaces-usb-manager
 COPY scripts/systemd257.sh /usr/local/sbin/systemd257
+COPY scripts/ion-legacy-shim.c /tmp/ion-legacy-shim.c
 
 RUN sed -i '/^#ParallelDownloads/s/^#//' /etc/pacman.conf && \
     sed -i '/NoExtract.*locale/d' /etc/pacman.conf && \
@@ -30,7 +31,7 @@ RUN sed -i '/^#ParallelDownloads/s/^#//' /etc/pacman.conf && \
     # 核心工具组件 
     bash jq dialog coreutils file findutils grep sed gawk curl wget ca-certificates bash-completion dbus systemd pam fastfetch logrotate \
     # 用户请求的基础开发/编辑工具
-    git nano sudo \
+    git nano sudo gcc \
     # 网络与 SSH 工具
     openssh net-tools iptables iputils iproute2 bind \
     # 用于系统监控的 procps 进程工具
@@ -113,6 +114,14 @@ RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
 # 为所有 Arch RootFS 安装 Droidspaces USB Manager
 RUN /usr/local/sbin/install-droidspaces-usb-manager --user "${USERNAME}"
 
+# Qualcomm KGSL on the Mi Pad 4 uses the legacy Android 4.4 ION ABI.
+RUN mkdir -p /usr/local/lib /usr/local/share/droidspaces && \
+    gcc -shared -fPIC -O2 -o /usr/local/lib/libion-legacy-shim.so \
+        /tmp/ion-legacy-shim.c -ldl && \
+    printf '%s\n' 'xiaomi-mi-pad-4' 'kernel=4.4' 'gpu=kgsl' 'ion=legacy' \
+        > /usr/local/share/droidspaces/kernel-profile && \
+    rm -f /tmp/ion-legacy-shim.c
+
 # 修复 Arch 登入shell没法读取 /etc/environment 环境变量的问题
 RUN echo 'session  required  pam_env.so' >> /etc/pam.d/su-l
 
@@ -158,6 +167,7 @@ fi
         cat <<'EOF' >> /etc/environment
 MESA_LOADER_DRIVER_OVERRIDE=kgsl
 TU_DEBUG=noconform
+LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so
 EOF
     fi
     echo 'export XDG_RUNTIME_DIR=/run/user/$(id -u)' >> /home/${USERNAME}/.bashrc
@@ -166,6 +176,11 @@ EOF
     cat <<'EOF' > /home/${USERNAME}/.config/kwinrc
 [Compositing]
 Enabled=false
+EOF
+    cat <<'EOF' > /home/${USERNAME}/.config/kscreenlockerrc
+[Daemon]
+Autolock=false
+LockOnResume=false
 EOF
     fi
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}

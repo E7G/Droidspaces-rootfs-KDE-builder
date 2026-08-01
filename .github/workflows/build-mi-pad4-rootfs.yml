@@ -1,0 +1,175 @@
+name: Build Xiaomi Mi Pad 4 RootFS
+
+on:
+  workflow_dispatch:
+    inputs:
+      rootfs_target:
+        description: RootFS target. Arch is attempted first; Ubuntu is the Wayland fallback.
+        required: true
+        type: choice
+        default: Arch-KDE
+        options:
+          - Arch-KDE
+          - Ubuntu-26-KDE
+      build_KDE:
+        description: KDE desktop size
+        required: true
+        type: choice
+        default: min
+        options:
+          - min
+          - conc
+      custom_username:
+        description: RootFS username
+        required: true
+        type: string
+        default: Gold
+      publish_release:
+        description: Publish the successful archive as a GitHub Release
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build-arch:
+    name: Build Arch KDE
+    if: ${{ inputs.rootfs_target == 'Arch-KDE' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Arch aarch64 RootFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x build_rootfs-qemu-aarch64.sh
+          ./build_rootfs-qemu-aarch64.sh \
+            -i Arch-KDE.Dockerfile \
+            -v "mi-pad4-${GITHUB_RUN_NUMBER}" \
+            -K "${{ inputs.build_KDE }}" \
+            -L true \
+            -P none \
+            -g true \
+            -a false \
+            -b true \
+            -c true \
+            -d false \
+            -e true \
+            -f false \
+            -h false \
+            -j false \
+            -n false \
+            -S true \
+            -t false \
+            -u "${{ inputs.custom_username }}" \
+            -A false
+
+      - name: Upload Arch RootFS
+        uses: actions/upload-artifact@v4
+        with:
+          name: mi-pad4-arch-rootfs
+          path: Arch-KDE-X11-Droidspaces-rootfs-aarch64-mi-pad4-*.tar.xz
+          if-no-files-found: error
+          retention-days: 14
+
+  build-ubuntu:
+    name: Build Ubuntu 26 Wayland fallback
+    needs: build-arch
+    if: ${{ always() && (inputs.rootfs_target == 'Ubuntu-26-KDE' || needs.build-arch.result == 'failure') }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Ubuntu 26 aarch64 Wayland RootFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x build_rootfs-qemu-aarch64.sh
+          ./build_rootfs-qemu-aarch64.sh \
+            -i Ubuntu-26-KDE.Dockerfile \
+            -v "mi-pad4-${GITHUB_RUN_NUMBER}" \
+            -K "${{ inputs.build_KDE }}" \
+            -L true \
+            -P none \
+            -g true \
+            -a false \
+            -b true \
+            -c true \
+            -d false \
+            -e true \
+            -f false \
+            -h false \
+            -j false \
+            -n true \
+            -S true \
+            -t false \
+            -u "${{ inputs.custom_username }}" \
+            -A true
+
+      - name: Upload Ubuntu RootFS
+        uses: actions/upload-artifact@v4
+        with:
+          name: mi-pad4-ubuntu-rootfs
+          path: Ubuntu-26-KDE-Wayland-Droidspaces-rootfs-aarch64-mi-pad4-*.tar.xz
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Package and publish RootFS
+    needs: [build-arch, build-ubuntu]
+    if: ${{ always() && (needs.build-arch.result == 'success' || needs.build-ubuntu.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download successful RootFS
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mi-pad4-*-rootfs
+          merge-multiple: true
+          path: release_assets
+
+      - name: Write device profile and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release_assets/mi-pad4-kernel-profile.txt <<'EOF'
+          device=xiaomi-mi-pad-4
+          architecture=aarch64
+          kernel=4.4
+          kernel_features=KSU,ReKSU,VGEM,DRM,KGSL
+          gpu=KGSL
+          ion_abi=legacy
+          systemd_compat=257
+          screen_lock=disabled
+          EOF
+          (cd release_assets && sha256sum *.tar.xz > SHA256SUMS)
+          find release_assets -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+
+      - name: Upload workflow bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: mi-pad4-rootfs-bundle
+          path: release_assets
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: ${{ inputs.publish_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mi-pad4-rootfs-v${{ github.run_number }}
+          name: Xiaomi Mi Pad 4 RootFS v${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            Xiaomi Mi Pad 4 / aarch64 Droidspaces RootFS.
+
+            Kernel profile: 4.4 with KSU/ReKSU, VGEM, DRM and KGSL.
+            Arch KDE is attempted first. Ubuntu 26 KDE Wayland is built automatically when Arch fails.
+            The image includes systemd 257 compatibility, KGSL/legacy ION shim, and disabled KDE screen locking.
+          files: release_assets/*
