@@ -484,11 +484,11 @@ RUN if [ "$ENABLE_systemd257_ARG" = "true" ]; then \
     rm -f /usr/local/sbin/systemd257
 
 # Xiaomi Mi Pad 4 / Android 4.4 kernel profile. KWin alone receives the KGSL
-# and legacy ION environment; Plasma Mobile clients use stable shm buffers.
+# and legacy ION environment; Plasma desktop clients use stable shm buffers.
 RUN <<'EOF_RUN'
 if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then
     test "$USERNAME" = "user"
-    test -x /usr/bin/startplasmamobile
+    test -x /usr/bin/startplasma-wayland
     test -x /usr/bin/kwin_wayland
 
     install -Dm755 /tmp/mi-pad4/droidspaces-init /sbin/droidspaces-init
@@ -578,12 +578,12 @@ EOF
     cat >/usr/local/share/droidspaces/mi-pad4-rootfs-profile <<'EOF'
 device=xiaomi-mi-pad-4-clover
 kernel=4.4
-desktop=plasma-mobile
+desktop=plasma-conc
 display=anland-wayland
 gpu=kgsl-accelerated-kwin
 ion=legacy-shim
 audio=anland
-input=fcitx5-pinyin,maliit
+input=fcitx5-pinyin
 locale=zh_CN.UTF-8
 default_user=user
 snap=disabled

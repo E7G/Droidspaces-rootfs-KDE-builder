@@ -1,4 +1,4 @@
-name: Build Mi Pad 4 Plasma Mobile RootFS
+name: Build Mi Pad 4 Plasma Conc RootFS
 
 on:
   workflow_dispatch:
@@ -18,12 +18,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: mi-pad4-mobile-release
+  group: mi-pad4-conc-release
   cancel-in-progress: false
 
 jobs:
   build-and-release:
-    name: Build and publish Ubuntu 26 Plasma Mobile
+    name: Build and publish Ubuntu 26 Plasma Conc
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
 
@@ -38,8 +38,8 @@ jobs:
           chmod +x build_rootfs-qemu-aarch64.sh
           ./build_rootfs-qemu-aarch64.sh \
             -i Ubuntu-26-KDE.Dockerfile \
-            -v "mi-pad4-mobile-${GITHUB_RUN_NUMBER}" \
-            -K mobile \
+            -v "mi-pad4-conc-${GITHUB_RUN_NUMBER}" \
+            -K conc \
             -L false \
             -P none \
             -g true \
@@ -63,18 +63,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          source_archive="$(find . -maxdepth 1 -name 'Ubuntu-26-KDE-Mobile-Droidspaces-rootfs-aarch64-mi-pad4-mobile-*.tar.xz' -print -quit)"
+          source_archive="$(find . -maxdepth 1 -name 'Ubuntu-26-KDE-Wayland-Droidspaces-rootfs-aarch64-mi-pad4-conc-*.tar.xz' -print -quit)"
           test -n "$source_archive"
 
           mkdir -p release_assets
-          final_name="Ubuntu-26-Plasma-Mobile-Anland-MiPad4-aarch64-v${GITHUB_RUN_NUMBER}.tar.xz"
+          final_name="Ubuntu-26-KDE-Conc-Anland-MiPad4-aarch64-v${GITHUB_RUN_NUMBER}.tar.xz"
           mv "$source_archive" "release_assets/$final_name"
 
           tar -tf "release_assets/$final_name" | sed 's#^\./##' > rootfs-files.txt
           required=(
             sbin/droidspaces-init
             usr/local/bin/mi-pad4-start-wayland
-            usr/bin/startplasmamobile
+            usr/bin/startplasma-wayland
             usr/bin/kwin_wayland
             usr/lib/aarch64-linux-gnu/libexec/kactivitymanagerd
             usr/local/lib/libion-legacy-shim.so
@@ -105,12 +105,12 @@ jobs:
           architecture=aarch64
           kernel=4.4
           kernel_features=KSU,ReKSU,VGEM,DRM,KGSL
-          desktop=Plasma-Mobile
+          desktop=Plasma-Conc
           display=Anland-Wayland
           gpu=KGSL-accelerated-KWin
           ion_abi=legacy-shim
           audio=Anland
-          input=Fcitx5-Pinyin,Maliit
+          input=Fcitx5-Pinyin
           locale=zh_CN.UTF-8
           default_user=user
           snap=disabled
@@ -123,7 +123,7 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mi-pad4-plasma-mobile-rootfs
+          name: mi-pad4-plasma-conc-rootfs
           path: release_assets/
           if-no-files-found: error
           retention-days: 30
@@ -131,17 +131,17 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: mi-pad4-mobile-v${{ github.run_number }}
-          name: 小米平板 4 Plasma Mobile RootFS v${{ github.run_number }}
+          tag_name: mi-pad4-conc-v${{ github.run_number }}
+          name: 小米平板 4 Plasma Conc RootFS v${{ github.run_number }}
           target_commitish: ${{ github.sha }}
           make_latest: true
           body: |
             小米平板 4（clover）专用 Droidspaces RootFS。
 
             - Ubuntu 26.04 aarch64，默认用户 `user`，密码 `1234`
-            - Plasma Mobile + Anland Wayland
+            - KDE Plasma Conc 桌面 + Anland Wayland
             - KWin 使用 KGSL GPU 加速和 legacy ION shim
-            - 简体中文、Noto CJK、Fcitx5 拼音、Maliit 触屏键盘
+            - 简体中文、Noto CJK、Fcitx5 拼音
             - Anland 音频，PipeWire/PulseAudio 兼容组件
             - 已移除并阻止 Ubuntu Snap
             - 内置 Linux 4.4 可用的 Droidspaces custom init
