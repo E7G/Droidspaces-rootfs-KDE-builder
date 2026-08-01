@@ -57,6 +57,18 @@ live_plasmashell_pid() {
   return 1
 }
 
+latest_live_pid() {
+  local pattern="$1" pid state newest=""
+  for pid in $(pgrep -f "$pattern" 2>/dev/null || true); do
+    state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+    if [[ -n "$state" && "$state" != Z* ]]; then
+      newest="$pid"
+    fi
+  done
+  [[ -n "$newest" ]] || return 1
+  echo "$newest"
+}
+
 if [[ "${1:-}" != child && "${1:-}" != shell ]]; then
   nohup "$0" child >>/var/log/plasma-conc-wayland.log 2>&1 </dev/null &
   nohup /usr/sbin/runuser -u user -- "$0" shell >>/home/user/plasma-conc-shell.log 2>&1 </dev/null &
@@ -78,8 +90,13 @@ if [[ "${1:-}" = child ]]; then
 fi
 
 for _ in $(seq 1 45); do
-  session_pid="$(pgrep -n -f '(^|/)startplasma-wayland($| )' 2>/dev/null || true)"
-  if [[ -n "$session_pid" && -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]]; then
+  session_pid="$(latest_live_pid '(^|/)startplasma-wayland($| )' || true)"
+  kwin_pid="$(latest_live_pid '(^|/)kwin_wayland($| )' || true)"
+  if [[ -n "$session_pid" && -n "$kwin_pid" && -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]]; then
+    # A stale Wayland socket survives a fast container restart.  Requiring the
+    # new compositor process, then allowing its output two seconds to settle,
+    # prevents Plasma from binding its panel to screen -1.
+    sleep 2
     break
   fi
   sleep 1
