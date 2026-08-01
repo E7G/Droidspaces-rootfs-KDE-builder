@@ -68,7 +68,7 @@ RUN apt-get update && \
     # 核心工具组件
     bash jq dialog coreutils file findutils grep sed gawk curl wget ca-certificates locales bash-completion udev dbus systemd-sysv systemd-resolved fastfetch \
     # 用户请求的基础开发/编辑工具
-    git nano sudo gcc \
+    git nano sudo gcc libc6-dev \
     # 网络与 SSH 工具
     openssh-server net-tools iptables iputils-ping iproute2 dnsutils \
     # 用于系统监控的 procps 进程工具
