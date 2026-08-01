@@ -493,10 +493,6 @@ if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then
 
     install -Dm755 /tmp/mi-pad4/droidspaces-init /sbin/droidspaces-init
     install -Dm755 /tmp/mi-pad4/mi-pad4-start-wayland /usr/local/bin/mi-pad4-start-wayland
-    install -d /usr/lib/droidspaces
-    install -m755 "$(readlink -f /usr/bin/kwin_wayland)" /usr/lib/droidspaces/kwin_wayland.real
-    rm -f /usr/bin/kwin_wayland
-    install -m755 /tmp/mi-pad4/kwin_wayland /usr/bin/kwin_wayland
 
     ln -sf /lib/systemd/systemd /sbin/init.systemd
     rm -f /sbin/init
@@ -523,7 +519,9 @@ LANGUAGE=zh_CN:zh
 LC_ALL=zh_CN.UTF-8
 EOF
 
-    install -d -m700 -o user -g user /home/user/.config/autostart /home/user/.config/fcitx5
+    install -d -m700 -o user -g user \
+        /home/user/.config/autostart /home/user/.config/fcitx5 \
+        /home/user/.cache/fontconfig /home/user/.local/share/kactivitymanagerd
     install -m644 -o user -g user /tmp/mi-pad4/fcitx5.desktop /home/user/.config/autostart/fcitx5.desktop
     install -m600 -o user -g user /tmp/mi-pad4/plasma-localerc /home/user/.config/plasma-localerc
     install -m600 -o user -g user /tmp/mi-pad4/kscreenlockerrc /home/user/.config/kscreenlockerrc

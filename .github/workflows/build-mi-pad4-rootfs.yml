@@ -76,7 +76,7 @@ jobs:
             usr/local/bin/mi-pad4-start-wayland
             usr/bin/startplasmamobile
             usr/bin/kwin_wayland
-            usr/lib/droidspaces/kwin_wayland.real
+            usr/lib/aarch64-linux-gnu/libexec/kactivitymanagerd
             usr/local/lib/libion-legacy-shim.so
             home/user/.config/plasma-localerc
             home/user/.config/fcitx5/profile

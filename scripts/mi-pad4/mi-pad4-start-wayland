@@ -33,9 +33,12 @@ export XDG_CONFIG_DIRS="$HOME/.config/plasma-mobile:/etc/xdg${XDG_CONFIG_DIRS:+:
 
 if [[ "$EUID" -eq 0 ]]; then
   install -d -m 700 -o user -g user "$XDG_RUNTIME_DIR"
+  install -d -m 700 -o user -g user \
+    "$HOME/.cache" "$HOME/.cache/fontconfig" \
+    "$HOME/.local" "$HOME/.local/share" "$HOME/.local/share/kactivitymanagerd"
   install -d -m 1777 /tmp/.X11-unix /tmp/.ICE-unix
 else
-  mkdir -p "$XDG_RUNTIME_DIR"
+  mkdir -p "$XDG_RUNTIME_DIR" "$HOME/.cache/fontconfig" "$HOME/.local/share/kactivitymanagerd"
   chmod 700 "$XDG_RUNTIME_DIR"
 fi
 
@@ -57,10 +60,18 @@ if [[ "${1:-}" != child && "${1:-}" != shell ]]; then
   exit 0
 fi
 
-# startplasmamobile selects the Plasma Mobile shell while the patched KWin
-# backend presents directly to Anland.
+# Keep KWin at its packaged path so its internal QPA plugin resolves correctly.
+# Only this child receives KGSL and the legacy ION shim; the Mobile shell helper
+# below stays on stable software/shared-memory buffers.
 if [[ "${1:-}" = child ]]; then
-  exec /usr/sbin/runuser -u user -- /usr/bin/dbus-run-session -- /usr/bin/startplasmamobile
+  unset LIBGL_ALWAYS_SOFTWARE
+  unset QT_QUICK_BACKEND
+  unset QT_OPENGL
+  export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+  export GALLIUM_DRIVER=kgsl
+  export FD_FORCE_KGSL=1
+  export LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so
+  exec /usr/sbin/runuser -u user -- /usr/bin/dbus-run-session -- /usr/bin/startplasma-wayland
 fi
 
 for _ in $(seq 1 45); do
@@ -90,5 +101,21 @@ fi
 
 export DBUS_SESSION_BUS_ADDRESS="$dbus_address"
 export DISPLAY="${session_display:-:0}"
+
+# KActivityManager must use the shell's software environment.  When it inherits
+# KWin's KGSL/legacy-ION environment it crashes before Mobile shell can load.
+if ! pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1; then
+  nohup /usr/lib/aarch64-linux-gnu/libexec/kactivitymanagerd \
+    >"$HOME/kactivitymanagerd.log" 2>&1 </dev/null &
+fi
+for _ in $(seq 1 10); do
+  pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1 && break
+  sleep 1
+done
+if ! pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1; then
+  echo "kactivitymanagerd did not become ready" >&2
+  exit 1
+fi
+
 fcitx5 -d --replace >/home/user/fcitx5.log 2>&1 || true
 exec /usr/bin/plasmashell -p org.kde.plasma.mobileshell
