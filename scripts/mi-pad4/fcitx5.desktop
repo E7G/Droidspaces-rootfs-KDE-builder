@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Fcitx 5
+Name[zh_CN]=Fcitx 5 输入法
+Exec=fcitx5 -d --replace
+Icon=fcitx
+Terminal=false
+NoDisplay=true
+X-KDE-autostart-after=panel

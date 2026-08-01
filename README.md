@@ -2,6 +2,21 @@
 
 # Droidspaces RootFS 自动构建
 
+## 小米平板 4 专用 RootFS
+
+`Build Mi Pad 4 Plasma Mobile RootFS` 工作流会直接构建并发布适用于小米平板 4（clover）的 Ubuntu 26.04 aarch64 RootFS：
+
+- 默认用户 `user`，默认密码 `1234`
+- Plasma Mobile + Anland Wayland
+- KWin 使用 KGSL GPU 加速与 Android 4.4 legacy ION shim
+- 简体中文、Noto CJK、Fcitx5 拼音和 Maliit 触屏键盘
+- Anland 音频与 PipeWire/PulseAudio 兼容组件
+- 移除并阻止 Ubuntu Snap
+- 内置旧 4.4 内核可用的 Droidspaces custom init
+- 针对 KSU/ReKSU、VGEM、DRM、KGSL 内核配置
+
+Release 同时提供 `mi-pad4-container.config`、设备 profile 和 `SHA256SUMS`。将配置片段中的专用字段合并到现有 `Ubuntu` 容器配置，启动容器后打开 Anland 即可。
+
 本项目用于通过 GitHub Actions 自动构建适用于 Droidspaces 的 Linux RootFS。构建流程基于 Dockerfile 模板，可以按需选择发行版、KDE 桌面规模、中文环境、输入法、GPU 加速、音频转发、TMOE、Docker、开发工具和 Wayland/Anland 支持。
 
 项目目标是减少在 Android 设备上手动配置桌面 Linux 容器的工作量。你只需要 Fork 仓库，在 Actions 页面选择构建参数，等待 Release 产物生成，然后把 `.tar.xz` RootFS 导入 Droidspaces。

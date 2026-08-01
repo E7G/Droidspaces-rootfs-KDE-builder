@@ -1,0 +1,12 @@
+#!/bin/bash
+
+export LANG=zh_CN.UTF-8
+export LANGUAGE=zh_CN:zh
+export LC_ALL=zh_CN.UTF-8
+
+if [[ "${1:-}" != supervise ]]; then
+  exec /usr/bin/tini -s -- "$0" supervise
+fi
+
+/usr/local/bin/mi-pad4-start-wayland || true
+exec /usr/bin/sleep infinity

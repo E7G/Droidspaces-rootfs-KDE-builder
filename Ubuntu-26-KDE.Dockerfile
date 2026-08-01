@@ -18,6 +18,7 @@ ARG ENABLE_anland_kde_ARG
 ARG ENABLE_8gen2_wayland_ARG
 ARG ENABLE_nosnap_ARG
 ARG ENABLE_systemd257_ARG
+ARG ENABLE_MI_PAD4_PROFILE_ARG=false
 ARG USERNAME
 ######################################################
 
@@ -36,6 +37,7 @@ COPY scripts/download-firmware /usr/local/bin/
 COPY scripts/nosnap.sh /usr/local/sbin/nosnap
 COPY scripts/systemd257.sh /usr/local/sbin/systemd257
 COPY scripts/ion-legacy-shim.c /tmp/ion-legacy-shim.c
+COPY scripts/mi-pad4/ /tmp/mi-pad4/
 
 # 将自定义的 bashrc 脚本复制到根文件系统的 profile 目录
 COPY scripts/bashrc.sh /etc/profile.d/ds-aliases.sh
@@ -66,7 +68,7 @@ RUN sed -i 's/Components: main/Components: main restricted universe multiverse/g
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     # 核心工具组件
-    bash jq dialog coreutils file findutils grep sed gawk curl wget ca-certificates locales bash-completion udev dbus systemd-sysv systemd-resolved fastfetch \
+    bash jq dialog coreutils file findutils grep sed gawk curl wget ca-certificates locales bash-completion udev dbus systemd-sysv systemd-resolved fastfetch tini \
     # 用户请求的基础开发/编辑工具
     git nano sudo gcc libc6-dev \
     # 网络与 SSH 工具
@@ -480,6 +482,92 @@ RUN if [ "$ENABLE_systemd257_ARG" = "true" ]; then \
         echo "--> [跳过] 未启用 systemd 257 旧内核兼容"; \
     fi && \
     rm -f /usr/local/sbin/systemd257
+
+# Xiaomi Mi Pad 4 / Android 4.4 kernel profile. KWin alone receives the KGSL
+# and legacy ION environment; Plasma Mobile clients use stable shm buffers.
+RUN <<'EOF_RUN'
+if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then
+    test "$USERNAME" = "user"
+    test -x /usr/bin/startplasmamobile
+    test -x /usr/bin/kwin_wayland
+
+    install -Dm755 /tmp/mi-pad4/droidspaces-init /sbin/droidspaces-init
+    install -Dm755 /tmp/mi-pad4/mi-pad4-start-wayland /usr/local/bin/mi-pad4-start-wayland
+    install -d /usr/lib/droidspaces
+    install -m755 "$(readlink -f /usr/bin/kwin_wayland)" /usr/lib/droidspaces/kwin_wayland.real
+    rm -f /usr/bin/kwin_wayland
+    install -m755 /tmp/mi-pad4/kwin_wayland /usr/bin/kwin_wayland
+
+    ln -sf /lib/systemd/systemd /sbin/init.systemd
+    rm -f /sbin/init
+    ln -s /sbin/droidspaces-init /sbin/init
+
+    sed -i -E '/^(MESA_LOADER_DRIVER_OVERRIDE|GALLIUM_DRIVER|FD_FORCE_KGSL|LD_PRELOAD|LIBGL_ALWAYS_SOFTWARE|QT_QUICK_BACKEND|QT_OPENGL|XMODIFIERS|GTK_IM_MODULE|QT_IM_MODULE|SDL_IM_MODULE|GLFW_IM_MODULE)=/d' /etc/environment
+    cat >>/etc/environment <<'EOF'
+LANG=zh_CN.UTF-8
+LANGUAGE=zh_CN:zh
+LC_ALL=zh_CN.UTF-8
+XMODIFIERS=@im=fcitx
+GTK_IM_MODULE=fcitx
+QT_IM_MODULE=fcitx
+SDL_IM_MODULE=fcitx
+GLFW_IM_MODULE=fcitx
+LIBGL_ALWAYS_SOFTWARE=1
+QT_QUICK_BACKEND=software
+QT_OPENGL=software
+EOF
+
+    cat >/etc/locale.conf <<'EOF'
+LANG=zh_CN.UTF-8
+LANGUAGE=zh_CN:zh
+LC_ALL=zh_CN.UTF-8
+EOF
+
+    install -d -m700 -o user -g user /home/user/.config/autostart /home/user/.config/fcitx5
+    install -m644 -o user -g user /tmp/mi-pad4/fcitx5.desktop /home/user/.config/autostart/fcitx5.desktop
+    install -m600 -o user -g user /tmp/mi-pad4/plasma-localerc /home/user/.config/plasma-localerc
+    install -m600 -o user -g user /tmp/mi-pad4/kscreenlockerrc /home/user/.config/kscreenlockerrc
+    cat >/home/user/.config/fcitx5/profile <<'EOF'
+[Groups/0]
+Name=默认
+Default Layout=us
+DefaultIM=pinyin
+
+[Groups/0/Items/0]
+Name=keyboard-us
+Layout=
+
+[Groups/0/Items/1]
+Name=pinyin
+Layout=
+
+[GroupOrder]
+0=默认
+EOF
+    chown user:user /home/user/.config/fcitx5/profile
+    chmod 600 /home/user/.config/fcitx5/profile
+
+    /usr/bin/kwriteconfig6 --file /home/user/.config/kdeglobals --group Locale --key Language zh_CN
+    chown -R user:user /home/user
+
+    install -Dm644 /tmp/mi-pad4/container.config /usr/local/share/droidspaces/mi-pad4-container.config
+    install -Dm644 /tmp/mi-pad4/README.txt /usr/local/share/droidspaces/MI-PAD4-README.txt
+    cat >/usr/local/share/droidspaces/mi-pad4-rootfs-profile <<'EOF'
+device=xiaomi-mi-pad-4-clover
+kernel=4.4
+desktop=plasma-mobile
+display=anland-wayland
+gpu=kgsl-accelerated-kwin
+ion=legacy-shim
+audio=anland
+input=fcitx5-pinyin,maliit
+locale=zh_CN.UTF-8
+default_user=user
+snap=disabled
+EOF
+fi
+rm -rf /tmp/mi-pad4
+EOF_RUN
 
 RUN apt-get clean && \
     rm -rf /var/lib/apt/lists/*

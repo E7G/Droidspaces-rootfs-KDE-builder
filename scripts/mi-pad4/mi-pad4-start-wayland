@@ -1,0 +1,94 @@
+#!/bin/bash
+
+set -u
+
+export HOME=/home/user
+export USER=user
+export LOGNAME=user
+export LANG=zh_CN.UTF-8
+export LANGUAGE=zh_CN:zh
+export LC_ALL=zh_CN.UTF-8
+export WAYLAND_DISPLAY=wayland-0
+export QT_QPA_PLATFORM=wayland
+export ANLAND=1
+export ANLAND_SOCKET=/run/display.sock
+export ANLAND_DRM_DEVICE=/dev/dri/renderD128
+export XDG_RUNTIME_DIR=/run/user/1000
+export XMODIFIERS=@im=fcitx
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export SDL_IM_MODULE=fcitx
+export GLFW_IM_MODULE=fcitx
+export LIBGL_ALWAYS_SOFTWARE=1
+export QT_QUICK_BACKEND=software
+export QT_OPENGL=software
+export QT_QPA_PLATFORMTHEME=KDE
+export QT_QUICK_CONTROLS_STYLE=org.kde.breeze
+export QT_ENABLE_GLYPH_CACHE_WORKAROUND=1
+export QT_QUICK_CONTROLS_MOBILE=true
+export PLASMA_INTEGRATION_USE_PORTAL=1
+export PLASMA_PLATFORM=phone:handset
+export PLASMA_DEFAULT_SHELL=org.kde.plasma.mobileshell
+export XDG_CONFIG_DIRS="$HOME/.config/plasma-mobile:/etc/xdg${XDG_CONFIG_DIRS:+:$XDG_CONFIG_DIRS}"
+
+if [[ "$EUID" -eq 0 ]]; then
+  install -d -m 700 -o user -g user "$XDG_RUNTIME_DIR"
+  install -d -m 1777 /tmp/.X11-unix /tmp/.ICE-unix
+else
+  mkdir -p "$XDG_RUNTIME_DIR"
+  chmod 700 "$XDG_RUNTIME_DIR"
+fi
+
+live_plasmashell_pid() {
+  local pid state
+  for pid in $(pgrep -x plasmashell 2>/dev/null || true); do
+    state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+    if [[ -n "$state" && "$state" != Z* ]]; then
+      echo "$pid"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [[ "${1:-}" != child && "${1:-}" != shell ]]; then
+  nohup "$0" child >>/var/log/plasma-mobile-wayland.log 2>&1 </dev/null &
+  nohup /usr/sbin/runuser -u user -- "$0" shell >>/home/user/plasma-mobile-shell.log 2>&1 </dev/null &
+  exit 0
+fi
+
+# startplasmamobile selects the Plasma Mobile shell while the patched KWin
+# backend presents directly to Anland.
+if [[ "${1:-}" = child ]]; then
+  exec /usr/sbin/runuser -u user -- /usr/bin/dbus-run-session -- /usr/bin/startplasmamobile
+fi
+
+for _ in $(seq 1 45); do
+  session_pid="$(pgrep -n -f '(^|/)startplasma-wayland($| )' 2>/dev/null || true)"
+  if [[ -n "$session_pid" && -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]]; then
+    break
+  fi
+  sleep 1
+done
+
+if shell_pid="$(live_plasmashell_pid)"; then
+  echo "plasmashell already running: $shell_pid"
+  exit 0
+fi
+
+if [[ -z "${session_pid:-}" ]]; then
+  echo "startplasma-wayland did not become ready" >&2
+  exit 1
+fi
+
+dbus_address="$(tr '\0' '\n' < "/proc/$session_pid/environ" | sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p' | head -n 1)"
+session_display="$(tr '\0' '\n' < "/proc/$session_pid/environ" | sed -n 's/^DISPLAY=//p' | head -n 1)"
+if [[ -z "$dbus_address" ]]; then
+  echo "DBUS_SESSION_BUS_ADDRESS not found for PID $session_pid" >&2
+  exit 1
+fi
+
+export DBUS_SESSION_BUS_ADDRESS="$dbus_address"
+export DISPLAY="${session_display:-:0}"
+fcitx5 -d --replace >/home/user/fcitx5.log 2>&1 || true
+exec /usr/bin/plasmashell -p org.kde.plasma.mobileshell

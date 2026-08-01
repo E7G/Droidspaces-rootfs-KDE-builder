@@ -1,103 +1,46 @@
-name: Build Xiaomi Mi Pad 4 RootFS
+name: Build Mi Pad 4 Plasma Mobile RootFS
 
 on:
   workflow_dispatch:
-    inputs:
-      rootfs_target:
-        description: Ubuntu 26 supports Anland/Wayland. Arch currently supports X11 only.
-        required: true
-        type: choice
-        default: Ubuntu-26-KDE
-        options:
-          - Arch-KDE
-          - Ubuntu-26-KDE
-      build_KDE:
-        description: KDE desktop size
-        required: true
-        type: choice
-        default: min
-        options:
-          - min
-          - conc
-      custom_username:
-        description: RootFS username
-        required: true
-        type: string
-        default: Gold
-      publish_release:
-        description: Publish the successful archive as a GitHub Release
-        required: true
-        type: boolean
-        default: true
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-mi-pad4-rootfs.yml
+      - Ubuntu-26-KDE.Dockerfile
+      - build_rootfs-qemu-aarch64.sh
+      - build_rootfs-native.sh
+      - scripts/ion-legacy-shim.c
+      - scripts/mi-pad4/**
+      - anland-build/ubuntu2604/**
 
 permissions:
   contents: write
-  actions: read
+
+concurrency:
+  group: mi-pad4-mobile-release
+  cancel-in-progress: false
 
 jobs:
-  build-arch:
-    name: Build Arch KDE
-    if: ${{ inputs.rootfs_target == 'Arch-KDE' }}
+  build-and-release:
+    name: Build and publish Ubuntu 26 Plasma Mobile
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build Arch aarch64 RootFS
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x build_rootfs-qemu-aarch64.sh
-          ./build_rootfs-qemu-aarch64.sh \
-            -i Arch-KDE.Dockerfile \
-            -v "mi-pad4-${GITHUB_RUN_NUMBER}" \
-            -K "${{ inputs.build_KDE }}" \
-            -L true \
-            -P none \
-            -g true \
-            -a false \
-            -b true \
-            -c true \
-            -d false \
-            -e true \
-            -f false \
-            -h false \
-            -j false \
-            -n false \
-            -S true \
-            -t false \
-            -u "${{ inputs.custom_username }}" \
-            -A false
-
-      - name: Upload Arch RootFS
-        uses: actions/upload-artifact@v4
-        with:
-          name: mi-pad4-arch-rootfs
-          path: Arch-KDE-X11-Droidspaces-rootfs-aarch64-mi-pad4-*.tar.xz
-          if-no-files-found: error
-          retention-days: 14
-
-  build-ubuntu:
-    name: Build Ubuntu 26 Anland Wayland
-    needs: build-arch
-    if: ${{ always() && (inputs.rootfs_target == 'Ubuntu-26-KDE' || needs.build-arch.result == 'failure') }}
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 360
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build Ubuntu 26 aarch64 Wayland RootFS
+      - name: Build Mi Pad 4 RootFS
         shell: bash
         run: |
           set -euo pipefail
           chmod +x build_rootfs-qemu-aarch64.sh
           ./build_rootfs-qemu-aarch64.sh \
             -i Ubuntu-26-KDE.Dockerfile \
-            -v "mi-pad4-${GITHUB_RUN_NUMBER}" \
-            -K "${{ inputs.build_KDE }}" \
-            -L true \
+            -v "mi-pad4-mobile-${GITHUB_RUN_NUMBER}" \
+            -K mobile \
+            -L false \
             -P none \
             -g true \
             -a false \
@@ -106,71 +49,99 @@ jobs:
             -d false \
             -e true \
             -f false \
-            -h false \
+            -h true \
             -j false \
             -n true \
             -S true \
             -t false \
-            -u "${{ inputs.custom_username }}" \
-            -A true
+            -u user \
+            -A true \
+            -M true
 
-      - name: Upload Ubuntu RootFS
-        uses: actions/upload-artifact@v4
-        with:
-          name: mi-pad4-ubuntu-rootfs
-          path: Ubuntu-26-KDE-Wayland-Droidspaces-rootfs-aarch64-mi-pad4-*.tar.xz
-          if-no-files-found: error
-          retention-days: 14
-
-  publish:
-    name: Package and publish RootFS
-    needs: [build-arch, build-ubuntu]
-    if: ${{ always() && (needs.build-arch.result == 'success' || needs.build-ubuntu.result == 'success') }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download successful RootFS
-        uses: actions/download-artifact@v4
-        with:
-          pattern: mi-pad4-*-rootfs
-          merge-multiple: true
-          path: release_assets
-
-      - name: Write device profile and checksums
+      - name: Validate and package release
+        id: package
         shell: bash
         run: |
           set -euo pipefail
-          cat > release_assets/mi-pad4-kernel-profile.txt <<'EOF'
-          device=xiaomi-mi-pad-4
+          source_archive="$(find . -maxdepth 1 -name 'Ubuntu-26-KDE-Mobile-Droidspaces-rootfs-aarch64-mi-pad4-mobile-*.tar.xz' -print -quit)"
+          test -n "$source_archive"
+
+          mkdir -p release_assets
+          final_name="Ubuntu-26-Plasma-Mobile-Anland-MiPad4-aarch64-v${GITHUB_RUN_NUMBER}.tar.xz"
+          mv "$source_archive" "release_assets/$final_name"
+
+          tar -tf "release_assets/$final_name" | sed 's#^\./##' > rootfs-files.txt
+          required=(
+            sbin/droidspaces-init
+            usr/local/bin/mi-pad4-start-wayland
+            usr/bin/startplasmamobile
+            usr/bin/kwin_wayland
+            usr/lib/droidspaces/kwin_wayland.real
+            usr/local/lib/libion-legacy-shim.so
+            home/user/.config/plasma-localerc
+            home/user/.config/fcitx5/profile
+            usr/share/locale/zh_CN/LC_MESSAGES/plasmashell.mo
+          )
+          for path in "${required[@]}"; do
+            grep -Fxq "$path" rootfs-files.txt || {
+              echo "Missing required RootFS path: $path" >&2
+              exit 1
+            }
+          done
+
+          if grep -Eq '^(usr/bin/snap|usr/lib/snapd)(/|$)' rootfs-files.txt; then
+            echo "Snap components remain in RootFS" >&2
+            exit 1
+          fi
+
+          tar -xOf "release_assets/$final_name" etc/passwd | grep -q '^user:'
+          cp scripts/mi-pad4/container.config release_assets/mi-pad4-container.config
+          cp scripts/mi-pad4/README.txt release_assets/README.txt
+          cat >release_assets/mi-pad4-kernel-profile.txt <<'EOF'
+          device=xiaomi-mi-pad-4-clover
           architecture=aarch64
           kernel=4.4
           kernel_features=KSU,ReKSU,VGEM,DRM,KGSL
-          gpu=KGSL
-          ion_abi=legacy
+          desktop=Plasma-Mobile
+          display=Anland-Wayland
+          gpu=KGSL-accelerated-KWin
+          ion_abi=legacy-shim
+          audio=Anland
+          input=Fcitx5-Pinyin,Maliit
+          locale=zh_CN.UTF-8
+          default_user=user
+          snap=disabled
           systemd_compat=257
-          screen_lock=disabled
           EOF
-          (cd release_assets && sha256sum *.tar.xz > SHA256SUMS)
-          find release_assets -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+          (cd release_assets && sha256sum "$final_name" > SHA256SUMS)
+          echo "archive=$final_name" >> "$GITHUB_OUTPUT"
 
-      - name: Upload workflow bundle
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mi-pad4-rootfs-bundle
-          path: release_assets
+          name: mi-pad4-plasma-mobile-rootfs
+          path: release_assets/
+          if-no-files-found: error
           retention-days: 30
 
       - name: Publish GitHub Release
-        if: ${{ inputs.publish_release }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: mi-pad4-rootfs-v${{ github.run_number }}
-          name: Xiaomi Mi Pad 4 RootFS v${{ github.run_number }}
+          tag_name: mi-pad4-mobile-v${{ github.run_number }}
+          name: 小米平板 4 Plasma Mobile RootFS v${{ github.run_number }}
           target_commitish: ${{ github.sha }}
+          make_latest: true
           body: |
-            Xiaomi Mi Pad 4 / aarch64 Droidspaces RootFS.
+            小米平板 4（clover）专用 Droidspaces RootFS。
 
-            Kernel profile: 4.4 with KSU/ReKSU, VGEM, DRM and KGSL.
-            Selected target: ${{ inputs.rootfs_target }}.
-            Ubuntu 26 uses the patched Anland/KWin Wayland stack; Arch is retained only as an explicit X11 option.
-            The image includes systemd 257 compatibility, KGSL/legacy ION shim, and disabled KDE screen locking.
+            - Ubuntu 26.04 aarch64，默认用户 `user`，密码 `1234`
+            - Plasma Mobile + Anland Wayland
+            - KWin 使用 KGSL GPU 加速和 legacy ION shim
+            - 简体中文、Noto CJK、Fcitx5 拼音、Maliit 触屏键盘
+            - Anland 音频，PipeWire/PulseAudio 兼容组件
+            - 已移除并阻止 Ubuntu Snap
+            - 内置 Linux 4.4 可用的 Droidspaces custom init
+            - 针对 KSU/ReKSU、VGEM、DRM、KGSL 内核配置
+
+            使用前将 `mi-pad4-container.config` 中的专用字段合并到现有 Ubuntu 容器配置，然后启动容器并打开 Anland。
           files: release_assets/*

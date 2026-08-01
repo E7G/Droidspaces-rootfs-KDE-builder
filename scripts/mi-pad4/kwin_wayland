@@ -1,0 +1,12 @@
+#!/bin/bash
+
+unset LIBGL_ALWAYS_SOFTWARE
+unset QT_QUICK_BACKEND
+unset QT_OPENGL
+
+export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+export GALLIUM_DRIVER=kgsl
+export FD_FORCE_KGSL=1
+export LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so
+
+exec /usr/lib/droidspaces/kwin_wayland.real "$@"
