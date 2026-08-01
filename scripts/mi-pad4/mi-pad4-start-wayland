@@ -117,8 +117,7 @@ for _ in $(seq 1 10); do
   sleep 1
 done
 if ! pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1; then
-  echo "kactivitymanagerd did not become ready" >&2
-  exit 1
+  echo "kactivitymanagerd did not become ready; continuing with Plasma desktop" >&2
 fi
 
 fcitx5 -d --replace >/home/user/fcitx5.log 2>&1 || true
