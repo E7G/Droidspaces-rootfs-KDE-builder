@@ -70,9 +70,30 @@ latest_live_pid() {
 }
 
 if [[ "${1:-}" != child && "${1:-}" != shell ]]; then
-  nohup "$0" child >>/var/log/plasma-conc-wayland.log 2>&1 </dev/null &
-  nohup /usr/sbin/runuser -u user -- "$0" shell >>/home/user/plasma-conc-shell.log 2>&1 </dev/null &
-  exit 0
+  # runit supervises this one foreground service.  Keep KWin and the user
+  # session as siblings so a failed compositor causes one clean restart rather
+  # than leaving a second Plasma session behind.
+  "$0" child >>/var/log/plasma-conc-wayland.log 2>&1 &
+  child_pid=$!
+  /usr/sbin/runuser -u user -- "$0" shell >>/home/user/plasma-conc-shell.log 2>&1 &
+  shell_pid=$!
+
+  cleanup() {
+    kill "$child_pid" "$shell_pid" 2>/dev/null || true
+    wait "$child_pid" "$shell_pid" 2>/dev/null || true
+  }
+  trap cleanup EXIT INT TERM
+
+  process_alive() {
+    local pid="$1" state
+    state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+    [[ -n "$state" && "$state" != Z* ]]
+  }
+
+  while process_alive "$child_pid" && process_alive "$shell_pid"; do
+    sleep 2
+  done
+  exit 1
 fi
 
 # Keep KWin at its packaged path so its internal QPA plugin resolves correctly.

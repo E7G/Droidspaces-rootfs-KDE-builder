@@ -8,5 +8,8 @@ if [[ "${1:-}" != supervise ]]; then
   exec /usr/bin/tini -s -- "$0" supervise
 fi
 
-/usr/local/bin/mi-pad4-start-wayland || true
-exec /usr/bin/sleep infinity
+# The Android 4.4 container cannot provide the cgroup/mount contract required
+# by systemd PID 1 or systemd --user.  runit is deliberately used as the small
+# PID 1 service supervisor; it reaps children and restarts the desktop service
+# without a polling shell or a systemd user manager.
+exec /usr/bin/runsvdir -P /etc/service

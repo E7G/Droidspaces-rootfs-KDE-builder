@@ -491,12 +491,24 @@ if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then
     test -x /usr/bin/startplasma-wayland
     test -x /usr/bin/kwin_wayland
 
+    # These are CI-only dependencies.  Plasma source archives and the service
+    # supervisor are fetched/installed inside the GitHub Actions build, never
+    # copied from the developer workstation.
+    apt-get update
+    apt-get install -y --no-install-recommends runit xz-utils
+    rm -rf /var/lib/apt/lists/*
+    test -x /usr/bin/runsvdir
+
     install -Dm755 /tmp/mi-pad4/droidspaces-init /sbin/droidspaces-init
     install -Dm755 /tmp/mi-pad4/mi-pad4-start-wayland /usr/local/bin/mi-pad4-start-wayland
 
     ln -sf /lib/systemd/systemd /sbin/init.systemd
     rm -f /sbin/init
     ln -s /sbin/droidspaces-init /sbin/init
+
+    install -Dm755 /tmp/mi-pad4/runit-desktop /etc/service/droidspaces-desktop/run
+    install -Dm755 /tmp/mi-pad4/restore-plasma-applets.sh /usr/local/sbin/restore-plasma-applets
+    /usr/local/sbin/restore-plasma-applets
 
     sed -i -E '/^(MESA_LOADER_DRIVER_OVERRIDE|GALLIUM_DRIVER|FD_FORCE_KGSL|LD_PRELOAD|LIBGL_ALWAYS_SOFTWARE|QT_QUICK_BACKEND|QT_OPENGL|XMODIFIERS|GTK_IM_MODULE|QT_IM_MODULE|SDL_IM_MODULE|GLFW_IM_MODULE)=/d' /etc/environment
     cat >>/etc/environment <<'EOF'
@@ -525,6 +537,8 @@ EOF
     install -m644 -o user -g user /tmp/mi-pad4/fcitx5.desktop /home/user/.config/autostart/fcitx5.desktop
     install -m600 -o user -g user /tmp/mi-pad4/plasma-localerc /home/user/.config/plasma-localerc
     install -m600 -o user -g user /tmp/mi-pad4/kscreenlockerrc /home/user/.config/kscreenlockerrc
+    install -m600 -o user -g user /tmp/mi-pad4/plasma-org.kde.plasma.desktop-appletsrc \
+        /home/user/.config/plasma-org.kde.plasma.desktop-appletsrc
     cat >/home/user/.config/baloofilerc <<'EOF'
 [Basic Settings]
 Indexing-Enabled=false
