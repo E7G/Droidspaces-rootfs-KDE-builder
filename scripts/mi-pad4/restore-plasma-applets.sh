@@ -25,36 +25,56 @@ fetch_archive() {
 fetch_archive "$DESKTOP_URL" "$DESKTOP_SHA256" plasma-desktop.tar.xz
 fetch_archive "$WORKSPACE_URL" "$WORKSPACE_SHA256" plasma-workspace.tar.xz
 
-install_payload() {
-    local source="$1" destination="$2"
+install_applet_payload() {
+    local source="$1" destination="$2" item name
     rm -rf "$destination"
-    install -d "$(dirname "$destination")"
-    cp -a "$source" "$destination"
+    install -d "$destination/ui"
+    cp -a "$source/metadata.json" "$destination/metadata.json"
+
+    # plasma_add_applet installs QML under ui/.  The source tree uses either
+    # the applet root or a qml/ subdirectory, so normalize it here instead of
+    # copying the source tree verbatim and leaving main.qml at the wrong level.
+    if [ -d "$source/qml" ]; then
+        cp -a "$source/qml/." "$destination/ui/"
+        return
+    fi
+
+    for item in "$source"/*; do
+        [ -e "$item" ] || continue
+        name="$(basename "$item")"
+        case "$name" in
+            metadata.json|CMakeLists.txt|Messages.sh|main.xml|plugin|autotests|tests)
+                continue
+                ;;
+        esac
+        cp -a "$item" "$destination/ui/"
+    done
 }
 
 desktop_root="$tmpdir/plasma-desktop-6.6.5"
 workspace_root="$tmpdir/plasma-workspace-6.6.5"
 
-install_payload "$desktop_root/applets/kickoff" \
+install_applet_payload "$desktop_root/applets/kickoff" \
     /usr/share/plasma/plasmoids/org.kde.plasma.kickoff
-install_payload "$desktop_root/applets/taskmanager" \
+install_applet_payload "$desktop_root/applets/taskmanager" \
     /usr/share/plasma/plasmoids/org.kde.plasma.taskmanager
-install_payload "$desktop_root/containments/panel" \
-    /usr/share/plasma/containments/org.kde.panel
 
-install_payload "$workspace_root/applets/clipboard" \
+install_applet_payload "$workspace_root/applets/clipboard" \
     /usr/share/plasma/plasmoids/org.kde.plasma.clipboard
-install_payload "$workspace_root/applets/devicenotifier" \
+install_applet_payload "$workspace_root/applets/devicenotifier" \
     /usr/share/plasma/plasmoids/org.kde.plasma.devicenotifier
-install_payload "$workspace_root/applets/digital-clock" \
+install_applet_payload "$workspace_root/applets/digital-clock" \
     /usr/share/plasma/plasmoids/org.kde.plasma.digitalclock
-install_payload "$workspace_root/applets/notifications" \
+install_applet_payload "$workspace_root/applets/notifications" \
     /usr/share/plasma/plasmoids/org.kde.plasma.notifications
-install_payload "$workspace_root/applets/panelspacer" \
+install_applet_payload "$workspace_root/applets/panelspacer" \
     /usr/share/plasma/plasmoids/org.kde.plasma.panelspacer
-install_payload "$workspace_root/applets/systemtray" \
+install_applet_payload "$workspace_root/applets/systemtray" \
     /usr/share/plasma/plasmoids/org.kde.plasma.systemtray
 
-test -f /usr/share/plasma/plasmoids/org.kde.plasma.kickoff/contents/ui/main.qml
-test -f /usr/share/plasma/plasmoids/org.kde.plasma.taskmanager/qml/main.qml
-test -f /usr/share/plasma/plasmoids/org.kde.plasma.digitalclock/contents/ui/main.qml
+install_applet_payload "$desktop_root/containments/panel" \
+    /usr/share/plasma/containments/org.kde.panel
+
+test -f /usr/share/plasma/plasmoids/org.kde.plasma.kickoff/ui/main.qml
+test -f /usr/share/plasma/plasmoids/org.kde.plasma.taskmanager/ui/main.qml
+test -f /usr/share/plasma/plasmoids/org.kde.plasma.digitalclock/ui/main.qml
