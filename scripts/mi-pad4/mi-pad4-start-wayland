@@ -123,6 +123,24 @@ export DBUS_SESSION_BUS_ADDRESS="$dbus_address"
 export DISPLAY="${session_display:-:0}"
 export QSG_RENDER_LOOP=basic
 
+# startplasma normally delegates these user services to systemd. Kernel 4.4
+# cannot keep a systemd user manager alive, so launch the audio graph directly.
+# Without a PipeWire server the Anland audio reconnect loop sits on a dead core
+# socket and wastes one CPU core.
+if ! pgrep -x pipewire >/dev/null 2>&1; then
+  nohup /usr/bin/pipewire >"$HOME/pipewire.log" 2>&1 </dev/null &
+fi
+for _ in $(seq 1 10); do
+  [[ -S "$XDG_RUNTIME_DIR/pipewire-0" ]] && break
+  sleep 0.2
+done
+if ! pgrep -x pipewire-pulse >/dev/null 2>&1; then
+  nohup /usr/bin/pipewire-pulse >"$HOME/pipewire-pulse.log" 2>&1 </dev/null &
+fi
+if ! pgrep -x wireplumber >/dev/null 2>&1; then
+  nohup /usr/bin/wireplumber >"$HOME/wireplumber.log" 2>&1 </dev/null &
+fi
+
 # KActivityManager must use the shell's software environment.  When it inherits
 # KWin's KGSL/legacy-ION environment it crashes before Plasma can load.
 if ! pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1; then
