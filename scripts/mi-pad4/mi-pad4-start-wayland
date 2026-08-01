@@ -26,7 +26,11 @@ export QT_QPA_PLATFORMTHEME=KDE
 export QT_QUICK_CONTROLS_STYLE=org.kde.breeze
 export QT_ENABLE_GLYPH_CACHE_WORKAROUND=1
 export QT_QUICK_CONTROLS_MOBILE=true
-export PLASMA_INTEGRATION_USE_PORTAL=1
+# The KDE portal backend inherits KWin's KGSL/legacy-ION environment and crashes
+# on the 4.4 kernel; its document FUSE helper can then spin forever. Native KDE
+# dialogs work without it and save memory/CPU on this 4 GB tablet.
+export PLASMA_INTEGRATION_USE_PORTAL=0
+export MALLOC_ARENA_MAX=2
 export PLASMA_PLATFORM=phone:handset
 export PLASMA_DEFAULT_SHELL=org.kde.plasma.mobileshell
 export XDG_CONFIG_DIRS="$HOME/.config/plasma-mobile:/etc/xdg${XDG_CONFIG_DIRS:+:$XDG_CONFIG_DIRS}"
@@ -101,6 +105,7 @@ fi
 
 export DBUS_SESSION_BUS_ADDRESS="$dbus_address"
 export DISPLAY="${session_display:-:0}"
+export QSG_RENDER_LOOP=basic
 
 # KActivityManager must use the shell's software environment.  When it inherits
 # KWin's KGSL/legacy-ION environment it crashes before Mobile shell can load.

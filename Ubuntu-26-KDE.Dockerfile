@@ -525,6 +525,15 @@ EOF
     install -m644 -o user -g user /tmp/mi-pad4/fcitx5.desktop /home/user/.config/autostart/fcitx5.desktop
     install -m600 -o user -g user /tmp/mi-pad4/plasma-localerc /home/user/.config/plasma-localerc
     install -m600 -o user -g user /tmp/mi-pad4/kscreenlockerrc /home/user/.config/kscreenlockerrc
+    cat >/home/user/.config/baloofilerc <<'EOF'
+[Basic Settings]
+Indexing-Enabled=false
+
+[General]
+dbVersion=2
+EOF
+    chown user:user /home/user/.config/baloofilerc
+    chmod 600 /home/user/.config/baloofilerc
     cat >/home/user/.config/fcitx5/profile <<'EOF'
 [Groups/0]
 Name=默认

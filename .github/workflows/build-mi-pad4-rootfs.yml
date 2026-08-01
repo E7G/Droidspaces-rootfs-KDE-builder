@@ -80,6 +80,7 @@ jobs:
             usr/local/lib/libion-legacy-shim.so
             home/user/.config/plasma-localerc
             home/user/.config/fcitx5/profile
+            home/user/.config/baloofilerc
             usr/share/locale/zh_CN/LC_MESSAGES/plasmashell.mo
           )
           for path in "${required[@]}"; do
