@@ -47,7 +47,7 @@ prepare() {
   cd "$srcdir/kwin-$pkgver"
   patch -Np1 -i "$srcdir/anland-kwin.patch"
   mkdir -p src/backends/anland
-  cp -a "$srcdir/anland-backend/." src/backends/anland/
+  cp -a "$startdir/anland-backend/." src/backends/anland/
 }
 EOF_KWIN_PATCH
     chown -R user:user "$dir"
