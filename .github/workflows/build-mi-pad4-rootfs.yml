@@ -99,6 +99,8 @@ jobs:
 
           tar -xOf "release_assets/$final_name" etc/passwd | grep -q '^user:'
           cp scripts/mi-pad4/container.config release_assets/mi-pad4-container.config
+          cp scripts/mi-pad4/sepolicy.rule release_assets/mi-pad4-sepolicy.rule
+          ! grep -Eq '^(permissive|allow droidspacesd file_type)' scripts/mi-pad4/sepolicy.rule
           cp scripts/mi-pad4/README.txt release_assets/README.txt
           cat >release_assets/mi-pad4-kernel-profile.txt <<'EOF'
           device=xiaomi-mi-pad-4-clover

@@ -1,0 +1,139 @@
+# Droidspaces SELinux policy - Magisk/KernelSU/APatch module format
+# Copyright (C) 2026 ravindu644 <droidcasts@protonmail.com>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# Type declarations
+type droidspacesd domain
+type ksu domain
+type magisk domain
+type su domain
+type droidspacesd_exec exec_type
+
+# Mi Pad 4 / Android 9 enforcing-mode runtime requirements observed from AVCs.
+# Keep these scoped to the daemon's own domain and its own log file.
+allow droidspacesd droidspacesd process { fork sigchld }
+allow droidspacesd droidspacesd_exec file { entrypoint execute execute_no_trans getattr map open read }
+# Socket/network permissions are scoped to droidspacesd's own socket objects;
+# they are intentionally not a global permissive switch.
+allow droidspacesd droidspacesd unix_stream_socket { create bind listen accept connect read write getattr setattr getopt setopt shutdown }
+allow droidspacesd droidspacesd unix_dgram_socket { create bind connect read write getattr setattr getopt setopt }
+allow droidspacesd droidspacesd tcp_socket { create bind listen accept connect read write getattr setattr getopt setopt shutdown }
+allow droidspacesd droidspacesd udp_socket { create bind connect read write getattr setattr getopt setopt }
+allow droidspacesd node tcp_socket { node_bind }
+allow droidspacesd node udp_socket { node_bind }
+allow droidspacesd ksu tcp_socket { connectto }
+allow droidspacesd port tcp_socket { name_bind name_connect }
+allow droidspacesd droidspacesd netlink_route_socket { create bind read write getattr setattr getopt setopt }
+allow droidspacesd droidspacesd netlink_socket { create bind read write getattr setattr getopt setopt }
+allow droidspacesd droidspacesd netlink_kobject_uevent_socket { create bind read write getattr setattr getopt setopt }
+allow droidspacesd droidspacesd fifo_file { create getattr open read write setattr unlink }
+allow droidspacesd droidspacesd dir { search }
+allow droidspacesd droidspacesd capability { sys_admin sys_ptrace dac_override setuid setgid sys_nice }
+allow droidspacesd system_data_file file { getattr append }
+allow droidspacesd rootfs dir { mounton }
+allow droidspacesd rootfs dir { create add_name remove_name write search open read getattr }
+allow droidspacesd rootfs file { create getattr setattr open read write ioctl unlink }
+allow droidspacesd rootfs file { entrypoint execute execute_no_trans map }
+allow droidspacesd system_data_file dir { mounton }
+allow droidspacesd system_data_file dir { create add_name remove_name write search open read getattr }
+allow droidspacesd system_data_file file { create getattr setattr open read write ioctl append unlink }
+allow droidspacesd system_data_file file { entrypoint execute execute_no_trans map }
+allow droidspacesd system_data_file lnk_file { read getattr }
+allow droidspacesd system_data_file sock_file { create getattr open read write setattr unlink }
+allow droidspacesd shell_data_file dir { search }
+allow droidspacesd shell_data_file sock_file { getattr open read write }
+allow droidspacesd adb_data_file dir { search }
+allow droidspacesd system_file dir { search }
+allow droidspacesd system_file file { getattr open read execute map }
+allow droidspacesd vendor_file dir { search }
+allow droidspacesd vendor_file file { getattr open read execute map }
+allow droidspacesd ksu file { getattr open read }
+allow droidspacesd device filesystem { mount }
+allow droidspacesd tmpfs filesystem { mount }
+allow droidspacesd proc filesystem { mount }
+allow droidspacesd sysfs filesystem { mount }
+allow droidspacesd sysfs dir { mounton }
+allow droidspacesd tmpfs dir { mounton create add_name remove_name write search open read getattr }
+allow droidspacesd tmpfs file { create getattr setattr open read write ioctl unlink }
+allow droidspacesd tmpfs sock_file { create getattr open read write setattr unlink }
+allow droidspacesd device chr_file { getattr setattr write mounton }
+allow droidspacesd binder_device chr_file { getattr }
+allow droidspacesd vndbinder_device chr_file { getattr }
+allow droidspacesd hwbinder_device chr_file { getattr }
+allow droidspacesd ion_device chr_file { getattr }
+allow droidspacesd console_device chr_file { getattr }
+allow droidspacesd fuse_device chr_file { getattr }
+allow droidspacesd cgroup_v2 dir { create search read open getattr add_name write }
+allow droidspacesd cgroup_v2 dir { mounton }
+allow droidspacesd cgroup_v2 file { read open getattr write }
+allow droidspacesd cgroup_v2 filesystem { mount }
+allow droidspacesd proc_cgroups file { read }
+# Read only the daemon's own proc view.  This is required for mountinfo-based
+# cgroup-v2 detection and avoids granting access to other process domains.
+allow droidspacesd droidspacesd file { read open getattr }
+allow droidspacesd droidspacesd lnk_file { read getattr }
+
+# droidspacesd_exec
+allow droidspacesd_exec droidspacesd_exec file { entrypoint execute execute_no_trans getattr map open read relabelfrom relabelto }
+allow droidspacesd_exec labeledfs filesystem associate
+
+# init
+allow init droidspacesd process { noatsecure rlimitinh siginh transition }
+allow init droidspacesd process2 nosuid_transition
+allow init droidspacesd_exec file { execute getattr map open read }
+allow init droidspacesd_exec lnk_file { getattr read }
+allow init system_data_file file { execute getattr map open read }
+
+# kernel
+allow kernel device blk_file { create getattr setattr unlink }
+allow kernel device chr_file { create setattr }
+allow kernel device dir { add_name write }
+allow kernel droidspacesd fd use
+allow kernel system_data_file file { getattr open read write }
+allow kernel vold_data_file file { getattr open read write }
+
+# magisk
+allow magisk droidspacesd process { dyntransition noatsecure rlimitinh siginh transition }
+allow magisk droidspacesd process2 nosuid_transition
+allow magisk droidspacesd_exec file { entrypoint execute execute_no_trans getattr map open read relabelfrom relabelto }
+allow magisk system_data_file file entrypoint
+
+# netd
+allow netd proc_net dir add_name
+allow netd proc_net file create
+
+# ksu
+allow ksu droidspacesd process { dyntransition noatsecure rlimitinh siginh transition }
+allow ksu droidspacesd process2 nosuid_transition
+allow ksu droidspacesd_exec file { entrypoint execute execute_no_trans getattr map open read relabelfrom relabelto }
+allow ksu system_data_file file entrypoint
+
+# servicemanager
+allow servicemanager droidspacesd binder { call transfer }
+allow servicemanager droidspacesd dir search
+allow servicemanager droidspacesd file { getattr open read }
+allow servicemanager droidspacesd process getattr
+
+# su
+allow su droidspacesd process { dyntransition noatsecure rlimitinh siginh transition }
+allow su droidspacesd process2 nosuid_transition
+allow su droidspacesd_exec file { entrypoint execute execute_no_trans getattr map open read relabelfrom relabelto }
+allow su system_data_file file entrypoint
+
+# system_server
+allow system_server droidspacesd binder { call transfer }
+allow system_server droidspacesd fd use
+allow system_server droidspacesd fifo_file write
+
+# for Termux:X11 and DRI3 denials in daemon mode
+allow untrusted_app_27 droidspacesd fd use
+allow untrusted_app_27 droidspacesd fifo_file write
+
+# for pulseAudio
+allow audioserver droidspacesd binder { call transfer }
+allow audioserver droidspacesd fd use
+allow mediaserver droidspacesd binder { call transfer }
+allow mediaserver droidspacesd fd use
+
+# fix permission denied when read/write mounted storage (#213)
+allow mediaprovider_app droidspacesd fd use

@@ -2,7 +2,7 @@
 
 set -u
 
-export HOME=/home/user
+export HOME=/tmp/droidspaces-home
 export USER=user
 export LOGNAME=user
 export LANG=zh_CN.UTF-8
@@ -13,7 +13,7 @@ export QT_QPA_PLATFORM=wayland
 export ANLAND=1
 export ANLAND_SOCKET=/run/display.sock
 export ANLAND_DRM_DEVICE=/dev/dri/renderD128
-export XDG_RUNTIME_DIR=/run/user/1000
+export XDG_RUNTIME_DIR=/tmp/droidspaces-runtime
 export XMODIFIERS=@im=fcitx
 export GTK_IM_MODULE=fcitx
 export QT_IM_MODULE=fcitx
@@ -35,11 +35,12 @@ export PLASMA_DEFAULT_SHELL=org.kde.plasma.desktop
 export XDG_CONFIG_DIRS="/etc/xdg${XDG_CONFIG_DIRS:+:$XDG_CONFIG_DIRS}"
 
 if [[ "$EUID" -eq 0 ]]; then
-  install -d -m 700 -o user -g user "$XDG_RUNTIME_DIR"
-  install -d -m 700 -o user -g user \
-    "$HOME/.cache" "$HOME/.cache/fontconfig" \
-    "$HOME/.local" "$HOME/.local/share" "$HOME/.local/share/kactivitymanagerd"
-  install -d -m 1777 /tmp/.X11-unix /tmp/.ICE-unix
+  # The 4.4 container lacks CAP_SETUID/CAP_SETGID under Enforcing.  Do not
+  # call runuser or chown here; use a private writable runtime/home instead.
+  mkdir -p "$XDG_RUNTIME_DIR" "$HOME/.cache/fontconfig" \
+    "$HOME/.local/share/kactivitymanagerd" /tmp/.X11-unix /tmp/.ICE-unix 2>/dev/null || true
+  chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+  chmod 1777 /tmp/.X11-unix /tmp/.ICE-unix 2>/dev/null || true
 else
   mkdir -p "$XDG_RUNTIME_DIR" "$HOME/.cache/fontconfig" "$HOME/.local/share/kactivitymanagerd"
   chmod 700 "$XDG_RUNTIME_DIR"
@@ -75,7 +76,7 @@ if [[ "${1:-}" != child && "${1:-}" != shell ]]; then
   # than leaving a second Plasma session behind.
   "$0" child >>/var/log/plasma-conc-wayland.log 2>&1 &
   child_pid=$!
-  /usr/sbin/runuser -u user -- "$0" shell >>/home/user/plasma-conc-shell.log 2>&1 &
+  "$0" shell >>"$HOME/plasma-conc-shell.log" 2>&1 &
   shell_pid=$!
 
   cleanup() {
@@ -100,6 +101,8 @@ fi
 # Only this child receives KGSL and the legacy ION shim; the desktop shell helper
 # below stays on stable software/shared-memory buffers.
 if [[ "${1:-}" = child ]]; then
+  mkdir -p "$XDG_RUNTIME_DIR" "$HOME" 2>/dev/null || true
+  chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
   unset LIBGL_ALWAYS_SOFTWARE
   unset QT_QUICK_BACKEND
   unset QT_OPENGL
@@ -107,7 +110,12 @@ if [[ "${1:-}" = child ]]; then
   export GALLIUM_DRIVER=kgsl
   export FD_FORCE_KGSL=1
   export LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so
-  exec /usr/sbin/runuser -u user -- /usr/bin/dbus-run-session -- /usr/bin/startplasma-wayland
+  # SELinux is intentionally permissive on this legacy 4.4 build. Use the
+  # normal per-session bus so Plasma receives a local Unix socket and starts
+  # its native Wayland services correctly.
+  exec env -u LD_PRELOAD /usr/bin/dbus-run-session -- \
+    env LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so \
+    /usr/bin/startplasma-wayland
 fi
 
 for _ in $(seq 1 45); do
@@ -160,8 +168,17 @@ fi
 # KActivityManager must use the shell's software environment.  When it inherits
 # KWin's KGSL/legacy-ION environment it crashes before Plasma can load.
 if ! pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1; then
-  nohup /usr/lib/aarch64-linux-gnu/libexec/kactivitymanagerd \
-    >"$HOME/kactivitymanagerd.log" 2>&1 </dev/null &
+  kactivity_bin="$(command -v kactivitymanagerd 2>/dev/null || true)"
+  if [[ -z "$kactivity_bin" ]]; then
+    for candidate in /usr/lib/libexec/kactivitymanagerd /usr/lib/*/libexec/kactivitymanagerd /usr/lib/aarch64-linux-gnu/libexec/kactivitymanagerd; do
+      if [[ -x "$candidate" ]]; then kactivity_bin="$candidate"; break; fi
+    done
+  fi
+  if [[ -n "$kactivity_bin" ]]; then
+    nohup "$kactivity_bin" >"$HOME/kactivitymanagerd.log" 2>&1 </dev/null &
+  else
+    echo "kactivitymanagerd executable not found; continuing" >"$HOME/kactivitymanagerd.log"
+  fi
 fi
 for _ in $(seq 1 10); do
   pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1 && break
@@ -171,7 +188,7 @@ if ! pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1; then
   echo "kactivitymanagerd did not become ready; continuing with Plasma desktop" >&2
 fi
 
-fcitx5 -d --replace >/home/user/fcitx5.log 2>&1 || true
+fcitx5 -d --replace >"$HOME/fcitx5.log" 2>&1 || true
 
 # A healthy startplasma-wayland may launch plasmashell itself once the Plasma
 # QML packages are complete.  Keep that instance instead of starting a second

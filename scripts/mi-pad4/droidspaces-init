@@ -4,12 +4,8 @@ export LANG=zh_CN.UTF-8
 export LANGUAGE=zh_CN:zh
 export LC_ALL=zh_CN.UTF-8
 
-if [[ "${1:-}" != supervise ]]; then
-  exec /usr/bin/tini -s -- "$0" supervise
-fi
-
 # The Android 4.4 container cannot provide the cgroup/mount contract required
-# by systemd PID 1 or systemd --user.  runit is deliberately used as the small
-# PID 1 service supervisor; it reaps children and restarts the desktop service
-# without a polling shell or a systemd user manager.
-exec /usr/bin/runsvdir -P /etc/service
+# by systemd PID 1 or systemd --user.  Start the single desktop supervisor
+# directly; it owns and reaps its KWin/Plasma children without systemd or an
+# additional runit PID layer (which cannot create a session on this 4.4 kernel).
+exec /usr/local/bin/mi-pad4-start-wayland

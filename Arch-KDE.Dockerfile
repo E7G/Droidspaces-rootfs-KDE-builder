@@ -16,6 +16,8 @@ ARG ENABLE_srf_ARG
 ARG ENABLE_tmoe_ARG
 ARG ENABLE_systemd257_ARG
 ARG USERNAME
+ARG ENABLE_anland_kde_ARG
+ARG ENABLE_MI_PAD4_PROFILE_ARG
 ######################################################
 
 COPY scripts/install-usb-manager.sh /usr/local/sbin/install-droidspaces-usb-manager
@@ -51,12 +53,11 @@ RUN sed -i '/^#ParallelDownloads/s/^#//' /etc/pacman.conf && \
         xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
         dolphin kate kinfocenter mesa-utils libpulse vulkan-tools aha clinfo dmidecode wayland-utils xorg-server \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
-        kimageformats plasma-browser-integration libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium; \
+        kimageformats plasma-browser-integration plasma-mobile plasma-keyboard libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium; \
     fi && \
     # Arch 强制安装，但是这玩意不开硬件访问会导致桌面闪退
     if [ "$BUILD_KDE" = "conc" ] || [ "$BUILD_KDE" = "min" ] ; then \
-        mv /usr/lib/xdg-desktop-portal /usr/lib/xdg-desktop-portal.bak && \
-        mv /usr/lib/xdg-desktop-portal-kde /usr/lib/xdg-desktop-portal-kde.bak; \
+        true; \
     fi && \
     ######################################################################################################
     #输入法 fcitx5 (可选)
@@ -139,6 +140,7 @@ RUN if [ "$PulseAudio" = "socket" ]; then \
 
 # 输入法与 KDE 开机自启动配置
 COPY scripts/start/ /tmp/droidspaces-start/
+COPY scripts/mi-pad4/ /tmp/mi-pad4/
 RUN <<'EOF_RUN'
     if [ "$ENABLE_srf_ARG" = "true" ]; then
     mkdir -p /home/${USERNAME}/.config/autostart
@@ -191,6 +193,20 @@ EOF
     fi
     rm -rf /tmp/droidspaces-start
 EOF_RUN
+
+# Mi Pad 4 runtime overlay. Droidspaces supplies the Android-side mounts and
+# display socket; the guest keeps the same custom_init for min and conc.
+RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
+        install -Dm755 /tmp/mi-pad4/droidspaces-init /sbin/droidspaces-init && \
+        install -Dm755 /tmp/mi-pad4/mi-pad4-start-wayland /usr/local/bin/mi-pad4-start-wayland && \
+        install -Dm644 /tmp/mi-pad4/container.config /usr/share/droidspaces/mi-pad4-container.config && \
+        install -Dm644 /tmp/mi-pad4/sepolicy.rule /usr/share/droidspaces/mi-pad4-sepolicy.rule && \
+        mkdir -p /etc/droidspaces && \
+        printf '%s\n' 'SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1' 'SYSTEMD_LOG_LEVEL=warning' > /etc/droidspaces/systemd-compat.env && \
+        printf '%s\n' '#!/bin/bash' 'set -u' 'echo "systemd: $(/usr/lib/systemd/systemd --version 2>/dev/null | head -n 1 || true)"' 'echo "kernel: $(uname -r)"' 'echo "cgroup2: $(mount 2>/dev/null | grep -c "type cgroup2" || true)"' 'echo "cgroup-v1: $(mount 2>/dev/null | grep -c "type cgroup" || true)"' 'echo "mode: custom-init is default on the 4.4 kernel"' > /usr/local/bin/droidspaces-systemd-check && \
+        chmod 755 /usr/local/bin/droidspaces-systemd-check; \
+    fi
+RUN rm -rf /tmp/mi-pad4
 
 # 下载并安装 Mesa
 RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \

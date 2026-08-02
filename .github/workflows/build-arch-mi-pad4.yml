@@ -1,0 +1,119 @@
+name: Build Arch Mi Pad 4 RootFS
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Desktop profile; run min first, then conc for the release
+        required: true
+        type: choice
+        default: min
+        options:
+          - min
+          - conc
+
+permissions:
+  contents: write
+
+concurrency:
+  group: arch-mi-pad4-${{ inputs.profile }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Arch rootfs
+        shell: bash
+        env:
+          PROFILE: ${{ inputs.profile }}
+        run: |
+          set -euo pipefail
+          chmod +x build_rootfs-qemu-aarch64.sh
+          ./build_rootfs-qemu-aarch64.sh \
+            -i Arch-KDE.Dockerfile \
+            -v "mi-pad4-${PROFILE}-${GITHUB_RUN_NUMBER}" \
+            -K "${PROFILE}" \
+            -L false \
+            -P none \
+            -g true \
+            -a false \
+            -b true \
+            -c true \
+            -d false \
+            -e true \
+            -f false \
+            -h true \
+            -j false \
+            -n true \
+            -S true \
+            -t false \
+            -u user \
+            -A true \
+            -M true
+
+      - name: Validate rootfs
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$(find . -maxdepth 1 -name 'Arch-KDE-Wayland-Droidspaces-rootfs-aarch64-*.tar.xz' -print -quit)"
+          test -n "$archive"
+          mkdir -p release_assets
+          final="Arch-${{ inputs.profile }}-Anland-MiPad4-aarch64-v${GITHUB_RUN_NUMBER}.tar.xz"
+          mv "$archive" "release_assets/$final"
+          tar -tf "release_assets/$final" | sed 's#^\./##' > rootfs-files.txt
+          for path in sbin/droidspaces-init usr/local/bin/mi-pad4-start-wayland usr/bin/startplasma-wayland usr/bin/kwin_wayland usr/local/lib/libion-legacy-shim.so; do
+            grep -Fxq "$path" rootfs-files.txt || { echo "Missing $path" >&2; exit 1; }
+          done
+          grep -Eq '^(usr/bin/systemd|usr/lib/systemd/systemd)$' rootfs-files.txt
+          grep -Fxq 'home/user' rootfs-files.txt || grep -q '^home/user/' rootfs-files.txt
+          ! grep -Eq '(^|/)(snap|snapd)(/|$)' rootfs-files.txt
+          (cd release_assets && sha256sum "$final" > SHA256SUMS)
+          cp scripts/mi-pad4/container.config release_assets/mi-pad4-container.config
+          cp scripts/mi-pad4/sepolicy.rule release_assets/mi-pad4-sepolicy.rule
+          cp scripts/mi-pad4/README.txt release_assets/README.txt
+          cat > release_assets/mi-pad4-kernel-profile.txt <<'EOF'
+          device=xiaomi-mi-pad-4-clover
+          architecture=aarch64
+          kernel=4.4
+          kernel_features=KSU,ReKSU,VGEM,DRM,KGSL
+          desktop=Arch-Plasma-${{ inputs.profile }}
+          display=Anland-Wayland
+          gpu=KGSL-legacy-ION-shim
+          audio=Anland
+          input=Fcitx5-Pinyin
+          locale=zh_CN.UTF-8
+          default_user=user
+          systemd_compat=257-tools-custom-init
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-mi-pad4-${{ inputs.profile }}
+          path: release_assets/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: arch-mi-pad4-${{ inputs.profile }}-v${{ github.run_number }}
+          name: Arch Mi Pad 4 ${{ inputs.profile }} RootFS v${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ inputs.profile == 'min' }}
+          make_latest: ${{ inputs.profile == 'conc' }}
+          files: release_assets/*
+          body: |
+            Arch Linux ARM aarch64 RootFS for Xiaomi Mi Pad 4 clover.
+            Profile: ${{ inputs.profile }}.
+            Uses the 4.4-compatible custom init by default; systemd tools and
+            systemd 257 compatibility settings are included, but systemd is not
+            forced to PID 1 because this kernel does not expose a complete cgroup
+            contract. Display is Anland Wayland, GPU path is KGSL + legacy ION shim.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
