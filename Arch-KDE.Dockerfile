@@ -144,6 +144,7 @@ RUN if [ "$PulseAudio" = "socket" ]; then \
 # 输入法与 KDE 开机自启动配置
 COPY scripts/start/ /tmp/droidspaces-start/
 COPY scripts/mi-pad4/ /tmp/mi-pad4/
+COPY arch-anland-overlay/ /tmp/anland-overlay/
 RUN <<'EOF_RUN'
     if [ "$ENABLE_srf_ARG" = "true" ]; then
     mkdir -p /home/${USERNAME}/.config/autostart
@@ -210,6 +211,17 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         chmod 755 /usr/local/bin/droidspaces-systemd-check; \
     fi
 RUN rm -rf /tmp/mi-pad4
+
+# Arch's stock KWin has no Anland backend. The CI workflow extracts the
+# matching 6.7.3 Anland KWin/Xwayland RPM payloads into this overlay before the
+# image build; never silently ship stock KWin for a Mi Pad 4 Anland image.
+RUN if [ -x /tmp/anland-overlay/usr/bin/kwin_wayland ] || [ -x /tmp/anland-overlay/usr/sbin/kwin_wayland ]; then \
+        cp -a /tmp/anland-overlay/. / && \
+        printf '%s\n' 'patched-kwin=6.7.3-anland-fedora43-payload' > /usr/share/droidspaces/anland-kwin-package; \
+    else \
+        printf '%s\n' 'patched-kwin=missing' > /usr/share/droidspaces/anland-kwin-package; \
+    fi
+RUN rm -rf /tmp/anland-overlay
 
 # 下载并安装 Mesa
 RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
