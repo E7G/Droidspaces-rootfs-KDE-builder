@@ -123,11 +123,6 @@ for _ in $(seq 1 45); do
   sleep 1
 done
 
-if shell_pid="$(live_plasmashell_pid)"; then
-  echo "plasmashell already running: $shell_pid"
-  exit 0
-fi
-
 if [[ -z "${session_pid:-}" ]]; then
   echo "startplasma-wayland did not become ready" >&2
   exit 1
@@ -177,4 +172,17 @@ if ! pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1; then
 fi
 
 fcitx5 -d --replace >/home/user/fcitx5.log 2>&1 || true
+
+# A healthy startplasma-wayland may launch plasmashell itself once the Plasma
+# QML packages are complete.  Keep that instance instead of starting a second
+# shell, but do not return before the audio/input services above are running.
+shell_pid="$(pgrep -x plasmashell 2>/dev/null | head -n 1 || true)"
+if [[ -n "$shell_pid" ]]; then
+  echo "plasmashell already running: $shell_pid"
+  while kill -0 "$shell_pid" 2>/dev/null; do
+    sleep 5
+  done
+  exit 1
+fi
+
 exec /usr/bin/plasmashell -p org.kde.plasma.desktop
