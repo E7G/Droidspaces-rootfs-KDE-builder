@@ -131,7 +131,12 @@ bool AnlandEglLayer::importBuffers(int count)
         attrs.width = actual.width();
         attrs.height = actual.height();
         attrs.format = protocol_format_to_drm(info.format);
-        attrs.modifier = info.modifier;
+        /* Android's ANativeWindow path reports modifier=0 for a linear buffer.
+         * In EGL dma-buf import, however, 0 means an explicit DRM_LINEAR
+         * modifier, while DRM_FORMAT_MOD_INVALID means implicit layout.  The
+         * 4.4 clover gralloc buffers are implicit-linear and Mesa's KGSL EGL
+         * rejects the explicit modifier with EGL_BAD_PARAMETER. */
+        attrs.modifier = info.modifier == 0 ? DRM_FORMAT_MOD_INVALID : info.modifier;
         // The producer owns the dmabuf fd; DmaBufAttributes (and the EGLImage we
         // hand the fd to) must not close it, so dup() into the owning slot.
         attrs.fd[0] = FileDescriptor(dup(fd));
