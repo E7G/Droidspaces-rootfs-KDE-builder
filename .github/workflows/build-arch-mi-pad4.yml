@@ -101,6 +101,7 @@ jobs:
           retention-days: 30
 
       - name: Publish release
+        if: ${{ inputs.profile == 'conc' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: arch-mi-pad4-${{ inputs.profile }}-v${{ github.run_number }}
