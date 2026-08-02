@@ -33,14 +33,6 @@ jobs:
           PROFILE: ${{ inputs.profile }}
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends rpm2cpio cpio zstd
-          rm -rf arch-anland-overlay
-          mkdir -p arch-anland-overlay
-          for package in anland-build/Fedora43/kwin-*.rpm anland-build/Fedora43/kwin-common-*.rpm anland-build/Fedora43/kwin-libs-*.rpm anland-build/Fedora43/xorg-x11-server-Xwayland-*.rpm; do
-            rpm2cpio "$package" | (cd arch-anland-overlay && cpio -idm --quiet)
-          done
-          test -x arch-anland-overlay/usr/bin/kwin_wayland || test -x arch-anland-overlay/usr/sbin/kwin_wayland
           chmod +x build_rootfs-qemu-aarch64.sh
           ./build_rootfs-qemu-aarch64.sh \
             -i Arch-KDE.Dockerfile \

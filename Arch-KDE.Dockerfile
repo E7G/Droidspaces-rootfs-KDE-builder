@@ -144,7 +144,6 @@ RUN if [ "$PulseAudio" = "socket" ]; then \
 # 输入法与 KDE 开机自启动配置
 COPY scripts/start/ /tmp/droidspaces-start/
 COPY scripts/mi-pad4/ /tmp/mi-pad4/
-COPY arch-anland-overlay/ /tmp/anland-overlay/
 RUN <<'EOF_RUN'
     if [ "$ENABLE_srf_ARG" = "true" ]; then
     mkdir -p /home/${USERNAME}/.config/autostart
@@ -210,18 +209,15 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         printf '%s\n' '#!/bin/bash' 'set -u' 'echo "systemd: $(/usr/lib/systemd/systemd --version 2>/dev/null | head -n 1 || true)"' 'echo "kernel: $(uname -r)"' 'echo "cgroup2: $(mount 2>/dev/null | grep -c "type cgroup2" || true)"' 'echo "cgroup-v1: $(mount 2>/dev/null | grep -c "type cgroup" || true)"' 'echo "mode: custom-init is default on the 4.4 kernel"' > /usr/local/bin/droidspaces-systemd-check && \
         chmod 755 /usr/local/bin/droidspaces-systemd-check; \
     fi
-RUN rm -rf /tmp/mi-pad4
-
-# Arch's stock KWin has no Anland backend. The CI workflow extracts the
-# matching 6.7.3 Anland KWin/Xwayland RPM payloads into this overlay before the
-# image build; never silently ship stock KWin for a Mi Pad 4 Anland image.
-RUN if [ -x /tmp/anland-overlay/usr/bin/kwin_wayland ] || [ -x /tmp/anland-overlay/usr/sbin/kwin_wayland ]; then \
-        cp -a /tmp/anland-overlay/. / && \
-        printf '%s\n' 'patched-kwin=6.7.3-anland-fedora43-payload' > /usr/share/droidspaces/anland-kwin-package; \
+# Build KWin/Xwayland natively against Arch's Qt ABI. Fedora RPMs cannot be
+# reused here because their binaries require Fedora-private Qt symbols.
+RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
+        chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh && \
+        BUILD_KDE="$BUILD_KDE" /tmp/mi-pad4/build-arch-anland-kwin.sh; \
     else \
-        printf '%s\n' 'patched-kwin=missing' > /usr/share/droidspaces/anland-kwin-package; \
+        printf '%s\n' 'patched-kwin=not-requested' > /usr/share/droidspaces/anland-kwin-package; \
     fi
-RUN rm -rf /tmp/anland-overlay
+RUN rm -rf /tmp/mi-pad4
 
 # 下载并安装 Mesa
 RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
