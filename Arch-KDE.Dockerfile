@@ -57,7 +57,10 @@ RUN sed -i '/^#ParallelDownloads/s/^#//' /etc/pacman.conf && \
     fi && \
     # Arch 强制安装，但是这玩意不开硬件访问会导致桌面闪退
     if [ "$BUILD_KDE" = "conc" ] || [ "$BUILD_KDE" = "min" ] ; then \
-        true; \
+        for service in /usr/share/dbus-1/services/org.freedesktop.portal*.service; do \
+            [ -e "$service" ] || continue; mv "$service" "$service.disabled"; \
+        done; \
+        rm -f /etc/xdg/autostart/xdg-desktop-portal*.desktop; \
     fi && \
     ######################################################################################################
     #输入法 fcitx5 (可选)

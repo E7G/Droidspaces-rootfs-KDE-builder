@@ -170,7 +170,7 @@ fi
 if ! pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1; then
   kactivity_bin="$(command -v kactivitymanagerd 2>/dev/null || true)"
   if [[ -z "$kactivity_bin" ]]; then
-    for candidate in /usr/lib/libexec/kactivitymanagerd /usr/lib/*/libexec/kactivitymanagerd /usr/lib/aarch64-linux-gnu/libexec/kactivitymanagerd; do
+    for candidate in /usr/lib/kactivitymanagerd /usr/lib/libexec/kactivitymanagerd /usr/lib/*/libexec/kactivitymanagerd /usr/lib/aarch64-linux-gnu/libexec/kactivitymanagerd; do
       if [[ -x "$candidate" ]]; then kactivity_bin="$candidate"; break; fi
     done
   fi
