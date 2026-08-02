@@ -26,6 +26,21 @@ chmod 0440 /etc/sudoers.d/droidspaces-user
 rm -rf "$BUILD_ROOT"
 mkdir -p "$BUILD_ROOT"
 
+# Arch's current pacman defaults require signatures for local files. Packages
+# produced by this CI build are intentionally unsigned; relax checking only in
+# this temporary install config, never in the final rootfs configuration.
+PACMAN_LOCAL_CONFIG="$BUILD_ROOT/pacman-localpkg.conf"
+cp /etc/pacman.conf "$PACMAN_LOCAL_CONFIG"
+if grep -Eq '^[[:space:]]*LocalFileSigLevel[[:space:]]*=' "$PACMAN_LOCAL_CONFIG"; then
+    sed -i 's/^[[:space:]]*LocalFileSigLevel[[:space:]]*=.*/LocalFileSigLevel = Never/' "$PACMAN_LOCAL_CONFIG"
+else
+    sed -i '/^\[options\]/a LocalFileSigLevel = Never' "$PACMAN_LOCAL_CONFIG"
+fi
+
+install_local_package() {
+    pacman --config "$PACMAN_LOCAL_CONFIG" -U --noconfirm "$1"
+}
+
 clone_at() {
     local url="$1" commit="$2" dir="$3"
     git clone --filter=blob:none --no-checkout "$url" "$dir"
@@ -57,7 +72,7 @@ EOF_KWIN_PATCH
     local package
     package="$(find "$BUILD_ROOT/packages" -maxdepth 1 -type f -name 'kwin-*.pkg.tar.*' -print -quit)"
     [ -n "$package" ] || { echo 'kwin package was not produced' >&2; find "$BUILD_ROOT" -maxdepth 3 -type f -name '*.pkg.tar.*' >&2; exit 1; }
-    pacman -U --noconfirm "$package"
+    install_local_package "$package"
 }
 
 build_xwayland() {
@@ -81,7 +96,7 @@ EOF_XWAYLAND_PATCH
     local package
     package="$(find "$BUILD_ROOT/packages" -maxdepth 1 -type f -name 'xorg-xwayland-*.pkg.tar.*' -print -quit)"
     [ -n "$package" ] || { echo 'xorg-xwayland package was not produced' >&2; find "$BUILD_ROOT" -maxdepth 3 -type f -name '*.pkg.tar.*' >&2; exit 1; }
-    pacman -U --noconfirm "$package"
+    install_local_package "$package"
 }
 
 build_kwin
