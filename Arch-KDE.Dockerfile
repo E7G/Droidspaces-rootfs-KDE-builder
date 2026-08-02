@@ -354,7 +354,7 @@ if [ -f /etc/logrotate.conf ]; then
     fi
 fi
 
-echo "Post-extraction fixes applied on $(date)" > /etc/droidspaces
+echo "Post-extraction fixes applied on $(date)" > /etc/droidspaces/build-info
 EOF_RUN
 
 # 注入 binfmt 服务脚本
