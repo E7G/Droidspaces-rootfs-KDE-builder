@@ -109,6 +109,7 @@ if [[ "${1:-}" = child ]]; then
   export MESA_LOADER_DRIVER_OVERRIDE=kgsl
   export GALLIUM_DRIVER=kgsl
   export FD_FORCE_KGSL=1
+  export KWIN_DISABLE_VULKAN=1
   export LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so
   # SELinux is intentionally permissive on this legacy 4.4 build. Use the
   # normal per-session bus so Plasma receives a local Unix socket and starts

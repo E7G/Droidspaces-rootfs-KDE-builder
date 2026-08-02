@@ -192,6 +192,13 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
 
     m_currentIndex = get_selected_idx(m_display);
 
+    if (m_currentIndex < 0 || m_currentIndex >= m_bufCount || !m_renderTargets[m_currentIndex]) {
+        // A failed EGLImage import must not turn into std::optional::operator*
+        // aborts. Wait for the next consumer reconnect/frame instead.
+        qCWarning(KWIN_ANLAND) << "no render target for consumer buffer" << m_currentIndex;
+        return std::nullopt;
+    }
+
     return OutputLayerBeginFrameInfo{
         .renderTarget = *m_renderTargets[m_currentIndex],
         .repaint = m_accumDamage[m_currentIndex],
@@ -281,7 +288,14 @@ bool AnlandEglBackend::init()
         return false;
     }
 
-    initWayland();
+    // EglBackend::initWayland() assumes a non-null DRM scanout device. Anland
+    // imports Android buffers directly, so skip DRM feedback on KGSL-only
+    // kernels and keep the surfaceless EGL path alive.
+    if (m_backend->drmDevice()) {
+        initWayland();
+    } else {
+        qCInfo(KWIN_ANLAND) << "skipping DRM Wayland feedback for surfaceless EGL";
+    }
 
     const auto outputs = m_backend->outputs();
     for (BackendOutput *output : outputs) {

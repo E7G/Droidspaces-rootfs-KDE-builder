@@ -32,11 +32,16 @@
 #include <QtConcurrent>
 
 #include <xf86drm.h>
+#include <epoxy/egl.h>
 
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
+
+#ifndef EGL_PLATFORM_SURFACELESS_MESA
+#define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
+#endif
 
 namespace KWin
 {
@@ -79,7 +84,20 @@ static std::unique_ptr<RenderDevice> openRenderDevice()
         }
     }
 
-    return RenderDevice::open(QStringLiteral("/dev/dri/renderD128"));
+    if (auto dev = RenderDevice::open(QStringLiteral("/dev/dri/renderD128"))) {
+        return dev;
+    }
+
+    // Mi Pad 4's 4.4 KGSL stack exposes /dev/kgsl-3d0, not a DRM render node.
+    // KWin 6.7's RenderDevice can still own a surfaceless EGL display; keeping
+    // the DRM pointer null disables only DRM feedback/syncobj paths.
+    const EGLDisplay eglDisplay = eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
+    auto display = EglDisplay::create(eglDisplay, nullptr);
+    if (display) {
+        qCInfo(KWIN_ANLAND) << "using surfaceless EGL without a DRM render node";
+        return std::make_unique<RenderDevice>(nullptr, std::move(display));
+    }
+    return nullptr;
 }
 
 AnlandBackend::AnlandBackend(const QString &socketPath, QObject *parent)
