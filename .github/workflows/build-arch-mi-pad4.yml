@@ -66,7 +66,8 @@ jobs:
           final="Arch-${{ inputs.profile }}-Anland-MiPad4-aarch64-v${GITHUB_RUN_NUMBER}.tar.xz"
           mv "$archive" "release_assets/$final"
           tar -tf "release_assets/$final" | sed 's#^\./##' > rootfs-files.txt
-          for path in sbin/droidspaces-init usr/local/bin/mi-pad4-start-wayland usr/bin/startplasma-wayland usr/bin/kwin_wayland usr/local/lib/libion-legacy-shim.so; do
+          grep -Eq '^(sbin|usr/bin)/droidspaces-init$' rootfs-files.txt || { echo "Missing droidspaces-init" >&2; exit 1; }
+          for path in usr/local/bin/mi-pad4-start-wayland usr/bin/startplasma-wayland usr/bin/kwin_wayland usr/local/lib/libion-legacy-shim.so; do
             grep -Fxq "$path" rootfs-files.txt || { echo "Missing $path" >&2; exit 1; }
           done
           grep -Eq '^(usr/bin/systemd|usr/lib/systemd/systemd)$' rootfs-files.txt
