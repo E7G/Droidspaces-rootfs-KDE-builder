@@ -50,9 +50,14 @@ prepare() {
   cp -a "$startdir/anland-backend/." src/backends/anland/
 }
 EOF_KWIN_PATCH
+    mkdir -p "$BUILD_ROOT/packages"
+    chown -R user:user "$BUILD_ROOT/packages"
     chown -R user:user "$dir"
-    su user -c "cd '$dir' && makepkg --syncdeps --noconfirm --nocheck --skippgpcheck --cleanbuild --clean"
-    pacman -U --noconfirm "$dir"/kwin-*.pkg.tar.zst
+    su user -c "cd '$dir' && PKGDEST='$BUILD_ROOT/packages' makepkg --syncdeps --noconfirm --nocheck --skippgpcheck --cleanbuild --clean"
+    local package
+    package="$(find "$BUILD_ROOT/packages" -maxdepth 1 -type f -name 'kwin-*.pkg.tar.*' -print -quit)"
+    [ -n "$package" ] || { echo 'kwin package was not produced' >&2; find "$BUILD_ROOT" -maxdepth 3 -type f -name '*.pkg.tar.*' >&2; exit 1; }
+    pacman -U --noconfirm "$package"
 }
 
 build_xwayland() {
@@ -69,9 +74,14 @@ prepare() {
   patch -Np1 -i "$srcdir/anland-xwayland.patch"
 }
 EOF_XWAYLAND_PATCH
+    mkdir -p "$BUILD_ROOT/packages"
+    chown -R user:user "$BUILD_ROOT/packages"
     chown -R user:user "$dir"
-    su user -c "cd '$dir' && makepkg --syncdeps --noconfirm --nocheck --skippgpcheck --cleanbuild --clean"
-    pacman -U --noconfirm "$dir"/xorg-xwayland-*.pkg.tar.zst
+    su user -c "cd '$dir' && PKGDEST='$BUILD_ROOT/packages' makepkg --syncdeps --noconfirm --nocheck --skippgpcheck --cleanbuild --clean"
+    local package
+    package="$(find "$BUILD_ROOT/packages" -maxdepth 1 -type f -name 'xorg-xwayland-*.pkg.tar.*' -print -quit)"
+    [ -n "$package" ] || { echo 'xorg-xwayland package was not produced' >&2; find "$BUILD_ROOT" -maxdepth 3 -type f -name '*.pkg.tar.*' >&2; exit 1; }
+    pacman -U --noconfirm "$package"
 }
 
 build_kwin
