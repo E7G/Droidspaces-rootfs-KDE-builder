@@ -172,6 +172,8 @@ fi
     if [ "$ENABLE_mesa_ARG" = "true" ] ; then
         cat <<'EOF' >> /etc/environment
 MESA_LOADER_DRIVER_OVERRIDE=kgsl
+FD_KGSL_ENABLE_DMABUF=1
+XWAYLAND_FORCE_KGSL_SURFACELESS=1
 TU_DEBUG=noconform
 LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so
 EOF
@@ -228,9 +230,9 @@ RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
         if compgen -G '/tmp/mesa-mi-pad4/*.pkg.tar.*' >/dev/null; then \
             pacman --config /tmp/pacman-nosig.conf -U --noconfirm /tmp/mesa-mi-pad4/*.pkg.tar.* && \
             printf '%s\n' \
-              'source=E7G/mesa-for-android-container@9a79b39f15ddb58d1fabbe1e590b630435016981' \
-              'pkgbuild=E7G/archlinuxarm-PKGBUILDs@e239f66' \
-              'fix=KGSL FD_FEATURE_IMPORT_DMABUF -> DRM_PRIME_CAP_IMPORT' \
+              'source=E7G/mesa-for-android-container@fdfe3fc9847c37b656ea3b8139a46531a338f927' \
+              'pkgbuild=E7G/archlinuxarm-PKGBUILDs@a9943305df9acd71220bfd68177081b5b5e42129' \
+              'fix=proven KGSL baseline + legacy ION ABI + KGSL dma-buf enable' \
               'egl=EGL_EXT_image_dma_buf_import' \
               > /usr/share/droidspaces/mesa-kgsl-dmabuf-import; \
         else \

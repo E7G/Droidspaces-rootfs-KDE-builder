@@ -1,0 +1,55 @@
+name: Build Arch Mi Pad 4 Mesa Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build patched Mesa packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch freedreno \
+            https://github.com/E7G/archlinuxarm-PKGBUILDs.git \
+            .ci/archlinuxarm-PKGBUILDs
+          docker run --privileged --rm \
+            -v "$PWD/.ci/archlinuxarm-PKGBUILDs:/src" \
+            lfdevs/archlinuxarm:base-devel bash -lc '
+              set -euo pipefail
+              pacman -Syyu --noconfirm
+              pacman -S --needed --noconfirm sudo base-devel git ccache
+              useradd -m -s /bin/bash builder
+              echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
+              chmod 0440 /etc/sudoers.d/builder
+              chown -R builder:builder /src
+              sudo -u builder bash -lc "
+                export CCACHE_DIR=/home/builder/.ccache
+                ccache --max-size=2G
+                cd /src/extra/mesa
+                makepkg -s --noconfirm --needed
+              "
+            '
+          mkdir -p mesa-mi-pad4-test
+          for pattern in \
+            'mesa-[0-9]*.pkg.tar.*' \
+            'vulkan-freedreno-*.pkg.tar.*' \
+            'vulkan-mesa-implicit-layers-*.pkg.tar.*'; do
+            cp -v .ci/archlinuxarm-PKGBUILDs/extra/mesa/$pattern mesa-mi-pad4-test/
+          done
+          sha256sum mesa-mi-pad4-test/*.pkg.tar.* > mesa-mi-pad4-test/SHA256SUMS
+
+      - name: Upload test packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-mi-pad4-mesa-test
+          path: mesa-mi-pad4-test/
+          retention-days: 7
