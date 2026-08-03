@@ -26,6 +26,7 @@ jobs:
               set -euo pipefail
               pacman -Syyu --noconfirm
               cp -a /repo/scripts/mi-pad4 /tmp/mi-pad4
+              chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh
               BUILD_KDE=min \
               BUILD_XWAYLAND=false \
               ANLAND_PACKAGE_OUTPUT_DIR=/out \
