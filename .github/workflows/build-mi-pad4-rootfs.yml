@@ -2,17 +2,6 @@ name: Build Mi Pad 4 Plasma Conc RootFS
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/build-mi-pad4-rootfs.yml
-      - Ubuntu-26-KDE.Dockerfile
-      - build_rootfs-qemu-aarch64.sh
-      - build_rootfs-native.sh
-      - scripts/ion-legacy-shim.c
-      - scripts/mi-pad4/**
-      - anland-build/ubuntu2604/**
 
 permissions:
   contents: write
