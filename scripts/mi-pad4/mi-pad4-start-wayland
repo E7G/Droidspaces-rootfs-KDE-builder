@@ -62,7 +62,7 @@ fi
 # HOME is an Android bind mount, not /home/user. Apply profile defaults once per
 # revision so upgrades can repair known-bad Plasma state without resetting user
 # changes on every start.
-profile_revision=20260804-2
+profile_revision=20260804-3
 profile_stamp="$HOME/.config/.mi-pad4-profile-revision"
 if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; then
   mkdir -p "$HOME/.config"
