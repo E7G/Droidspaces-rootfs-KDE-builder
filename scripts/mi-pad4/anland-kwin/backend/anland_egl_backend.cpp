@@ -146,7 +146,46 @@ bool AnlandEglLayer::importBuffers(int count)
         // EglBackend::importDmaBufAsTexture() builds the EGLImage and wraps it in
         // a GLTexture in one step (the 5.27-era manual EGLImageKHR +
         // EGLImageTexture(...) dance is gone in 6.x).
-        std::shared_ptr<GLTexture> texture = m_backend->importDmaBufAsTexture(attrs);
+        /* Qualcomm's 4.4 gralloc and the KGSL EGL implementation disagree on
+         * whether the buffer is advertised as RGBA/XRGB and whether a linear
+         * modifier is explicit.  Keep the protocol value first, then retry
+         * the equivalent legacy combinations instead of turning the whole
+         * output black on EGL_BAD_PARAMETER. */
+        const std::array<uint32_t, 5> formatCandidates = {
+            attrs.format,
+            DRM_FORMAT_XRGB8888,
+            DRM_FORMAT_ARGB8888,
+            DRM_FORMAT_XBGR8888,
+            DRM_FORMAT_ABGR8888,
+        };
+        const std::array<uint64_t, 2> modifierCandidates = {
+            attrs.modifier,
+            DRM_FORMAT_MOD_LINEAR,
+        };
+        std::shared_ptr<GLTexture> texture;
+        uint32_t importedFormat = attrs.format;
+        uint64_t importedModifier = attrs.modifier;
+        for (const uint32_t candidateFormat : formatCandidates) {
+            for (const uint64_t candidateModifier : modifierCandidates) {
+                if (candidateFormat == attrs.format && candidateModifier == attrs.modifier) {
+                    // This is the normal protocol path and was already tried
+                    // by the first import below.
+                }
+                attrs.format = candidateFormat;
+                attrs.modifier = candidateModifier;
+                texture = m_backend->importDmaBufAsTexture(attrs);
+                if (texture) {
+                    importedFormat = candidateFormat;
+                    importedModifier = candidateModifier;
+                    break;
+                }
+            }
+            if (texture) {
+                break;
+            }
+        }
+        attrs.format = importedFormat;
+        attrs.modifier = importedModifier;
         if (!texture) {
             qCWarning(KWIN_ANLAND) << "failed to import dmabuf" << i << "as texture";
             releaseBuffers();
