@@ -43,6 +43,7 @@ jobs:
           sha256sum kwin-mi-pad4-test/*.pkg.tar.* > kwin-mi-pad4-test/SHA256SUMS
 
       - name: Upload test package
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: arch-mi-pad4-kwin-test

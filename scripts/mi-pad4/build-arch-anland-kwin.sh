@@ -108,4 +108,5 @@ if [[ -n "$PACKAGE_OUTPUT_DIR" ]]; then
     mkdir -p "$PACKAGE_OUTPUT_DIR"
     cp -a "$BUILD_ROOT/packages"/*.pkg.tar.* "$PACKAGE_OUTPUT_DIR/"
 fi
+install -d -m 0755 /usr/share/droidspaces
 printf '%s\n' 'patched-kwin=arch-native-6.7.3-anland' > /usr/share/droidspaces/anland-kwin-package
