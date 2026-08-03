@@ -25,6 +25,8 @@ jobs:
             lfdevs/archlinuxarm:base-devel bash -lc '
               set -euo pipefail
               pacman -Syyu --noconfirm
+              pacman -S --needed --noconfirm sudo
+              useradd -m -s /bin/bash user
               cp -a /repo/scripts/mi-pad4 /tmp/mi-pad4
               chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh
               BUILD_KDE=min \
