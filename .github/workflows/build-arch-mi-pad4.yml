@@ -27,6 +27,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Build patched Mesa for KGSL
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .ci/archlinuxarm-PKGBUILDs mesa-mi-pad4
+          git clone --depth 1 --branch freedreno \
+            https://github.com/E7G/archlinuxarm-PKGBUILDs.git \
+            .ci/archlinuxarm-PKGBUILDs
+          docker run --privileged --rm \
+            -v "$PWD/.ci/archlinuxarm-PKGBUILDs:/src" \
+            lfdevs/archlinuxarm:base-devel bash -lc '
+              set -euo pipefail
+              pacman -Syyu --noconfirm
+              pacman -S --needed --noconfirm sudo base-devel git ccache
+              useradd -m -s /bin/bash builder
+              echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
+              chmod 0440 /etc/sudoers.d/builder
+              chown -R builder:builder /src
+              sudo -u builder bash -lc "
+                export CCACHE_DIR=/home/builder/.ccache
+                ccache --max-size=2G
+                cd /src/extra/mesa
+                makepkg -s --noconfirm --needed
+              "
+            '
+          mkdir -p mesa-mi-pad4
+          for pattern in \
+            'mesa-[0-9]*.pkg.tar.*' \
+            'vulkan-freedreno-*.pkg.tar.*' \
+            'vulkan-mesa-implicit-layers-*.pkg.tar.*'; do
+            cp -v .ci/archlinuxarm-PKGBUILDs/extra/mesa/$pattern mesa-mi-pad4/
+          done
+          test -n "$(find mesa-mi-pad4 -maxdepth 1 -name 'mesa-*.pkg.tar.*' -print -quit)"
+          sha256sum mesa-mi-pad4/*.pkg.tar.* | tee mesa-mi-pad4/SHA256SUMS
+
       - name: Build Arch rootfs
         shell: bash
         env:
@@ -71,6 +106,8 @@ jobs:
             grep -Fxq "$path" rootfs-files.txt || { echo "Missing $path" >&2; exit 1; }
           done
           grep -Fxq 'usr/share/droidspaces/anland-kwin-package' rootfs-files.txt
+          grep -Fxq 'usr/share/droidspaces/mesa-kgsl-dmabuf-import' rootfs-files.txt
+          grep -Eq '^var/lib/pacman/local/mesa-1:26\.2\.0-6/' rootfs-files.txt
           grep -Eq '^(usr/bin/systemd|usr/lib/systemd/systemd)$' rootfs-files.txt
           grep -Fxq 'home/user' rootfs-files.txt || grep -q '^home/user/' rootfs-files.txt
           ! grep -Eq '(^|/)(snap|snapd)(/|$)' rootfs-files.txt

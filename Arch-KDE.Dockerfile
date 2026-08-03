@@ -23,6 +23,7 @@ ARG ENABLE_MI_PAD4_PROFILE_ARG
 COPY scripts/install-usb-manager.sh /usr/local/sbin/install-droidspaces-usb-manager
 COPY scripts/systemd257.sh /usr/local/sbin/systemd257
 COPY scripts/ion-legacy-shim.c /tmp/ion-legacy-shim.c
+COPY mesa-mi-pad4/ /tmp/mesa-mi-pad4/
 
 RUN sed -i '/^#ParallelDownloads/s/^#//' /etc/pacman.conf && \
     sed -i '/NoExtract.*locale/d' /etc/pacman.conf && \
@@ -222,15 +223,20 @@ RUN rm -rf /tmp/mi-pad4
 # 下载并安装 Mesa
 RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
         echo "--> [开启] 正在下载并安装最新版 Mesa 驱动..." && \
-        URL=$(curl -s https://api.github.com/repos/lfdevs/mesa-for-android-container/releases/latest | \
-        jq -r '.assets[] | select(.name | test("mesa-for-android-container_.*_archlinux_arm64\\.tar")) | .browser_download_url' | head -1) && \
-        if [ -z "$URL" ] || [ "$URL" = "null" ]; then echo "获取下载链接失败，可能是触发了 GitHub API 速率限制"; exit 1; fi && \
-        wget -q --tries=5 --waitretry=3 -O /tmp/mesa.tar "$URL" && \
-        tar -xf /tmp/mesa.tar -C /tmp && \
         cp /etc/pacman.conf /tmp/pacman-nosig.conf && \
         sed -i 's/.*SigLevel.*/SigLevel = Never/g' /tmp/pacman-nosig.conf && \
-        pacman --config /tmp/pacman-nosig.conf -U --noconfirm /tmp/*.pkg.tar.* && \
-        rm -f /tmp/mesa.tar /tmp/*.pkg.tar.* /tmp/pacman-nosig.conf /tmp/*.sig ; \
+        if compgen -G '/tmp/mesa-mi-pad4/*.pkg.tar.*' >/dev/null; then \
+            pacman --config /tmp/pacman-nosig.conf -U --noconfirm /tmp/mesa-mi-pad4/*.pkg.tar.* && \
+            printf '%s\n' \
+              'source=E7G/mesa-for-android-container@9a79b39f15ddb58d1fabbe1e590b630435016981' \
+              'pkgbuild=E7G/archlinuxarm-PKGBUILDs@e239f66' \
+              'fix=KGSL FD_FEATURE_IMPORT_DMABUF -> DRM_PRIME_CAP_IMPORT' \
+              'egl=EGL_EXT_image_dma_buf_import' \
+              > /usr/share/droidspaces/mesa-kgsl-dmabuf-import; \
+        else \
+            echo 'Missing CI-built Mi Pad 4 Mesa packages' >&2; exit 1; \
+        fi && \
+        rm -rf /tmp/mesa-mi-pad4 /tmp/pacman-nosig.conf ; \
     else \
         echo "--> [跳过] 未开启 Mesa 驱动安装"; \
     fi
