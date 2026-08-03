@@ -190,6 +190,18 @@ EOF
 Autolock=false
 LockOnResume=false
 EOF
+    install -m600 -o ${USERNAME} -g ${USERNAME} /tmp/mi-pad4/plasma-localerc \
+        /home/${USERNAME}/.config/plasma-localerc
+    install -m600 -o ${USERNAME} -g ${USERNAME} /tmp/mi-pad4/plasma-org.kde.plasma.desktop-appletsrc \
+        /home/${USERNAME}/.config/plasma-org.kde.plasma.desktop-appletsrc
+    install -m600 -o ${USERNAME} -g ${USERNAME} /tmp/mi-pad4/baloofilerc \
+        /home/${USERNAME}/.config/baloofilerc
+    rm -f /home/${USERNAME}/.config/autostart/fcitx5.desktop
+    mkdir -p /home/${USERNAME}/.config/autostart
+    for service in baloo_file powerdevil polkit-kde-authentication-agent-1; do
+        printf '%s\n' '[Desktop Entry]' 'Hidden=true' \
+            > "/home/${USERNAME}/.config/autostart/${service}.desktop"
+    done
     fi
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
     if [ "$BUILD_KDE_plus" = "true" ] ; then

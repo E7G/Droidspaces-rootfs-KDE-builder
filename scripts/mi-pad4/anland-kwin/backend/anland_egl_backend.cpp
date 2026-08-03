@@ -252,7 +252,13 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
 
     return OutputLayerBeginFrameInfo{
         .renderTarget = *m_renderTargets[m_currentIndex],
-        .repaint = m_accumDamage[m_currentIndex],
+        // Android's BufferQueue may recycle a dmabuf with undefined contents;
+        // unlike KWin's EglSwapchain it does not preserve pixels outside the
+        // requested damage. A partial repaint therefore exposes black pixels
+        // whenever a new window or Plasma popup appears. The Mi Pad 4 path is
+        // event-driven and capped at 30 Hz, so repaint the complete scene on
+        // each submitted frame instead of relying on buffer age.
+        .repaint = Region::infinite(),
     };
 }
 

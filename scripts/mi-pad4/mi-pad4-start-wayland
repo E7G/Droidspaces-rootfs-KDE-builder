@@ -35,6 +35,17 @@ export GTK_USE_PORTAL=0
 export MALLOC_ARENA_MAX=2
 export PLASMA_DEFAULT_SHELL=org.kde.plasma.desktop
 export XDG_CONFIG_DIRS="/etc/xdg${XDG_CONFIG_DIRS:+:$XDG_CONFIG_DIRS}"
+# plasmashell is launched outside plasma_session on this legacy guest. Seed the
+# session metadata it normally inherits so KDE menus and services resolve.
+export KDE_FULL_SESSION=true
+export KDE_SESSION_VERSION=6
+export XDG_CURRENT_DESKTOP=KDE
+export KDE_APPLICATIONS_AS_SCOPE=1
+export XDG_MENU_PREFIX=plasma-
+export XDG_SESSION_TYPE=wayland
+export QT_WAYLAND_RECONNECT=1
+export _JAVA_AWT_WM_NONREPARENTING=1
+export KDE_USE_SYSTEMD=0
 
 if [[ "$EUID" -eq 0 ]]; then
   # The 4.4 container lacks CAP_SETUID/CAP_SETGID under Enforcing.  Do not
@@ -46,6 +57,26 @@ if [[ "$EUID" -eq 0 ]]; then
 else
   mkdir -p "$XDG_RUNTIME_DIR" "$HOME/.cache/fontconfig" "$HOME/.local/share/kactivitymanagerd"
   chmod 700 "$XDG_RUNTIME_DIR"
+fi
+
+# HOME is an Android bind mount, not /home/user. Apply profile defaults once per
+# revision so upgrades can repair known-bad Plasma state without resetting user
+# changes on every start.
+profile_revision=20260804-2
+profile_stamp="$HOME/.config/.mi-pad4-profile-revision"
+if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; then
+  mkdir -p "$HOME/.config"
+  for config in kwinrc kscreenlockerrc plasma-localerc \
+      plasma-org.kde.plasma.desktop-appletsrc baloofilerc; do
+    if [[ -f "/home/user/.config/$config" ]]; then
+      cp -f "/home/user/.config/$config" "$HOME/.config/$config"
+    fi
+  done
+  if [[ -d /home/user/.config/autostart ]]; then
+    mkdir -p "$HOME/.config/autostart"
+    cp -f /home/user/.config/autostart/*.desktop "$HOME/.config/autostart/" 2>/dev/null || true
+  fi
+  printf '%s\n' "$profile_revision" >"$profile_stamp"
 fi
 
 live_plasmashell_pid() {
@@ -154,6 +185,21 @@ export DBUS_SESSION_BUS_ADDRESS="$dbus_address"
 export DISPLAY="${session_display:-:0}"
 export QSG_RENDER_LOOP=basic
 
+# Import only session metadata from plasma_session. Importing its full
+# environment would leak KWin's KGSL and legacy-ION settings into plasmashell.
+plasma_session_pid="$(latest_live_pid '(^|/)plasma_session($| )' || true)"
+if [[ -n "$plasma_session_pid" && -r "/proc/$plasma_session_pid/environ" ]]; then
+  while IFS='=' read -r name value; do
+    case "$name" in
+      KDE_FULL_SESSION|KDE_SESSION_VERSION|KDE_SESSION_UID|KDE_APPLICATIONS_AS_SCOPE|\
+      XDG_CURRENT_DESKTOP|XDG_MENU_PREFIX|XDG_SESSION_TYPE|XDG_CONFIG_DIRS|\
+      QT_WAYLAND_RECONNECT|_JAVA_AWT_WM_NONREPARENTING)
+        export "$name=$value"
+        ;;
+    esac
+  done < <(tr '\0' '\n' < "/proc/$plasma_session_pid/environ")
+fi
+
 # startplasma normally delegates these user services to systemd. Kernel 4.4
 # cannot keep a systemd user manager alive, so launch the audio graph directly.
 # Without a PipeWire server the Anland audio reconnect loop sits on a dead core
@@ -171,31 +217,6 @@ fi
 if ! pgrep -x wireplumber >/dev/null 2>&1; then
   nohup /usr/bin/wireplumber >"$HOME/wireplumber.log" 2>&1 </dev/null &
 fi
-
-# KActivityManager must use the shell's software environment.  When it inherits
-# KWin's KGSL/legacy-ION environment it crashes before Plasma can load.
-if ! pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1; then
-  kactivity_bin="$(command -v kactivitymanagerd 2>/dev/null || true)"
-  if [[ -z "$kactivity_bin" ]]; then
-    for candidate in /usr/lib/kactivitymanagerd /usr/lib/libexec/kactivitymanagerd /usr/lib/*/libexec/kactivitymanagerd /usr/lib/aarch64-linux-gnu/libexec/kactivitymanagerd; do
-      if [[ -x "$candidate" ]]; then kactivity_bin="$candidate"; break; fi
-    done
-  fi
-  if [[ -n "$kactivity_bin" ]]; then
-    nohup "$kactivity_bin" >"$HOME/kactivitymanagerd.log" 2>&1 </dev/null &
-  else
-    echo "kactivitymanagerd executable not found; continuing" >"$HOME/kactivitymanagerd.log"
-  fi
-fi
-for _ in $(seq 1 10); do
-  pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1 && break
-  sleep 1
-done
-if ! pgrep -f '(^|/)kactivitymanagerd($| )' >/dev/null 2>&1; then
-  echo "kactivitymanagerd did not become ready; continuing with Plasma desktop" >&2
-fi
-
-fcitx5 -d --replace >"$HOME/fcitx5.log" 2>&1 || true
 
 # A healthy startplasma-wayland may launch plasmashell itself once the Plasma
 # QML packages are complete.  Keep that instance instead of starting a second

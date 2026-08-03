@@ -11,6 +11,7 @@ esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_ROOT=/tmp/droidspaces-arch-anland-build
+PACKAGE_OUTPUT_DIR="${ANLAND_PACKAGE_OUTPUT_DIR:-}"
 KWINKG=365ae0acc5f521f53a85fe6d9a030646687324f8
 XWAYLANDKG=8f82d79d312192108bb6417187c6ea986cdfcb3c
 
@@ -100,5 +101,11 @@ EOF_XWAYLAND_PATCH
 }
 
 build_kwin
-build_xwayland
+if [[ "${BUILD_XWAYLAND:-true}" = true ]]; then
+    build_xwayland
+fi
+if [[ -n "$PACKAGE_OUTPUT_DIR" ]]; then
+    mkdir -p "$PACKAGE_OUTPUT_DIR"
+    cp -a "$BUILD_ROOT/packages"/*.pkg.tar.* "$PACKAGE_OUTPUT_DIR/"
+fi
 printf '%s\n' 'patched-kwin=arch-native-6.7.3-anland' > /usr/share/droidspaces/anland-kwin-package

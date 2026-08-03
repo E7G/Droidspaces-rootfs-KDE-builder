@@ -1,0 +1,47 @@
+name: Build Arch Mi Pad 4 KWin Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build patched KWin package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p kwin-mi-pad4-test
+          docker run --privileged --rm \
+            -v "$PWD:/repo" \
+            -v "$PWD/kwin-mi-pad4-test:/out" \
+            lfdevs/archlinuxarm:base-devel bash -lc '
+              set -euo pipefail
+              pacman -Syyu --noconfirm
+              cp -a /repo/scripts/mi-pad4 /tmp/mi-pad4
+              BUILD_KDE=min \
+              BUILD_XWAYLAND=false \
+              ANLAND_PACKAGE_OUTPUT_DIR=/out \
+                /tmp/mi-pad4/build-arch-anland-kwin.sh
+            '
+          for package in kwin-mi-pad4-test/*.pkg.tar.*; do
+            safe_name="${package//:/_}"
+            if [[ "$safe_name" != "$package" ]]; then
+              mv -v "$package" "$safe_name"
+            fi
+          done
+          sha256sum kwin-mi-pad4-test/*.pkg.tar.* > kwin-mi-pad4-test/SHA256SUMS
+
+      - name: Upload test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-mi-pad4-kwin-test
+          path: kwin-mi-pad4-test/
+          retention-days: 7
