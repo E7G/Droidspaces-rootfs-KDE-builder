@@ -107,7 +107,7 @@ jobs:
           done
           grep -Fxq 'usr/share/droidspaces/anland-kwin-package' rootfs-files.txt
           grep -Fxq 'usr/share/droidspaces/mesa-kgsl-dmabuf-import' rootfs-files.txt
-          grep -Eq '^var/lib/pacman/local/mesa-1:26\.2\.0-7/' rootfs-files.txt
+          grep -Eq '^var/lib/pacman/local/mesa-1:26\.2\.0-8/' rootfs-files.txt
           grep -Eq '^(usr/bin/systemd|usr/lib/systemd/systemd)$' rootfs-files.txt
           grep -Fxq 'home/user' rootfs-files.txt || grep -q '^home/user/' rootfs-files.txt
           ! grep -Eq '(^|/)(snap|snapd)(/|$)' rootfs-files.txt
