@@ -158,8 +158,15 @@ bool AnlandEglLayer::importBuffers(int count)
             DRM_FORMAT_XBGR8888,
             DRM_FORMAT_ABGR8888,
         };
-        const std::array<uint64_t, 2> modifierCandidates = {
+        /* Keep the literal protocol value 0 as a separate retry.  Android 9's
+         * clover gralloc uses 0 for its legacy implicit layout, while Mesa's
+         * DRM path uses DRM_FORMAT_MOD_INVALID for the same EGL attribute
+         * omission and DRM_FORMAT_MOD_LINEAR (1) for an explicit linear
+         * modifier.  The old KGSL EGL driver accepts only one of these forms
+         * depending on the buffer allocation path. */
+        const std::array<uint64_t, 3> modifierCandidates = {
             attrs.modifier,
+            0,
             DRM_FORMAT_MOD_LINEAR,
         };
         std::shared_ptr<GLTexture> texture;
