@@ -45,6 +45,12 @@ jobs:
             'vulkan-mesa-implicit-layers-*.pkg.tar.*'; do
             cp -v .ci/archlinuxarm-PKGBUILDs/extra/mesa/$pattern mesa-mi-pad4-test/
           done
+          for package in mesa-mi-pad4-test/*.pkg.tar.*; do
+            safe_name="${package//:/_}"
+            if [[ "$safe_name" != "$package" ]]; then
+              mv -v "$package" "$safe_name"
+            fi
+          done
           sha256sum mesa-mi-pad4-test/*.pkg.tar.* > mesa-mi-pad4-test/SHA256SUMS
 
       - name: Upload test packages
