@@ -111,7 +111,7 @@ if [[ "${1:-}" = child ]]; then
   unset QT_QUICK_BACKEND
   unset QT_OPENGL
   export MESA_LOADER_DRIVER_OVERRIDE=kgsl
-  export GALLIUM_DRIVER=kgsl
+  unset GALLIUM_DRIVER
   export FD_FORCE_KGSL=1
   export FD_KGSL_ENABLE_DMABUF=1
   export XWAYLAND_FORCE_KGSL_SURFACELESS=1

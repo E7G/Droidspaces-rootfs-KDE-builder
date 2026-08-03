@@ -1,4 +1,5 @@
 #include <dlfcn.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -23,16 +24,25 @@ struct ion_legacy_allocation {
     uint64_t align;
     uint32_t heap_id_mask;
     uint32_t flags;
-    uint64_t handle;
+    int32_t handle;
 };
 
 struct ion_fd_data {
+    int32_t handle;
+    int32_t fd;
+};
+
+struct ion_handle_data {
+    int32_t handle;
+};
+
+struct ion_new_fd_data {
     uint64_t handle;
     int32_t fd;
     uint32_t unused;
 };
 
-struct ion_handle_data {
+struct ion_new_handle_data {
     uint64_t handle;
 };
 
@@ -73,14 +83,23 @@ static int fd_target_is(int fd, const char *expected)
 
 int drmGetCap(int fd, uint64_t capability, uint64_t *value)
 {
-    /* KGSL exposes dma-buf import/export but is not a DRM fd. */
-    if (capability == 5 && value && fd_target_is(fd, "/dev/kgsl-3d0")) {
-        *value = 3;
-        return 0;
+    /* KGSL exposes dma-buf import/export but is not a DRM fd. Never pass
+     * KGSL descriptors to libdrm while probing unsupported DRM capabilities. */
+    if (fd_target_is(fd, "/dev/kgsl-3d0")) {
+        if (capability == 5 && value) {
+            *value = 3;
+            return 0;
+        }
+        errno = ENOTSUP;
+        return -1;
     }
 
     if (!next_drm_get_cap)
         next_drm_get_cap = (drm_get_cap_fn)dlsym(RTLD_NEXT, "drmGetCap");
+    if (!next_drm_get_cap) {
+        errno = ENOSYS;
+        return -1;
+    }
     return next_drm_get_cap(fd, capability, value);
 }
 
@@ -91,6 +110,10 @@ int ioctl(int fd, unsigned long request, ...)
 
     if (!next_ioctl)
         next_ioctl = (ioctl_fn)dlsym(RTLD_NEXT, "ioctl");
+    if (!next_ioctl) {
+        errno = ENOSYS;
+        return -1;
+    }
 
     __builtin_va_start(ap, request);
     arg = __builtin_va_arg(ap, void *);
@@ -109,7 +132,6 @@ int ioctl(int fd, unsigned long request, ...)
         struct ion_fd_data share = {
             .handle = 0,
             .fd = -1,
-            .unused = 0,
         };
         struct ion_handle_data free_data;
         int ret;
@@ -119,14 +141,36 @@ int ioctl(int fd, unsigned long request, ...)
             return ret;
 
         share.handle = alloc.handle;
-        ret = next_ioctl(fd, 0xc0104904UL, &share);
+        ret = next_ioctl(fd, 0xc0084904UL, &share);
         free_data.handle = alloc.handle;
-        next_ioctl(fd, 0xc0084901UL, &free_data);
+        next_ioctl(fd, 0xc0044901UL, &free_data);
         if (ret < 0)
             return ret;
 
         new_alloc->fd = share.fd;
         return 0;
+    }
+
+    /* Translate widened ION structs used by older Mesa builds to clover's
+     * 32-bit ion_user_handle_t ioctl ABI. */
+    if (fd_target_is(fd, "/dev/ion") && request == 0xc0104904UL) {
+        struct ion_new_fd_data *new_share = arg;
+        struct ion_fd_data share = {
+            .handle = (int32_t)new_share->handle,
+            .fd = -1,
+        };
+        int ret = next_ioctl(fd, 0xc0084904UL, &share);
+        if (ret == 0)
+            new_share->fd = share.fd;
+        return ret;
+    }
+
+    if (fd_target_is(fd, "/dev/ion") && request == 0xc0084901UL) {
+        struct ion_new_handle_data *new_free = arg;
+        struct ion_handle_data free_data = {
+            .handle = (int32_t)new_free->handle,
+        };
+        return next_ioctl(fd, 0xc0044901UL, &free_data);
     }
 
     return next_ioctl(fd, request, arg);

@@ -230,9 +230,9 @@ RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
         if compgen -G '/tmp/mesa-mi-pad4/*.pkg.tar.*' >/dev/null; then \
             pacman --config /tmp/pacman-nosig.conf -U --noconfirm /tmp/mesa-mi-pad4/*.pkg.tar.* && \
             printf '%s\n' \
-              'source=E7G/mesa-for-android-container@23e6d04b2bb8d576cd7793ef73b997455f880f67' \
-              'pkgbuild=E7G/archlinuxarm-PKGBUILDs@1c833f27d0c0ace1678d585b293494b53fdd3d69' \
-              'fix=proven KGSL baseline + legacy ION ABI/lifetime + KGSL dma-buf enable' \
+              'source=E7G/mesa-for-android-container@0f8a8d14c50612527909784e5d4dd45da628fa84' \
+              'pkgbuild=E7G/archlinuxarm-PKGBUILDs@3ac8aeb07923707ac054c65b0e451b540f2ade4a' \
+              'fix=proven KGSL baseline + clover 32-bit ION ABI/lifetime + KGSL dma-buf enable' \
               'egl=EGL_EXT_image_dma_buf_import' \
               > /usr/share/droidspaces/mesa-kgsl-dmabuf-import; \
         else \
