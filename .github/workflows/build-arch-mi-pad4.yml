@@ -4,13 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: Desktop profile; run min first, then conc for the release
+        description: Desktop profile
         required: true
         type: choice
         default: min
         options:
           - min
           - conc
+      publish_release:
+        description: Publish a conc build to GitHub Releases
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -148,7 +153,7 @@ jobs:
           retention-days: 30
 
       - name: Publish release
-        if: ${{ inputs.profile == 'conc' }}
+        if: ${{ inputs.profile == 'conc' && inputs.publish_release }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: arch-mi-pad4-${{ inputs.profile }}-v${{ github.run_number }}
