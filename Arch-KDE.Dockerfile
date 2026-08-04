@@ -222,6 +222,11 @@ EOF_RUN
 RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         install -Dm755 /tmp/mi-pad4/droidspaces-init /sbin/droidspaces-init && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-start-wayland /usr/local/bin/mi-pad4-start-wayland && \
+        install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
+        for desktop in /usr/share/applications/firefox*.desktop; do \
+            [ -f "$desktop" ] || continue; \
+            sed -i 's#Exec=/usr/lib/firefox/firefox#Exec=/usr/local/bin/mi-pad4-firefox#g' "$desktop"; \
+        done && \
         install -Dm644 /tmp/mi-pad4/container.config /usr/share/droidspaces/mi-pad4-container.config && \
         install -Dm644 /tmp/mi-pad4/sepolicy.rule /usr/share/droidspaces/mi-pad4-sepolicy.rule && \
         mkdir -p /etc/droidspaces && \

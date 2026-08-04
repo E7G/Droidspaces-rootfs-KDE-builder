@@ -1,0 +1,43 @@
+#!/bin/bash
+
+set -u
+
+# Plasma uses software Qt rendering on the 4.4/KGSL desktop path. Firefox has
+# its own GTK/Wayland renderer; inheriting LIBGL_ALWAYS_SOFTWARE makes page
+# scrolling and video decoding needlessly CPU-bound.
+export MOZ_ENABLE_WAYLAND=1
+export GDK_BACKEND=wayland
+unset LIBGL_ALWAYS_SOFTWARE
+unset QT_QUICK_BACKEND
+unset QT_OPENGL
+
+profile_root="${HOME:-/tmp/droidspaces-home}/.config/mozilla/firefox"
+for profile in "$profile_root"/*.default*; do
+  [[ -d "$profile" ]] || continue
+  cat >"$profile/user.js" <<'EOF'
+// Mi Pad 4: keep Firefox responsive with 4 GB RAM and a 4.4 kernel.
+user_pref("dom.ipc.processCount", 2);
+user_pref("dom.ipc.processCount.webIsolated", 2);
+user_pref("dom.ipc.processPrelaunch.enabled", false);
+user_pref("browser.tabs.unloadOnLowMemory", true);
+user_pref("browser.sessionhistory.max_total_viewers", 2);
+user_pref("browser.sessionstore.interval", 60000);
+user_pref("network.prefetch-next", false);
+user_pref("network.dns.disablePrefetch", true);
+user_pref("network.http.speculative-parallel-limit", 0);
+user_pref("browser.urlbar.speculativeConnect.enabled", false);
+user_pref("toolkit.cosmeticAnimations.enabled", false);
+user_pref("ui.prefersReducedMotion", 1);
+user_pref("media.hardware-video-decoding.enabled", false);
+user_pref("media.ffmpeg.vaapi.enabled", false);
+user_pref("toolkit.telemetry.enabled", false);
+user_pref("datareporting.healthreport.uploadEnabled", false);
+user_pref("browser.newtabpage.activity-stream.feeds.telemetry", false);
+user_pref("browser.newtabpage.activity-stream.telemetry", false);
+user_pref("browser.urlbar.quicksuggest.enabled", false);
+user_pref("browser.urlbar.suggest.quicksuggest.nonsponsored", false);
+user_pref("browser.urlbar.suggest.quicksuggest.sponsored", false);
+EOF
+done
+
+exec /usr/lib/firefox/firefox "$@"
