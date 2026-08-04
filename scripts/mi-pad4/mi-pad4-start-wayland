@@ -64,7 +64,7 @@ fi
 # HOME is an Android bind mount, not /home/user. Apply profile defaults once per
 # revision so upgrades can repair known-bad Plasma state without resetting user
 # changes on every start.
-profile_revision=20260804-4
+profile_revision=20260804-5
 profile_stamp="$HOME/.config/.mi-pad4-profile-revision"
 if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; then
   mkdir -p "$HOME/.config"
@@ -78,6 +78,17 @@ if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; t
     mkdir -p "$HOME/.config/autostart"
     cp -f /home/user/.config/autostart/*.desktop "$HOME/.config/autostart/" 2>/dev/null || true
   fi
+
+  # Dolphin stores dock/window state separately from dolphinrc. A forced
+  # container stop can leave an invalid Qt save-state blob; Dolphin then logs
+  # "Unknown class" and can block while restoring its first window.
+  if [[ -f "$HOME/.local/state/dolphinstaterc" ]]; then
+    mkdir -p "$HOME/.local/state"
+    mv -f "$HOME/.local/state/dolphinstaterc" \
+      "$HOME/.local/state/dolphinstaterc.pre-mi-pad4-$profile_revision" 2>/dev/null || true
+  fi
+  rm -f "$HOME"/.cache/drkonqi/application-not-responding/dolphin.*.json 2>/dev/null || true
+  rm -f "$XDG_RUNTIME_DIR"/dolphin*.kioworker.socket 2>/dev/null || true
   printf '%s\n' "$profile_revision" >"$profile_stamp"
 fi
 
@@ -105,12 +116,38 @@ latest_live_pid() {
   echo "$newest"
 }
 
+start_system_bus() {
+  local bus_socket=/run/dbus/system_bus_socket
+
+  if [[ -S "$bus_socket" ]]; then
+    export DBUS_SYSTEM_BUS_ADDRESS="unix:path=$bus_socket"
+    return 0
+  fi
+
+  # systemd cannot provide the system bus on the tablet's 4.4 kernel. The
+  # legacy dbus daemon is sufficient here and enables normal D-Bus activation
+  # for udisks2, UPower and polkit without adding another supervisor.
+  mkdir -p /run/dbus
+  /usr/bin/dbus-daemon --system --fork --nopidfile \
+    >/tmp/droidspaces-system-dbus.log 2>&1 || true
+  for _ in $(seq 1 20); do
+    [[ -S "$bus_socket" ]] && break
+    sleep 0.1
+  done
+  if [[ ! -S "$bus_socket" ]]; then
+    echo "system D-Bus did not become ready" >&2
+    return 1
+  fi
+  export DBUS_SYSTEM_BUS_ADDRESS="unix:path=$bus_socket"
+}
+
 if [[ "${1:-}" != child && "${1:-}" != shell ]]; then
   # runit supervises this one foreground service.  Keep KWin and the user
   # session as siblings so a failed compositor causes one clean restart rather
   # than leaving a second Plasma session behind.
   rm -f "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" \
     "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY.lock" 2>/dev/null || true
+  start_system_bus || true
   "$0" child >>/var/log/plasma-conc-wayland.log 2>&1 &
   child_pid=$!
   "$0" shell >>"$HOME/plasma-conc-shell.log" 2>&1 &
