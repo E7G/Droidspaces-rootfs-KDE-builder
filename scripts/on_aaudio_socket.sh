@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-CONTAINER_NAME="arch" # Mi Pad 4 container name
+CONTAINER_NAME="Aech" #这个写你的容器名称
 USERNAME="Gold"        #容器用户名
 DISPLAY_NUMBER=":5"   
 DPI=315
