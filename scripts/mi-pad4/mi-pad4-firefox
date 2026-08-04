@@ -14,6 +14,28 @@ export LIBVA_DRM_X11_DISPLAY="${DISPLAY:-:0}"
 export LD_LIBRARY_PATH="/usr/local/lib/firefox-vaapi${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export EGL_PLATFORM=wayland
 export MOZ_DRM_DEVICE=/dev/dri/renderD128
+# Plasma's session DISPLAY is not the Xwayland display used by the VA shim.
+# Read both values from the live Xwayland process; selecting the first xauth
+# file is unsafe because fast restarts leave many stale files behind.
+xwayland_pid="$(pgrep -n -x Xwayland 2>/dev/null || true)"
+if [[ -n "$xwayland_pid" ]]; then
+    xwayland_env="$(strings "/proc/$xwayland_pid/environ" 2>/dev/null || true)"
+    xwayland_display="$(printf '%s\n' "$xwayland_env" | sed -n 's/^DISPLAY=//p' | head -n 1)"
+    xwayland_xauth="$(printf '%s\n' "$xwayland_env" | sed -n 's/^XAUTHORITY=//p' | head -n 1)"
+    [[ -n "$xwayland_display" ]] && export LIBVA_DRM_X11_DISPLAY="$xwayland_display"
+    [[ -z "${XAUTHORITY:-}" && -n "$xwayland_xauth" ]] && XAUTHORITY="$xwayland_xauth"
+fi
+if [[ -z "${XAUTHORITY:-}" ]]; then
+    XAUTHORITY="$(find "${XDG_RUNTIME_DIR:-/tmp/droidspaces-runtime/user-0}" -maxdepth 1 -name 'xauth_*' -type f -print -quit 2>/dev/null || true)"
+fi
+export XAUTHORITY
+# Firefox is launched by plasmashell, not by KWin's KGSL environment. Select
+# the patched freedreno path explicitly so Wayland compositing does not fall
+# back to llvmpipe/software EGL.
+export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+export FD_FORCE_KGSL=1
+export FD_KGSL_ENABLE_DMABUF=1
+export XWAYLAND_FORCE_KGSL_SURFACELESS=1
 # RDD's generic seccomp policy blocks legacy ION and Qualcomm private V4L2
 # ioctls. This only disables the dedicated media-process sandbox.
 export MOZ_DISABLE_RDD_SANDBOX=1
@@ -30,6 +52,9 @@ user_pref("dom.ipc.processCount.webIsolated", 2);
 user_pref("dom.ipc.processPrelaunch.enabled", false);
 user_pref("browser.tabs.unloadOnLowMemory", true);
 user_pref("browser.sessionhistory.max_total_viewers", 2);
+user_pref("browser.cache.disk.capacity", 65536);
+user_pref("browser.cache.memory.capacity", 32768);
+user_pref("media.cache_size", 32768);
 user_pref("browser.sessionstore.interval", 60000);
 user_pref("network.prefetch-next", false);
 user_pref("network.dns.disablePrefetch", true);
