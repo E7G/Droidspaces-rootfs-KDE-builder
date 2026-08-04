@@ -228,19 +228,41 @@ static void apply_format(struct anland_audio *a, const struct audio_format *f)
     }
 }
 
+/* Stop polling a disconnected borrowed fd. EPOLLHUP is level-triggered, so leaving
+ * the source armed makes the PipeWire thread loop wake continuously until reconnect. */
+static void disable_audio_io(struct anland_audio *a)
+{
+    if (a->io) {
+        pw_loop_update_io(pw_thread_loop_get_loop(a->loop), a->io, 0);
+    }
+    a->audio_fd = -1;
+    ring_reset(a);
+}
+
 /* Mic PCM / format announcements arriving from the consumer. Runs on the loop thread. */
 static void on_audio_readable(void *data, int fd, uint32_t mask)
 {
     struct anland_audio *a = data;
-    if (mask & (SPA_IO_ERR | SPA_IO_HUP))
+    if (mask & (SPA_IO_ERR | SPA_IO_HUP)) {
+        disable_audio_io(a);
         return;
+    }
     if (!(mask & SPA_IO_IN))
         return;
 
     for (;;) {
         ssize_t n = recv(fd, a->rx, sizeof(a->rx), MSG_DONTWAIT);
-        if (n <= 0)
+        if (n == 0) {
+            disable_audio_io(a);
             break;
+        }
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno != EAGAIN && errno != EWOULDBLOCK)
+                disable_audio_io(a);
+            break;
+        }
         if ((size_t)n < sizeof(struct audio_msg))
             continue;
         struct audio_msg h;

@@ -2,7 +2,7 @@ Xiaomi Mi Pad 4 Droidspaces RootFS
 
 Default user: user
 Default password: 1234
-Desktop: KDE Plasma Conc on Anland Wayland
+Desktop: KDE Plasma Minimal on Anland Wayland
 Locale: Simplified Chinese (zh_CN.UTF-8)
 
 Required container settings are in container.config.
