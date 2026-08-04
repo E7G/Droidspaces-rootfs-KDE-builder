@@ -102,7 +102,16 @@ jobs:
           mv "$archive" "release_assets/$final"
           tar -tf "release_assets/$final" | sed 's#^\./##' > rootfs-files.txt
           grep -Eq '^(sbin|usr/bin)/droidspaces-init$' rootfs-files.txt || { echo "Missing droidspaces-init" >&2; exit 1; }
-          for path in usr/local/bin/mi-pad4-start-wayland usr/bin/startplasma-wayland usr/bin/kwin_wayland usr/local/lib/libion-legacy-shim.so; do
+          for path in \
+            usr/local/bin/mi-pad4-start-wayland \
+            usr/local/bin/mi-pad4-firefox \
+            usr/local/lib/libion-legacy-shim.so \
+            usr/local/lib/firefox-vaapi/libva-drm.so.2 \
+            usr/lib/dri/v4l2_drv_video.so \
+            usr/lib/firefox/glxtest \
+            usr/lib/firefox/glxtest.real \
+            usr/bin/startplasma-wayland \
+            usr/bin/kwin_wayland; do
             grep -Fxq "$path" rootfs-files.txt || { echo "Missing $path" >&2; exit 1; }
           done
           grep -Fxq 'usr/share/droidspaces/anland-kwin-package' rootfs-files.txt

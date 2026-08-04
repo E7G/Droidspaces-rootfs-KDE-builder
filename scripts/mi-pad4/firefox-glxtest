@@ -1,0 +1,24 @@
+#!/bin/bash
+
+set -u
+
+probe_fd=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  if [[ "${args[i]}" == "-f" && $((i + 1)) -lt ${#args[@]} ]]; then
+    probe_fd="${args[i + 1]}"
+    break
+  fi
+done
+
+"$0.real" "$@"
+status=$?
+
+if [[ "$probe_fd" =~ ^[0-9]+$ ]]; then
+  printf '%s\n' \
+    'MESA_ACCELERATED' 'TRUE' \
+    'DRM_RENDERDEVICE' '/dev/dri/renderD128' \
+    >&"$probe_fd"
+fi
+
+exit "$status"

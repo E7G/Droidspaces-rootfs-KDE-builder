@@ -7,14 +7,23 @@ set -u
 # scrolling and video decoding needlessly CPU-bound.
 export MOZ_ENABLE_WAYLAND=1
 export GDK_BACKEND=wayland
+export LIBVA_DRIVER_NAME=v4l2
+export LIBVA_DRIVERS_PATH=/usr/lib/dri
+export LIBVA_V4L2_VIDEO_PATH=/dev/video32
+export LIBVA_DRM_X11_DISPLAY="${DISPLAY:-:0}"
+export LD_LIBRARY_PATH="/usr/local/lib/firefox-vaapi${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export EGL_PLATFORM=wayland
+export MOZ_DRM_DEVICE=/dev/dri/renderD128
+# RDD's generic seccomp policy blocks legacy ION and Qualcomm private V4L2
+# ioctls. This only disables the dedicated media-process sandbox.
+export MOZ_DISABLE_RDD_SANDBOX=1
 unset LIBGL_ALWAYS_SOFTWARE
 unset QT_QUICK_BACKEND
 unset QT_OPENGL
 
-profile_root="${HOME:-/tmp/droidspaces-home}/.config/mozilla/firefox"
-for profile in "$profile_root"/*.default*; do
-  [[ -d "$profile" ]] || continue
-  cat >"$profile/user.js" <<'EOF'
+profile="${HOME:-/tmp/droidspaces-home}/.mozilla/firefox/mi-pad4.default-release"
+mkdir -p "$profile"
+cat >"$profile/user.js" <<'EOF'
 // Mi Pad 4: keep Firefox responsive with 4 GB RAM and a 4.4 kernel.
 user_pref("dom.ipc.processCount", 2);
 user_pref("dom.ipc.processCount.webIsolated", 2);
@@ -28,8 +37,17 @@ user_pref("network.http.speculative-parallel-limit", 0);
 user_pref("browser.urlbar.speculativeConnect.enabled", false);
 user_pref("toolkit.cosmeticAnimations.enabled", false);
 user_pref("ui.prefersReducedMotion", 1);
-user_pref("media.hardware-video-decoding.enabled", false);
-user_pref("media.ffmpeg.vaapi.enabled", false);
+user_pref("media.hardware-video-decoding.enabled", true);
+user_pref("media.hardware-video-decoding.force-enabled", true);
+user_pref("media.ffmpeg.vaapi.enabled", true);
+user_pref("media.ffvpx.enabled", false);
+user_pref("media.ffvpx.hw.enabled", true);
+user_pref("media.rdd-ffmpeg.enabled", true);
+user_pref("media.av1.enabled", false);
+user_pref("gfx.webrender.all", true);
+user_pref("gfx.webrender.force-disabled", false);
+user_pref("gfx.webrender.software", false);
+user_pref("widget.dmabuf.force-enabled", true);
 user_pref("toolkit.telemetry.enabled", false);
 user_pref("datareporting.healthreport.uploadEnabled", false);
 user_pref("browser.newtabpage.activity-stream.feeds.telemetry", false);
@@ -38,6 +56,5 @@ user_pref("browser.urlbar.quicksuggest.enabled", false);
 user_pref("browser.urlbar.suggest.quicksuggest.nonsponsored", false);
 user_pref("browser.urlbar.suggest.quicksuggest.sponsored", false);
 EOF
-done
 
-exec /usr/lib/firefox/firefox "$@"
+exec /usr/lib/firefox/firefox --profile "$profile" "$@"

@@ -25,6 +25,8 @@ COPY scripts/systemd257.sh /usr/local/sbin/systemd257
 COPY scripts/ion-legacy-shim.c /tmp/ion-legacy-shim.c
 COPY mesa-mi-pad4/ /tmp/mesa-mi-pad4/
 
+ARG MI_PAD4_V4L2_VAAPI_COMMIT=1be35ad2fc1bc66c76842d735b6ec91e11944a44
+
 RUN printf '%s\n' \
     'Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo' \
     'Server = https://mirrors.ustc.edu.cn/archlinuxarm/$arch/$repo' \
@@ -51,7 +53,7 @@ RUN printf '%s\n' \
     if [ "$BUILD_KDE" = "min" ]; then \
         pacman -S --noconfirm --needed \
         xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
-        dolphin kate kinfocenter mesa-utils libpulse vulkan-tools; \
+        dolphin kate kinfocenter mesa-utils libpulse vulkan-tools firefox; \
     fi && \
     # 精简KDE
     if [ "$BUILD_KDE" = "conc" ]; then \
@@ -233,6 +235,27 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         printf '%s\n' 'SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1' 'SYSTEMD_LOG_LEVEL=warning' > /etc/droidspaces/systemd-compat.env && \
         printf '%s\n' '#!/bin/bash' 'set -u' 'echo "systemd: $(/usr/lib/systemd/systemd --version 2>/dev/null | head -n 1 || true)"' 'echo "kernel: $(uname -r)"' 'echo "cgroup2: $(mount 2>/dev/null | grep -c "type cgroup2" || true)"' 'echo "cgroup-v1: $(mount 2>/dev/null | grep -c "type cgroup" || true)"' 'echo "mode: custom-init is default on the 4.4 kernel"' > /usr/local/bin/droidspaces-systemd-check && \
         chmod 755 /usr/local/bin/droidspaces-systemd-check; \
+    fi
+# Qualcomm msm_vidc on the Mi Pad 4 uses legacy ION USERPTR queues and private
+# sequence-change controls, which the upstream generic V4L2 VA driver lacks.
+RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
+        pacman -S --noconfirm --needed meson ninja libva libdrm gst-plugins-bad-libs && \
+        git clone https://github.com/E7G/libva-v4l2-stateful.git /tmp/libva-v4l2-stateful && \
+        git -C /tmp/libva-v4l2-stateful checkout "$MI_PAD4_V4L2_VAAPI_COMMIT" && \
+        meson setup /tmp/libva-v4l2-stateful/build /tmp/libva-v4l2-stateful \
+            --buildtype=release --prefix=/usr && \
+        meson compile -C /tmp/libva-v4l2-stateful/build && \
+        meson install -C /tmp/libva-v4l2-stateful/build && \
+        test -s /usr/lib/dri/v4l2_drv_video.so && \
+        install -d /usr/local/lib/firefox-vaapi && \
+        cc -shared -fPIC -O2 -Wl,-soname,libva-drm.so.2 \
+            /tmp/mi-pad4/libva-drm-x11-shim.c \
+            -o /usr/local/lib/firefox-vaapi/libva-drm.so.2 \
+            -lva-x11 -lX11 -lpthread && \
+        test -s /usr/local/lib/firefox-vaapi/libva-drm.so.2 && \
+        mv /usr/lib/firefox/glxtest /usr/lib/firefox/glxtest.real && \
+        install -Dm755 /tmp/mi-pad4/firefox-glxtest /usr/lib/firefox/glxtest && \
+        rm -rf /tmp/libva-v4l2-stateful; \
     fi
 # Build KWin/Xwayland natively against Arch's Qt ABI. Fedora RPMs cannot be
 # reused here because their binaries require Fedora-private Qt symbols.
