@@ -64,7 +64,13 @@ fi
 # HOME is an Android bind mount, not /home/user. Apply profile defaults once per
 # revision so upgrades can repair known-bad Plasma state without resetting user
 # changes on every start.
-profile_revision=20260804-5
+if [[ -f /usr/share/applications/firefox.desktop && \
+      -f /usr/share/icons/hicolor/128x128/apps/firefox.png ]]; then
+  sed -i 's|^Icon=.*|Icon=/usr/share/icons/hicolor/128x128/apps/firefox.png|' \
+    /usr/share/applications/firefox.desktop
+fi
+
+profile_revision=20260805-2
 profile_stamp="$HOME/.config/.mi-pad4-profile-revision"
 if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; then
   mkdir -p "$HOME/.config"
@@ -77,6 +83,13 @@ if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; t
   if [[ -d /home/user/.config/autostart ]]; then
     mkdir -p "$HOME/.config/autostart"
     cp -f /home/user/.config/autostart/*.desktop "$HOME/.config/autostart/" 2>/dev/null || true
+  fi
+
+  mkdir -p "$HOME/Desktop"
+  cp -f /home/user/Desktop/*.desktop "$HOME/Desktop/" 2>/dev/null || true
+  if [[ -f /usr/share/applications/firefox.desktop ]]; then
+    cp -f /usr/share/applications/firefox.desktop "$HOME/Desktop/firefox.desktop"
+    chmod 0755 "$HOME/Desktop/firefox.desktop"
   fi
 
   # Dolphin stores dock/window state separately from dolphinrc. A forced
