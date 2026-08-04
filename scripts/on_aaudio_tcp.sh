@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-CONTAINER_NAME="Arch"  #容器名称
+CONTAINER_NAME="arch"  # container name
 USERNAME="Gold"      #rootfs用户名
 DISPLAY_NUMBER=":5"  #开启桌面编号 :0 :1 :2
 DPI=315                #termux-x11 DPI
