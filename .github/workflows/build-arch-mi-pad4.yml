@@ -12,7 +12,7 @@ on:
           - min
           - conc
       publish_release:
-        description: Publish a conc build to GitHub Releases
+        description: Publish this build to GitHub Releases
         required: true
         type: boolean
         default: false
@@ -153,14 +153,14 @@ jobs:
           retention-days: 30
 
       - name: Publish release
-        if: ${{ inputs.profile == 'conc' && inputs.publish_release }}
+        if: ${{ inputs.publish_release }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: arch-mi-pad4-${{ inputs.profile }}-v${{ github.run_number }}
           name: Arch Mi Pad 4 ${{ inputs.profile }} RootFS v${{ github.run_number }}
           target_commitish: ${{ github.sha }}
-          prerelease: ${{ inputs.profile == 'min' }}
-          make_latest: ${{ inputs.profile == 'conc' }}
+          prerelease: false
+          make_latest: true
           files: release_assets/*
           body: |
             Arch Linux ARM aarch64 RootFS for Xiaomi Mi Pad 4 clover.
