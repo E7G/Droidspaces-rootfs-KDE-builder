@@ -25,7 +25,12 @@ COPY scripts/systemd257.sh /usr/local/sbin/systemd257
 COPY scripts/ion-legacy-shim.c /tmp/ion-legacy-shim.c
 COPY mesa-mi-pad4/ /tmp/mesa-mi-pad4/
 
-RUN sed -i '/^#ParallelDownloads/s/^#//' /etc/pacman.conf && \
+RUN printf '%s\n' \
+    'Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo' \
+    'Server = https://mirrors.ustc.edu.cn/archlinuxarm/$arch/$repo' \
+    > /etc/pacman.d/mirrorlist && \
+    if [ -f /etc/nsswitch.conf ]; then sed -i 's/^hosts:.*/hosts: files dns/' /etc/nsswitch.conf; fi && \
+    sed -i '/^#ParallelDownloads/s/^#//' /etc/pacman.conf && \
     sed -i '/NoExtract.*locale/d' /etc/pacman.conf && \
     sed -i '/NoExtract.*i18n/d' /etc/pacman.conf && \
     pacman -Sy --noconfirm archlinux-keyring glibc && \
@@ -54,7 +59,7 @@ RUN sed -i '/^#ParallelDownloads/s/^#//' /etc/pacman.conf && \
         xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
         dolphin kate kinfocenter mesa-utils libpulse vulkan-tools aha clinfo dmidecode wayland-utils xorg-server \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
-        kimageformats plasma-browser-integration plasma-mobile plasma-keyboard libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium; \
+        kimageformats plasma-browser-integration plasma-mobile plasma-keyboard libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium firefox; \
     fi && \
     # Arch 强制安装，但是这玩意不开硬件访问会导致桌面闪退
     if [ "$BUILD_KDE" = "conc" ] || [ "$BUILD_KDE" = "min" ] ; then \
