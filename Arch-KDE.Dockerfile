@@ -239,7 +239,7 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
 # Qualcomm msm_vidc on the Mi Pad 4 uses legacy ION USERPTR queues and private
 # sequence-change controls, which the upstream generic V4L2 VA driver lacks.
 RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
-        pacman -S --noconfirm --needed meson ninja libva libdrm gst-plugins-bad-libs && \
+        pacman -S --noconfirm --needed pkgconf meson ninja libva libdrm gst-plugins-bad-libs && \
         git clone https://github.com/E7G/libva-v4l2-stateful.git /tmp/libva-v4l2-stateful && \
         git -C /tmp/libva-v4l2-stateful checkout "$MI_PAD4_V4L2_VAAPI_COMMIT" && \
         meson setup /tmp/libva-v4l2-stateful/build /tmp/libva-v4l2-stateful \
