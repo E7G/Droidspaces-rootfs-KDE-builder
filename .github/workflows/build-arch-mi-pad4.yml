@@ -10,7 +10,6 @@ on:
         default: min
         options:
           - min
-          - conc
       publish_release:
         description: Publish this build to GitHub Releases
         required: true
