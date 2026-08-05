@@ -128,7 +128,9 @@ EOF_XWAYLAND_PATCH
 }
 
 build_kio
-build_kwin
+if [[ "${BUILD_KWIN:-true}" = true ]]; then
+    build_kwin
+fi
 if [[ "${BUILD_XWAYLAND:-true}" = true ]]; then
     build_xwayland
 fi
