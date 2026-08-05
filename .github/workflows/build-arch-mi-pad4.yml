@@ -119,6 +119,7 @@ jobs:
             grep -Fxq "$path" rootfs-files.txt || { echo "Missing $path" >&2; exit 1; }
           done
           grep -Fxq 'usr/share/droidspaces/anland-kwin-package' rootfs-files.txt
+          grep -Fxq 'usr/share/droidspaces/kio-runtime-named-socket' rootfs-files.txt
           grep -Fxq 'usr/share/droidspaces/mesa-kgsl-dmabuf-import' rootfs-files.txt
           grep -Eq '^var/lib/pacman/local/mesa-1:26\.2\.0-9/' rootfs-files.txt
           grep -Eq '^(usr/bin/systemd|usr/lib/systemd/systemd)$' rootfs-files.txt

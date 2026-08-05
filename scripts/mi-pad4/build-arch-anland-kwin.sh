@@ -12,12 +12,13 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_ROOT=/tmp/droidspaces-arch-anland-build
 PACKAGE_OUTPUT_DIR="${ANLAND_PACKAGE_OUTPUT_DIR:-}"
+KIOKG=8ca1426ad92c58c17d4ef610e57febd763717272
 KWINKG=365ae0acc5f521f53a85fe6d9a030646687324f8
 XWAYLANDKG=8f82d79d312192108bb6417187c6ea986cdfcb3c
 
 pacman -S --noconfirm --needed \
     base-devel cmake ninja meson extra-cmake-modules kdoctools krunner \
-    plasma-wayland-protocols python vulkan-headers wayland-protocols \
+    plasma-wayland-protocols python qt6-tools vulkan-headers wayland-protocols \
     xorgproto xtrans xorg-font-util xorg-xwayland libcap
 
 install -d -m 0755 /etc/sudoers.d
@@ -47,6 +48,32 @@ clone_at() {
     git clone --filter=blob:none --no-checkout "$url" "$dir"
     git -C "$dir" fetch --depth=1 origin "$commit"
     git -C "$dir" checkout --detach "$commit"
+}
+
+build_kio() {
+    local dir="$BUILD_ROOT/kio"
+    clone_at https://gitlab.archlinux.org/archlinux/packaging/packages/kio.git "$KIOKG" "$dir"
+    sed -i "s/^arch=(.*)$/arch=('aarch64')/" "$dir/PKGBUILD"
+    cp "$SCRIPT_DIR/kio-runtime-named-socket.patch" "$dir/kio-runtime-named-socket.patch"
+    cat >> "$dir/PKGBUILD" <<'EOF_KIO_PATCH'
+source+=(kio-runtime-named-socket.patch)
+sha256sums+=('SKIP')
+
+prepare() {
+  cd "$srcdir/kio-$pkgver"
+  patch -Np1 -i "$srcdir/kio-runtime-named-socket.patch"
+}
+EOF_KIO_PATCH
+    mkdir -p "$BUILD_ROOT/packages"
+    chown -R user:user "$BUILD_ROOT/packages"
+    chown -R user:user "$dir"
+    su user -c "cd '$dir' && PKGDEST='$BUILD_ROOT/packages' makepkg --syncdeps --noconfirm --nocheck --skippgpcheck --cleanbuild --clean"
+    local package
+    package="$(find "$BUILD_ROOT/packages" -maxdepth 1 -type f -name 'kio-[0-9]*.pkg.tar.*' -print -quit)"
+    [ -n "$package" ] || { echo 'kio package was not produced' >&2; find "$BUILD_ROOT" -maxdepth 3 -type f -name '*.pkg.tar.*' >&2; exit 1; }
+    install_local_package "$package"
+    printf '%s\n' 'patched-kio=named-worker-socket-for-kernel-4.4' \
+        > /usr/share/droidspaces/kio-runtime-named-socket
 }
 
 build_kwin() {
@@ -100,6 +127,7 @@ EOF_XWAYLAND_PATCH
     install_local_package "$package"
 }
 
+build_kio
 build_kwin
 if [[ "${BUILD_XWAYLAND:-true}" = true ]]; then
     build_xwayland

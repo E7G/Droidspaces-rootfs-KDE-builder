@@ -1,0 +1,48 @@
+diff --git a/src/core/connectionbackend.cpp b/src/core/connectionbackend.cpp
+index a113389..7b812ce 100644
+--- a/src/core/connectionbackend.cpp
++++ b/src/core/connectionbackend.cpp
+@@ -17,7 +17,7 @@
+ #include <QLocalSocket>
+ #include <QPointer>
+ #include <QStandardPaths>
+-#include <QTemporaryFile>
++#include <QUuid>
+ #include <cerrno>
+ 
+ #include "kiocoreconnectiondebug.h"
+@@ -106,20 +106,12 @@ ConnectionBackend::ConnectionResult ConnectionBackend::listenForRemote()
+     Q_ASSERT(!localServer); // !tcpServer as well
+ 
+     const QString prefix = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+-    static QBasicAtomicInt s_socketCounter = Q_BASIC_ATOMIC_INITIALIZER(1);
+     QString appName = QCoreApplication::instance()->applicationName();
+     appName.replace(QLatin1Char('/'), QLatin1Char('_')); // #357499
+-    QTemporaryFile socketfile(prefix + QLatin1Char('/') + appName + QStringLiteral("XXXXXX.%1.kioworker.socket").arg(s_socketCounter.fetchAndAddAcquire(1)));
+-    if (!socketfile.open()) {
+-        return {false, i18n("Unable to create KIO worker: %1", QString::fromUtf8(strerror(errno)))};
+-    }
+-
+-    QString sockname = socketfile.fileName();
+-    address.clear();
+-    address.setScheme(QStringLiteral("local"));
+-    address.setPath(sockname);
+-    socketfile.setAutoRemove(false);
+-    socketfile.remove(); // can't bind if there is such a file
++    // QTemporaryFile uses O_TMPFILE and linkat(/proc/self/fd, ...) on Linux.
++    // The Mi Pad 4 4.4 kernel cannot materialize that anonymous file.
++    const QString sockname = prefix + QLatin1Char('/') + appName + QUuid::createUuid().toString(QUuid::Id128)
++        + QStringLiteral(".kioworker.socket");
+ 
+     localServer = new QLocalServer(this);
+     if (!localServer->listen(sockname)) {
+@@ -128,6 +120,9 @@ ConnectionBackend::ConnectionResult ConnectionBackend::listenForRemote()
+         localServer = nullptr;
+         return {false, errorString};
+     }
++    address.clear();
++    address.setScheme(QStringLiteral("local"));
++    address.setPath(sockname);
+ 
+     connect(localServer, &QLocalServer::newConnection, this, &ConnectionBackend::newConnection);
+ 
