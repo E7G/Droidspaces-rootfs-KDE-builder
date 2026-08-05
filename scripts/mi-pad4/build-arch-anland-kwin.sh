@@ -72,6 +72,7 @@ EOF_KIO_PATCH
     package="$(find "$BUILD_ROOT/packages" -maxdepth 1 -type f -name 'kio-[0-9]*.pkg.tar.*' -print -quit)"
     [ -n "$package" ] || { echo 'kio package was not produced' >&2; find "$BUILD_ROOT" -maxdepth 3 -type f -name '*.pkg.tar.*' >&2; exit 1; }
     install_local_package "$package"
+    install -d -m 0755 /usr/share/droidspaces
     printf '%s\n' 'patched-kio=named-worker-socket-for-kernel-4.4' \
         > /usr/share/droidspaces/kio-runtime-named-socket
 }
