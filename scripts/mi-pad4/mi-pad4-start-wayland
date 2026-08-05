@@ -70,7 +70,7 @@ if [[ -f /usr/share/applications/firefox.desktop && \
     /usr/share/applications/firefox.desktop
 fi
 
-profile_revision=20260805-2
+profile_revision=20260806-1
 profile_stamp="$HOME/.config/.mi-pad4-profile-revision"
 if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; then
   mkdir -p "$HOME/.config"
@@ -101,9 +101,14 @@ if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; t
       "$HOME/.local/state/dolphinstaterc.pre-mi-pad4-$profile_revision" 2>/dev/null || true
   fi
   rm -f "$HOME"/.cache/drkonqi/application-not-responding/dolphin.*.json 2>/dev/null || true
-  rm -f "$XDG_RUNTIME_DIR"/dolphin*.kioworker.socket 2>/dev/null || true
   printf '%s\n' "$profile_revision" >"$profile_stamp"
 fi
+
+# KIO worker sockets and Dolphin session state are transient. Clean them on
+# every container start, including upgrades where the profile stamp matches.
+rm -f "$HOME/.config/session/dolphin_dolphin_dolphin" 2>/dev/null || true
+rm -f "$HOME/.local/state/dolphinstaterc" 2>/dev/null || true
+rm -f "$XDG_RUNTIME_DIR"/dolphin*.kioworker.socket 2>/dev/null || true
 
 live_plasmashell_pid() {
   local pid state

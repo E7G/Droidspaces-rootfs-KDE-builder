@@ -1,0 +1,24 @@
+#!/bin/bash
+set -u
+
+runtime="${XDG_RUNTIME_DIR:-/tmp/droidspaces-runtime/user-0}"
+home="${HOME:-/tmp/droidspaces-home}"
+
+has_live_dolphin=false
+for pid in $(pgrep -x dolphin 2>/dev/null || true); do
+    state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+    if [[ -n "$state" && "$state" != Z* ]]; then
+        has_live_dolphin=true
+        break
+    fi
+done
+
+if [[ "$has_live_dolphin" = false ]]; then
+    # Dolphin/KIO leaves these runtime files behind when KWin kills a blocked
+    # worker. Reusing the saved window/session state can block the next launch.
+    rm -f "$runtime"/dolphin*.kioworker.socket 2>/dev/null || true
+    rm -f "$home/.config/session/dolphin_dolphin_dolphin" 2>/dev/null || true
+    rm -f "$home/.local/state/dolphinstaterc" 2>/dev/null || true
+fi
+
+exec /usr/bin/dolphin --new-window "$@"

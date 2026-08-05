@@ -224,6 +224,7 @@ EOF_RUN
 RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         install -Dm755 /tmp/mi-pad4/droidspaces-init /sbin/droidspaces-init && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-start-wayland /usr/local/bin/mi-pad4-start-wayland && \
+        install -Dm755 /tmp/mi-pad4/dolphin-safe /usr/local/bin/dolphin && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
         for desktop in /usr/share/applications/firefox*.desktop; do \
             [ -f "$desktop" ] || continue; \
