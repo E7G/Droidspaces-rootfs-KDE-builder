@@ -407,8 +407,18 @@ for candidate in /usr/lib/systemd/systemd /lib/systemd/systemd; do
 done
 [ -n "$SYSTEMD_DAEMON" ] || die "安装后找不到 systemd PID 1"
 
-if [ "$PATCHSET" != "none" ] && ! grep -a -q 'SYSTEMD_DROIDSPACES_COMPAT' "$SYSTEMD_DAEMON"; then
-  die "installed systemd does not contain the Droidspaces compatibility patch"
+if [ "$PATCHSET" != "none" ]; then
+  PATCH_MARKER_FOUND=0
+  for candidate in "$SYSTEMD_DAEMON" /usr/lib/systemd/libsystemd-shared-*.so; do
+    [ -f "$candidate" ] || continue
+    if grep -aFq 'SYSTEMD_DROIDSPACES_COMPAT' "$candidate"; then
+      PATCH_MARKER_FOUND=1
+      break
+    fi
+  done
+  if [ "$PATCH_MARKER_FOUND" -ne 1 ]; then
+    die "installed systemd runtime does not contain the Droidspaces compatibility patch"
+  fi
 fi
 
 if command -v ldd >/dev/null 2>&1; then
