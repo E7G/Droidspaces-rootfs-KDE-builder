@@ -40,7 +40,10 @@ RUN printf '%s\n' \
     sed -i '/NoExtract.*i18n/d' /etc/pacman.conf && \
     pacman -Sy --noconfirm archlinux-keyring glibc && \
     pacman -Su --noconfirm && \
-    pacman -U --noconfirm --needed /tmp/local-packages-mi-pad4/pango-*.pkg.tar.* && \
+    cp /etc/pacman.conf /tmp/pacman-local.conf && \
+    sed -i '/^LocalFileSigLevel[[:space:]]*=/d; /^\[options\]$/a LocalFileSigLevel = Never' /tmp/pacman-local.conf && \
+    pacman --config /tmp/pacman-local.conf -U --noconfirm --needed /tmp/local-packages-mi-pad4/pango-*.pkg.tar.* && \
+    rm -f /tmp/pacman-local.conf && \
     pacman -S --noconfirm --needed \
     # 核心工具组件 
     bash jq dialog coreutils file findutils grep sed gawk curl wget ca-certificates bash-completion dbus systemd pam fastfetch logrotate \
