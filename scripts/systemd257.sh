@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 为旧 Android 内核构建 systemd 257 兼容运行时。
-# 脚本只处理当前 systemd 主版本高于 257 的系统；257 及更低版本会直接跳过。
+# 默认只处理 systemd 258+；SYSTEMD257_FORCE_REBUILD=1 可强制重编译 257。
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
@@ -11,12 +11,15 @@ export CCACHE_DISABLE=1
 readonly SYSTEMD257_TARGET_MAJOR=257
 readonly SYSTEMD257_REPO="${SYSTEMD257_REPO:-https://github.com/systemd/systemd.git}"
 readonly SYSTEMD257_REF="${SYSTEMD257_REF:-v257-stable}"
+readonly SYSTEMD257_FORCE_REBUILD="${SYSTEMD257_FORCE_REBUILD:-0}"
+readonly SYSTEMD257_PATCH_DIR="${SYSTEMD257_PATCH_DIR:-}"
 
 WORK_DIR=""
 PACKAGE_MANAGER=""
 CURRENT_VERSION_LINE=""
 SOURCE_COMMIT=""
 SOURCE_VERSION=""
+PATCHSET="none"
 
 log() {
   printf '[systemd257] %s\n' "$*"
@@ -87,7 +90,11 @@ case "$CURRENT_MAJOR" in
 esac
 
 log "current version: $CURRENT_VERSION_LINE"
-if [ "$CURRENT_MAJOR" -le "$SYSTEMD257_TARGET_MAJOR" ]; then
+case "${SYSTEMD257_FORCE_REBUILD,,}" in
+  1|true|yes|on) FORCE_REBUILD=1 ;;
+  *) FORCE_REBUILD=0 ;;
+esac
+if [ "$CURRENT_MAJOR" -le "$SYSTEMD257_TARGET_MAJOR" ] && [ "$FORCE_REBUILD" -ne 1 ]; then
   log "systemd $CURRENT_MAJOR does not require a 257 compatibility rebuild; skipped"
   exit 0
 fi
@@ -223,6 +230,31 @@ case "$SOURCE_MAJOR" in
   *) die "源码版本不是 systemd 257：${SOURCE_VERSION:-unknown}" ;;
 esac
 log "source version: $SOURCE_VERSION (commit=$SOURCE_COMMIT)"
+
+apply_source_patches() {
+  local patch patch_name
+  local -a patches=() patch_names=()
+
+  [ -n "$SYSTEMD257_PATCH_DIR" ] || return 0
+  [ -d "$SYSTEMD257_PATCH_DIR" ] || die "patch directory not found: $SYSTEMD257_PATCH_DIR"
+
+  while IFS= read -r -d '' patch; do
+    patches+=("$patch")
+  done < <(find "$SYSTEMD257_PATCH_DIR" -maxdepth 1 -type f -name '*.patch' -print0 | sort -z)
+  [ "${#patches[@]}" -gt 0 ] || die "no patches found in $SYSTEMD257_PATCH_DIR"
+
+  for patch in "${patches[@]}"; do
+    patch_name="$(basename "$patch")"
+    log "applying $patch_name"
+    git -C "$SOURCE_DIR" apply --check "$patch"
+    git -C "$SOURCE_DIR" apply "$patch"
+    patch_names+=("$patch_name")
+  done
+
+  PATCHSET="$(IFS=,; printf '%s' "${patch_names[*]}")"
+}
+
+apply_source_patches
 
 BUILD_JOBS="${SYSTEMD257_JOBS:-}"
 if ! printf '%s' "$BUILD_JOBS" | grep -Eq '^[1-9][0-9]*$'; then
@@ -375,6 +407,10 @@ for candidate in /usr/lib/systemd/systemd /lib/systemd/systemd; do
 done
 [ -n "$SYSTEMD_DAEMON" ] || die "安装后找不到 systemd PID 1"
 
+if [ "$PATCHSET" != "none" ] && ! grep -a -q 'SYSTEMD_DROIDSPACES_COMPAT' "$SYSTEMD_DAEMON"; then
+  die "installed systemd does not contain the Droidspaces compatibility patch"
+fi
+
 if command -v ldd >/dev/null 2>&1; then
   LDD_OUTPUT="$(ldd "$SYSTEMD_DAEMON" 2>&1 || true)"
   if printf '%s\n' "$LDD_OUTPUT" | grep -q 'not found'; then
@@ -457,6 +493,7 @@ installed_version=$INSTALLED_VERSION_LINE
 source_version=$SOURCE_VERSION
 source_ref=$SYSTEMD257_REF
 source_commit=$SOURCE_COMMIT
+patchset=$PATCHSET
 package_manager=$PACKAGE_MANAGER
 EOF
 

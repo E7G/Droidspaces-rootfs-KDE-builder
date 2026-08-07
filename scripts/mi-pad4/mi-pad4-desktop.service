@@ -1,0 +1,16 @@
+[Unit]
+Description=Mi Pad 4 Anland Plasma desktop
+After=local-fs.target
+Wants=dbus.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mi-pad4-start-wayland
+Restart=on-failure
+RestartSec=2s
+KillMode=process
+TimeoutStopSec=10s
+Environment=SYSTEMD_DROIDSPACES_COMPAT=1
+
+[Install]
+WantedBy=multi-user.target

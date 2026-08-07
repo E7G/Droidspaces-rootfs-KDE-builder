@@ -22,10 +22,12 @@ ARG ENABLE_MI_PAD4_PROFILE_ARG
 
 COPY scripts/install-usb-manager.sh /usr/local/sbin/install-droidspaces-usb-manager
 COPY scripts/systemd257.sh /usr/local/sbin/systemd257
+COPY scripts/systemd257/ /usr/local/share/droidspaces/systemd257/
 COPY scripts/ion-legacy-shim.c /tmp/ion-legacy-shim.c
 COPY mesa-mi-pad4/ /tmp/mesa-mi-pad4/
 
 ARG MI_PAD4_V4L2_VAAPI_COMMIT=1be35ad2fc1bc66c76842d735b6ec91e11944a44
+ARG MI_PAD4_SYSTEMD257_COMMIT=70b5d110be7702afc4dbce012f60d49506d513da
 
 RUN printf '%s\n' \
     'Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo' \
@@ -220,10 +222,13 @@ EOF
 EOF_RUN
 
 # Mi Pad 4 runtime overlay. Droidspaces supplies the Android-side mounts and
-# display socket; the guest keeps the same custom_init for min and conc.
+# display socket; the patched systemd runs as PID 1 and supervises the desktop.
 RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         install -Dm755 /tmp/mi-pad4/droidspaces-init /sbin/droidspaces-init && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-start-wayland /usr/local/bin/mi-pad4-start-wayland && \
+        install -Dm644 /tmp/mi-pad4/mi-pad4-desktop.service /etc/systemd/system/mi-pad4-desktop.service && \
+        mkdir -p /etc/systemd/system/multi-user.target.wants && \
+        ln -sfn ../mi-pad4-desktop.service /etc/systemd/system/multi-user.target.wants/mi-pad4-desktop.service && \
         install -Dm755 /tmp/mi-pad4/dolphin-safe /usr/local/bin/dolphin && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
         for desktop in /usr/share/applications/firefox*.desktop; do \
@@ -233,8 +238,8 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         install -Dm644 /tmp/mi-pad4/container.config /usr/share/droidspaces/mi-pad4-container.config && \
         install -Dm644 /tmp/mi-pad4/sepolicy.rule /usr/share/droidspaces/mi-pad4-sepolicy.rule && \
         mkdir -p /etc/droidspaces && \
-        printf '%s\n' 'SYSTEMD_CGROUP_ENABLE_LEGACY_FORCE=1' 'SYSTEMD_LOG_LEVEL=warning' > /etc/droidspaces/systemd-compat.env && \
-        printf '%s\n' '#!/bin/bash' 'set -u' 'echo "systemd: $(/usr/lib/systemd/systemd --version 2>/dev/null | head -n 1 || true)"' 'echo "kernel: $(uname -r)"' 'echo "cgroup2: $(mount 2>/dev/null | grep -c "type cgroup2" || true)"' 'echo "cgroup-v1: $(mount 2>/dev/null | grep -c "type cgroup" || true)"' 'echo "mode: custom-init is default on the 4.4 kernel"' > /usr/local/bin/droidspaces-systemd-check && \
+        printf '%s\n' 'SYSTEMD_DROIDSPACES_COMPAT=1' 'SYSTEMD_LOG_LEVEL=warning' > /etc/droidspaces/systemd-compat.env && \
+        printf '%s\n' '#!/bin/bash' 'set -u' 'echo "systemd: $(/usr/lib/systemd/systemd --version 2>/dev/null | head -n 1 || true)"' 'echo "kernel: $(uname -r)"' 'echo "pid1: $(cat /proc/1/comm 2>/dev/null || true)"' 'echo "state: $(systemctl is-system-running 2>/dev/null || true)"' 'echo "desktop: $(systemctl is-active mi-pad4-desktop.service 2>/dev/null || true)"' 'echo "mode: systemd257-droidspaces"' > /usr/local/bin/droidspaces-systemd-check && \
         chmod 755 /usr/local/bin/droidspaces-systemd-check; \
     fi
 # Qualcomm msm_vidc on the Mi Pad 4 uses legacy ION USERPTR queues and private
@@ -444,11 +449,15 @@ RUN if [ "$ENABLE_binfmt_ARG" = "true" ]; then \
 
 # 可选：为 systemd 258+ 发行版构建 systemd 257 旧内核兼容运行时。
 RUN if [ "$ENABLE_systemd257_ARG" = "true" ]; then \
+        SYSTEMD257_FORCE_REBUILD="$ENABLE_MI_PAD4_PROFILE_ARG" \
+        SYSTEMD257_REF="$MI_PAD4_SYSTEMD257_COMMIT" \
+        SYSTEMD257_PATCH_DIR=/usr/local/share/droidspaces/systemd257 \
         bash /usr/local/sbin/systemd257; \
     else \
         echo "--> [跳过] 未启用 systemd 257 旧内核兼容"; \
     fi && \
-    rm -f /usr/local/sbin/systemd257
+    rm -f /usr/local/sbin/systemd257 && \
+    rm -rf /usr/local/share/droidspaces/systemd257
 
 # 彻底清理 pacman 缓存
 RUN rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/*

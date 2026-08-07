@@ -1,11 +1,19 @@
 #!/bin/bash
 
+set -eu
+
 export LANG=zh_CN.UTF-8
 export LANGUAGE=zh_CN:zh
 export LC_ALL=zh_CN.UTF-8
+export SYSTEMD_DROIDSPACES_COMPAT=1
+export SYSTEMD_LOG_LEVEL=warning
+export container=droidspaces
 
-# The Android 4.4 container cannot provide the cgroup/mount contract required
-# by systemd PID 1 or systemd --user.  Start the single desktop supervisor
-# directly; it owns and reaps its KWin/Plasma children without systemd or an
-# additional runit PID layer (which cannot create a session on this 4.4 kernel).
-exec /usr/local/bin/mi-pad4-start-wayland
+for systemd in /usr/lib/systemd/systemd /lib/systemd/systemd; do
+  if [[ -x "$systemd" ]]; then
+    exec "$systemd" --system --unit=multi-user.target
+  fi
+done
+
+echo "patched systemd PID 1 not found" >&2
+exit 127

@@ -108,6 +108,9 @@ jobs:
           grep -Eq '^(sbin|usr/bin)/droidspaces-init$' rootfs-files.txt || { echo "Missing droidspaces-init" >&2; exit 1; }
           for path in \
             usr/local/bin/mi-pad4-start-wayland \
+            etc/droidspaces-systemd257 \
+            etc/systemd/system/mi-pad4-desktop.service \
+            etc/systemd/system/multi-user.target.wants/mi-pad4-desktop.service \
             usr/local/bin/dolphin \
             usr/local/bin/mi-pad4-firefox \
             usr/local/lib/libion-legacy-shim.so \
@@ -124,6 +127,12 @@ jobs:
           grep -Fxq 'usr/share/droidspaces/mesa-kgsl-dmabuf-import' rootfs-files.txt
           grep -Eq '^var/lib/pacman/local/mesa-1:26\.2\.0-9/' rootfs-files.txt
           grep -Eq '^(usr/bin/systemd|usr/lib/systemd/systemd)$' rootfs-files.txt
+          marker="$(tar -xOf "release_assets/$final" ./etc/droidspaces-systemd257)"
+          printf '%s\n' "$marker" | grep -Fxq 'patchset=0001-droidspaces-kernel-4.4-compat.patch'
+          printf '%s\n' "$marker" | grep -Fxq 'source_commit=70b5d110be7702afc4dbce012f60d49506d513da'
+          printf '%s\n' "$marker" | grep -Eq '^installed_version=systemd 257([[:space:]]|$)'
+          tar -xOf "release_assets/$final" ./etc/systemd/system/mi-pad4-desktop.service | \
+            grep -Fxq 'ExecStart=/usr/local/bin/mi-pad4-start-wayland'
           grep -Fxq 'home/user' rootfs-files.txt || grep -q '^home/user/' rootfs-files.txt
           ! grep -Eq '(^|/)(snap|snapd)(/|$)' rootfs-files.txt
           (cd release_assets && sha256sum "$final" > SHA256SUMS)
@@ -142,7 +151,7 @@ jobs:
           input=Fcitx5-Pinyin
           locale=zh_CN.UTF-8
           default_user=user
-          systemd_compat=257-tools-custom-init
+          systemd_compat=257-pid1-droidspaces
           EOF
 
       - name: Upload artifact
@@ -166,9 +175,8 @@ jobs:
           body: |
             Arch Linux ARM aarch64 RootFS for Xiaomi Mi Pad 4 clover.
             Profile: ${{ inputs.profile }}.
-            Uses the 4.4-compatible custom init by default; systemd tools and
-            systemd 257 compatibility settings are included, but systemd is not
-            forced to PID 1 because this kernel does not expose a complete cgroup
-            contract. Display is Anland Wayland, GPU path is KGSL + legacy ION shim.
+            Uses systemd 257 as PID 1 with the Droidspaces cgroup/sandbox
+            compatibility patch for the Android 4.4 kernel. Display is Anland
+            Wayland, GPU path is KGSL + legacy ION shim.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
