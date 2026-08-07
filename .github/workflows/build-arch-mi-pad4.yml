@@ -10,6 +10,7 @@ on:
         default: min
         options:
           - min
+
       publish_release:
         description: Publish this build to GitHub Releases
         required: true
@@ -27,6 +28,7 @@ jobs:
   build:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,48 +39,132 @@ jobs:
           PANGO_PKG_COMMIT: 92547f34a91108b16e6dd2ea08317e0bd1be7487
         run: |
           set -euo pipefail
-          rm -rf .ci/archlinuxarm-PKGBUILDs .ci/pango mesa-mi-pad4 local-packages-mi-pad4
-          git clone --depth 1 --branch freedreno \
+
+          rm -rf \
+            .ci/archlinuxarm-PKGBUILDs \
+            .ci/pango \
+            mesa-mi-pad4 \
+            local-packages-mi-pad4
+
+          git clone \
+            --depth 1 \
+            --branch freedreno \
             https://github.com/E7G/archlinuxarm-PKGBUILDs.git \
             .ci/archlinuxarm-PKGBUILDs
-          git clone --filter=blob:none --no-checkout \
+
+          git clone \
+            --filter=blob:none \
+            --no-checkout \
             https://gitlab.archlinux.org/archlinux/packaging/packages/pango.git \
             .ci/pango
-          git -C .ci/pango fetch --depth 1 origin "$PANGO_PKG_COMMIT"
-          git -C .ci/pango checkout --detach FETCH_HEAD
-          docker run --privileged --rm \
+
+          git -C .ci/pango fetch \
+            --depth 1 \
+            origin \
+            "$PANGO_PKG_COMMIT"
+
+          git -C .ci/pango checkout \
+            --detach \
+            FETCH_HEAD
+
+          docker run \
+            --privileged \
+            --rm \
             -v "$PWD/.ci/archlinuxarm-PKGBUILDs:/src" \
             -v "$PWD/.ci/pango:/pango" \
-            lfdevs/archlinuxarm:base-devel bash -lc '
+            lfdevs/archlinuxarm:base-devel \
+            bash -lc '
               set -euo pipefail
+
               pacman -Syyu --noconfirm
-              pacman -S --needed --noconfirm sudo base-devel git ccache
+              pacman -S --needed --noconfirm \
+                sudo \
+                base-devel \
+                git \
+                ccache
+
               useradd -m -s /bin/bash builder
-              echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
+
+              echo "builder ALL=(ALL) NOPASSWD: ALL" \
+                >/etc/sudoers.d/builder
+
               chmod 0440 /etc/sudoers.d/builder
-              chown -R builder:builder /src /pango
+
+              chown -R builder:builder \
+                /src \
+                /pango
+
               sudo -u builder bash -lc "
+                set -euo pipefail
+
                 export CCACHE_DIR=/home/builder/.ccache
                 ccache --max-size=2G
+
                 cd /src/extra/mesa
                 makepkg -s --noconfirm --needed
+
                 cd /pango
                 makepkg -sA --noconfirm --needed
               "
             '
+
           mkdir -p mesa-mi-pad4
+
+          shopt -s nullglob
+
           for pattern in \
             'mesa-[0-9]*.pkg.tar.*' \
             'vulkan-freedreno-*.pkg.tar.*' \
-            'vulkan-mesa-implicit-layers-*.pkg.tar.*'; do
-            cp -v .ci/archlinuxarm-PKGBUILDs/extra/mesa/$pattern mesa-mi-pad4/
+            'vulkan-mesa-implicit-layers-*.pkg.tar.*'
+          do
+            files=(.ci/archlinuxarm-PKGBUILDs/extra/mesa/$pattern)
+
+            if ((${#files[@]} == 0)); then
+              echo "Missing Mesa package matching: $pattern" >&2
+              exit 1
+            fi
+
+            cp -v "${files[@]}" mesa-mi-pad4/
           done
-          test -n "$(find mesa-mi-pad4 -maxdepth 1 -name 'mesa-*.pkg.tar.*' -print -quit)"
-          sha256sum mesa-mi-pad4/*.pkg.tar.* | tee mesa-mi-pad4/SHA256SUMS
+
+          test -n "$(
+            find mesa-mi-pad4 \
+              -maxdepth 1 \
+              -name 'mesa-*.pkg.tar.*' \
+              -print \
+              -quit
+          )"
+
+          sha256sum \
+            mesa-mi-pad4/*.pkg.tar.* \
+            | tee mesa-mi-pad4/SHA256SUMS
+
           mkdir -p local-packages-mi-pad4
-          cp -v .ci/pango/pango-[0-9]*.pkg.tar.* local-packages-mi-pad4/
-          test -n "$(find local-packages-mi-pad4 -maxdepth 1 -name 'pango-*.pkg.tar.*' -print -quit)"
-          sha256sum local-packages-mi-pad4/*.pkg.tar.* | tee local-packages-mi-pad4/SHA256SUMS
+
+          pango_packages=(
+            .ci/pango/pango-[0-9]*.pkg.tar.*
+          )
+
+          if ((${#pango_packages[@]} == 0)); then
+            echo "Missing built Pango package" >&2
+            exit 1
+          fi
+
+          cp -v \
+            "${pango_packages[@]}" \
+            local-packages-mi-pad4/
+
+          test -n "$(
+            find local-packages-mi-pad4 \
+              -maxdepth 1 \
+              -name 'pango-*.pkg.tar.*' \
+              -print \
+              -quit
+          )"
+
+          sha256sum \
+            local-packages-mi-pad4/*.pkg.tar.* \
+            | tee local-packages-mi-pad4/SHA256SUMS
 
       - name: Build Arch rootfs
         shell: bash
@@ -86,7 +172,9 @@ jobs:
           PROFILE: ${{ inputs.profile }}
         run: |
           set -euo pipefail
+
           chmod +x build_rootfs-qemu-aarch64.sh
+
           ./build_rootfs-qemu-aarch64.sh \
             -i Arch-KDE.Dockerfile \
             -v "mi-pad4-${PROFILE}-${GITHUB_RUN_NUMBER}" \
@@ -113,13 +201,122 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="$(find . -maxdepth 1 -name 'Arch-KDE-Wayland-Droidspaces-rootfs-aarch64-*.tar.xz' -print -quit)"
-          test -n "$archive"
+
+          #
+          # Locate generated rootfs
+          #
+          mapfile -t archives < <(
+            find . \
+              -maxdepth 1 \
+              -type f \
+              -name 'Arch-KDE-Wayland-Droidspaces-rootfs-aarch64-*.tar.xz' \
+              -print
+          )
+
+          if ((${#archives[@]} == 0)); then
+            echo "RootFS archive was not generated" >&2
+            exit 1
+          fi
+
+          if ((${#archives[@]} > 1)); then
+            echo "Multiple RootFS archives found:" >&2
+            printf '  %s\n' "${archives[@]}" >&2
+            exit 1
+          fi
+
+          archive="${archives[0]}"
+
           mkdir -p release_assets
+
           final="Arch-${{ inputs.profile }}-Anland-MiPad4-aarch64-v${GITHUB_RUN_NUMBER}.tar.xz"
-          mv "$archive" "release_assets/$final"
-          tar -tf "release_assets/$final" | sed 's#^\./##' > rootfs-files.txt
-          grep -Eq '^(sbin|usr/bin)/droidspaces-init$' rootfs-files.txt || { echo "Missing droidspaces-init" >&2; exit 1; }
+
+          mv \
+            "$archive" \
+            "release_assets/$final"
+
+          rootfs_archive="release_assets/$final"
+
+          #
+          # Store raw tar member list.
+          #
+          tar -tf "$rootfs_archive" \
+            > rootfs-files-raw.txt
+
+          #
+          # Store normalized member list:
+          #
+          #   ./etc/foo -> etc/foo
+          #   etc/foo   -> etc/foo
+          #
+          sed 's#^\./##' \
+            rootfs-files-raw.txt \
+            > rootfs-files.txt
+
+          #
+          # Helper: return the real member name used inside the tar archive.
+          #
+          # This supports both:
+          #
+          #   etc/droidspaces-systemd257
+          #
+          # and:
+          #
+          #   ./etc/droidspaces-systemd257
+          #
+          tar_member_name() {
+            local wanted="${1#./}"
+            local member=""
+
+            member="$(
+              awk -v wanted="$wanted" '
+                {
+                  normalized=$0
+                  sub(/^\.\//, "", normalized)
+
+                  if (normalized == wanted) {
+                    print $0
+                    exit
+                  }
+                }
+              ' rootfs-files-raw.txt
+            )"
+
+            if [[ -z "$member" ]]; then
+              echo "Missing archive member: $wanted" >&2
+              return 1
+            fi
+
+            printf '%s\n' "$member"
+          }
+
+          #
+          # Helper: print a file directly from the tar archive.
+          #
+          tar_cat() {
+            local wanted="$1"
+            local member
+
+            member="$(tar_member_name "$wanted")"
+
+            tar -xOf \
+              "$rootfs_archive" \
+              "$member"
+          }
+
+          #
+          # Validate droidspaces-init
+          #
+          grep -Eq \
+            '^(sbin|usr/bin)/droidspaces-init$' \
+            rootfs-files.txt \
+            || {
+              echo "Missing droidspaces-init" >&2
+              exit 1
+            }
+
+          #
+          # Validate required runtime files
+          #
           for path in \
             usr/local/bin/mi-pad4-start-wayland \
             etc/droidspaces-systemd257 \
@@ -133,27 +330,173 @@ jobs:
             usr/lib/firefox/glxtest \
             usr/lib/firefox/glxtest.real \
             usr/bin/startplasma-wayland \
-            usr/bin/kwin_wayland; do
-            grep -Fxq "$path" rootfs-files.txt || { echo "Missing $path" >&2; exit 1; }
+            usr/bin/kwin_wayland
+          do
+            grep -Fxq \
+              "$path" \
+              rootfs-files.txt \
+              || {
+                echo "Missing $path" >&2
+                exit 1
+              }
           done
-          grep -Fxq 'usr/share/droidspaces/anland-kwin-package' rootfs-files.txt
-          grep -Fxq 'usr/share/droidspaces/kio-runtime-named-socket' rootfs-files.txt
-          grep -Fxq 'usr/share/droidspaces/mesa-kgsl-dmabuf-import' rootfs-files.txt
-          grep -Eq '^var/lib/pacman/local/mesa-1:26\.2\.0-9/' rootfs-files.txt
-          grep -Eq '^var/lib/pacman/local/pango-1:1\.58\.2-1/' rootfs-files.txt
-          grep -Eq '^(usr/bin/systemd|usr/lib/systemd/systemd)$' rootfs-files.txt
-          marker="$(tar -xOf "release_assets/$final" ./etc/droidspaces-systemd257)"
-          printf '%s\n' "$marker" | grep -Fxq 'patchset=0001-droidspaces-kernel-4.4-compat.patch'
-          printf '%s\n' "$marker" | grep -Fxq 'source_commit=70b5d110be7702afc4dbce012f60d49506d513da'
-          printf '%s\n' "$marker" | grep -Eq '^installed_version=systemd 257([[:space:]]|$)'
-          tar -xOf "release_assets/$final" ./etc/systemd/system/mi-pad4-desktop.service | \
-            grep -Fxq 'ExecStart=/usr/local/bin/mi-pad4-start-wayland'
-          grep -Fxq 'home/user' rootfs-files.txt || grep -q '^home/user/' rootfs-files.txt
-          ! grep -Eq '(^|/)(snap|snapd)(/|$)' rootfs-files.txt
-          (cd release_assets && sha256sum "$final" > SHA256SUMS)
-          cp scripts/mi-pad4/container.config release_assets/mi-pad4-container.config
-          cp scripts/mi-pad4/sepolicy.rule release_assets/mi-pad4-sepolicy.rule
-          cp scripts/mi-pad4/README.txt release_assets/README.txt
+
+          #
+          # Droidspaces patches / markers
+          #
+          grep -Fxq \
+            'usr/share/droidspaces/anland-kwin-package' \
+            rootfs-files.txt
+
+          grep -Fxq \
+            'usr/share/droidspaces/kio-runtime-named-socket' \
+            rootfs-files.txt
+
+          grep -Fxq \
+            'usr/share/droidspaces/mesa-kgsl-dmabuf-import' \
+            rootfs-files.txt
+
+          #
+          # Validate locally built package versions
+          #
+          grep -Eq \
+            '^var/lib/pacman/local/mesa-1:26\.2\.0-9/' \
+            rootfs-files.txt \
+            || {
+              echo "Expected Mesa 1:26.2.0-9 is not installed" >&2
+              exit 1
+            }
+
+          grep -Eq \
+            '^var/lib/pacman/local/pango-1:1\.58\.2-1/' \
+            rootfs-files.txt \
+            || {
+              echo "Expected Pango 1:1.58.2-1 is not installed" >&2
+              exit 1
+            }
+
+          #
+          # Validate systemd
+          #
+          grep -Eq \
+            '^(usr/bin/systemd|usr/lib/systemd/systemd)$' \
+            rootfs-files.txt \
+            || {
+              echo "systemd executable is missing" >&2
+              exit 1
+            }
+
+          #
+          # IMPORTANT:
+          #
+          # Do NOT hard-code:
+          #
+          #   ./etc/droidspaces-systemd257
+          #
+          # here.
+          #
+          # tar_cat automatically resolves whether the archive uses
+          # "./etc/..." or "etc/...".
+          #
+          marker="$(
+            tar_cat \
+              etc/droidspaces-systemd257
+          )"
+
+          printf '%s\n' "$marker" \
+            | grep -Fxq \
+              'patchset=0001-droidspaces-kernel-4.4-compat.patch' \
+            || {
+              echo "Wrong or missing Droidspaces systemd patchset marker" >&2
+              exit 1
+            }
+
+          printf '%s\n' "$marker" \
+            | grep -Fxq \
+              'source_commit=70b5d110be7702afc4dbce012f60d49506d513da' \
+            || {
+              echo "Unexpected systemd source commit" >&2
+              exit 1
+            }
+
+          printf '%s\n' "$marker" \
+            | grep -Eq \
+              '^installed_version=systemd 257([[:space:]]|$)' \
+            || {
+              echo "Expected systemd 257 is not installed" >&2
+              exit 1
+            }
+
+          #
+          # Validate Plasma autostart service
+          #
+          tar_cat \
+            etc/systemd/system/mi-pad4-desktop.service \
+            | grep -Fxq \
+              'ExecStart=/usr/local/bin/mi-pad4-start-wayland' \
+            || {
+              echo "mi-pad4-desktop.service has an invalid ExecStart" >&2
+              exit 1
+            }
+
+          #
+          # Validate default user
+          #
+          if ! grep -Fxq \
+              'home/user' \
+              rootfs-files.txt
+          then
+            grep -q \
+              '^home/user/' \
+              rootfs-files.txt \
+              || {
+                echo "Missing /home/user" >&2
+                exit 1
+              }
+          fi
+
+          #
+          # Snap / snapd must not exist
+          #
+          if grep -Eq \
+              '(^|/)(snap|snapd)(/|$)' \
+              rootfs-files.txt
+          then
+            echo "Unexpected snap/snapd files found in RootFS" >&2
+            grep -E \
+              '(^|/)(snap|snapd)(/|$)' \
+              rootfs-files.txt \
+              >&2 \
+              || true
+            exit 1
+          fi
+
+          #
+          # Create release checksum
+          #
+          (
+            cd release_assets
+            sha256sum "$final" > SHA256SUMS
+          )
+
+          #
+          # Copy Mi Pad 4 configuration
+          #
+          cp \
+            scripts/mi-pad4/container.config \
+            release_assets/mi-pad4-container.config
+
+          cp \
+            scripts/mi-pad4/sepolicy.rule \
+            release_assets/mi-pad4-sepolicy.rule
+
+          cp \
+            scripts/mi-pad4/README.txt \
+            release_assets/README.txt
+
+          #
+          # Device profile
+          #
           cat > release_assets/mi-pad4-kernel-profile.txt <<'EOF'
           device=xiaomi-mi-pad-4-clover
           architecture=aarch64
@@ -168,6 +511,16 @@ jobs:
           default_user=user
           systemd_compat=257-pid1-droidspaces
           EOF
+
+          echo
+          echo "=============================================="
+          echo "RootFS validation completed successfully"
+          echo "=============================================="
+          echo "Archive: $rootfs_archive"
+          echo
+          ls -lh "$rootfs_archive"
+          echo
+          cat release_assets/SHA256SUMS
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -189,9 +542,15 @@ jobs:
           files: release_assets/*
           body: |
             Arch Linux ARM aarch64 RootFS for Xiaomi Mi Pad 4 clover.
+
             Profile: ${{ inputs.profile }}.
+
             Uses systemd 257 as PID 1 with the Droidspaces cgroup/sandbox
-            compatibility patch for the Android 4.4 kernel. Display is Anland
-            Wayland, GPU path is KGSL + legacy ION shim.
+            compatibility patch for the Android 4.4 kernel.
+
+            Display: Anland Wayland
+            GPU: KGSL + legacy ION shim
+            Audio: Anland
+            Input: Fcitx5 Pinyin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
