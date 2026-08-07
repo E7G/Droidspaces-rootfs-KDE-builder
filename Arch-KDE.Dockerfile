@@ -25,6 +25,7 @@ COPY scripts/systemd257.sh /usr/local/sbin/systemd257
 COPY scripts/systemd257/ /usr/local/share/droidspaces/systemd257/
 COPY scripts/ion-legacy-shim.c /tmp/ion-legacy-shim.c
 COPY mesa-mi-pad4/ /tmp/mesa-mi-pad4/
+COPY local-packages-mi-pad4/ /tmp/local-packages-mi-pad4/
 
 ARG MI_PAD4_V4L2_VAAPI_COMMIT=1be35ad2fc1bc66c76842d735b6ec91e11944a44
 ARG MI_PAD4_SYSTEMD257_COMMIT=70b5d110be7702afc4dbce012f60d49506d513da
@@ -39,6 +40,7 @@ RUN printf '%s\n' \
     sed -i '/NoExtract.*i18n/d' /etc/pacman.conf && \
     pacman -Sy --noconfirm archlinux-keyring glibc && \
     pacman -Su --noconfirm && \
+    pacman -U --noconfirm --needed /tmp/local-packages-mi-pad4/pango-*.pkg.tar.* && \
     pacman -S --noconfirm --needed \
     # 核心工具组件 
     bash jq dialog coreutils file findutils grep sed gawk curl wget ca-certificates bash-completion dbus systemd pam fastfetch logrotate \
@@ -460,7 +462,7 @@ RUN if [ "$ENABLE_systemd257_ARG" = "true" ]; then \
     rm -rf /usr/local/share/droidspaces/systemd257
 
 # 彻底清理 pacman 缓存
-RUN rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/*
+RUN rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/* /tmp/local-packages-mi-pad4
 # 阶段 2：将完整的根文件系统导出到 scratch（空白层），以便外部直接提取或打包成 tarfs
 FROM scratch AS export
 COPY --from=customizer / /
