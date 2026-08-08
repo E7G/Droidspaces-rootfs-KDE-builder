@@ -1,0 +1,20 @@
+diff --git a/shell/panelview.cpp b/shell/panelview.cpp
+index 3c9dcb52b..af68a1d88 100644
+--- a/shell/panelview.cpp
++++ b/shell/panelview.cpp
+@@ -1167,8 +1167,14 @@ void PanelView::setScreenToFollow(QScreen *screen)
+         return;
+     }
+ 
++    // Anland exposes one fixed internal output. During initial output-order
++    // discovery Qt may replace its QScreen object while retaining the same
++    // Wayland output name. Hiding a not-yet-configured layer surface here makes
++    // Qt destroy it without recreating it, leaving the panel permanently absent.
++    const bool sameOutput = m_screenToFollow && m_screenToFollow->name() == screen->name();
++
+     // layer surfaces can't be moved between outputs, so hide and show the window on a new output
+-    const bool remap = m_layerWindow && isVisible();
++    const bool remap = m_layerWindow && isVisible() && !sameOutput;
+     if (remap) {
+         setVisible(false);
+     }

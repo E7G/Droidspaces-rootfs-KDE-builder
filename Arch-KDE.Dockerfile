@@ -277,9 +277,12 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
     fi
 # Build KWin/Xwayland natively against Arch's Qt ABI. Fedora RPMs cannot be
 # reused here because their binaries require Fedora-private Qt symbols.
+# pacman reinstalls KWin's stock wrapper; restore the Anland wrapper last because
+# Plasma Wayland launches this fixed path and ignores KDEWM.
 RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh && \
-        BUILD_KDE="$BUILD_KDE" /tmp/mi-pad4/build-arch-anland-kwin.sh; \
+        BUILD_KDE="$BUILD_KDE" /tmp/mi-pad4/build-arch-anland-kwin.sh && \
+        install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland-wrapper /usr/sbin/kwin_wayland_wrapper; \
     else \
         printf '%s\n' 'patched-kwin=not-requested' > /usr/share/droidspaces/anland-kwin-package; \
     fi

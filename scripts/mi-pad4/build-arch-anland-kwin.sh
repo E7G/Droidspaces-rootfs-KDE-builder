@@ -15,6 +15,7 @@ PACKAGE_OUTPUT_DIR="${ANLAND_PACKAGE_OUTPUT_DIR:-}"
 KIOKG=8ca1426ad92c58c17d4ef610e57febd763717272
 KWINKG=365ae0acc5f521f53a85fe6d9a030646687324f8
 XWAYLANDKG=8f82d79d312192108bb6417187c6ea986cdfcb3c
+PLASMAWORKSPACEKG=864d8e5f78cb3665317efc5ca3f525e87a30f6dc
 
 pacman -S --noconfirm --needed \
     base-devel cmake ninja meson extra-cmake-modules kdoctools krunner \
@@ -128,12 +129,41 @@ EOF_XWAYLAND_PATCH
     install_local_package "$package"
 }
 
-build_kio
+build_plasma_workspace() {
+    local dir="$BUILD_ROOT/plasma-workspace"
+    clone_at https://gitlab.archlinux.org/archlinux/packaging/packages/plasma-workspace.git "$PLASMAWORKSPACEKG" "$dir"
+    sed -i "s/^arch=(.*)$/arch=('aarch64')/" "$dir/PKGBUILD"
+    cp "$SCRIPT_DIR/plasma-workspace-panel-remap.patch" "$dir/mi-pad4-panel-remap.patch"
+    cat >> "$dir/PKGBUILD" <<'EOF_PLASMA_WORKSPACE_PATCH'
+source+=(mi-pad4-panel-remap.patch)
+sha256sums+=('SKIP')
+
+prepare() {
+  cd "$srcdir/plasma-workspace-$pkgver"
+  patch -Np1 -i "$srcdir/mi-pad4-panel-remap.patch"
+}
+EOF_PLASMA_WORKSPACE_PATCH
+    mkdir -p "$BUILD_ROOT/packages"
+    chown -R user:user "$BUILD_ROOT/packages"
+    chown -R user:user "$dir"
+    su user -c "cd '$dir' && PKGDEST='$BUILD_ROOT/packages' makepkg --syncdeps --noconfirm --nocheck --skippgpcheck --cleanbuild --clean"
+    local package
+    package="$(find "$BUILD_ROOT/packages" -maxdepth 1 -type f -name 'plasma-workspace-[0-9]*.pkg.tar.*' -print -quit)"
+    [ -n "$package" ] || { echo 'plasma-workspace package was not produced' >&2; find "$BUILD_ROOT" -maxdepth 3 -type f -name '*.pkg.tar.*' >&2; exit 1; }
+    install_local_package "$package"
+}
+
+if [[ "${BUILD_KIO:-true}" = true ]]; then
+    build_kio
+fi
 if [[ "${BUILD_KWIN:-true}" = true ]]; then
     build_kwin
 fi
 if [[ "${BUILD_XWAYLAND:-true}" = true ]]; then
     build_xwayland
+fi
+if [[ "${BUILD_PLASMA_WORKSPACE:-true}" = true ]]; then
+    build_plasma_workspace
 fi
 if [[ -n "$PACKAGE_OUTPUT_DIR" ]]; then
     mkdir -p "$PACKAGE_OUTPUT_DIR"
@@ -141,3 +171,4 @@ if [[ -n "$PACKAGE_OUTPUT_DIR" ]]; then
 fi
 install -d -m 0755 /usr/share/droidspaces
 printf '%s\n' 'patched-kwin=arch-native-6.7.3-anland' > /usr/share/droidspaces/anland-kwin-package
+printf '%s\n' 'patched-plasma-workspace=6.7.4-anland-panel-remap' > /usr/share/droidspaces/plasma-workspace-panel-remap
