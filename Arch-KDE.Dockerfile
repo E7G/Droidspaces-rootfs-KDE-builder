@@ -232,7 +232,11 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         install -Dm755 /tmp/mi-pad4/droidspaces-init /sbin/droidspaces-init && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-start-wayland /usr/local/bin/mi-pad4-start-wayland && \
         install -Dm644 /tmp/mi-pad4/mi-pad4-desktop.service /etc/systemd/system/mi-pad4-desktop.service && \
+        install -Dm644 /tmp/mi-pad4/dbus-daemon.service /etc/systemd/system/dbus.service && \
+        ln -sfn /dev/null /etc/systemd/system/dbus.socket && \
+        ln -sfn /dev/null /etc/systemd/system/dbus-broker.service && \
         mkdir -p /etc/systemd/system/multi-user.target.wants && \
+        ln -sfn ../dbus.service /etc/systemd/system/multi-user.target.wants/dbus.service && \
         ln -sfn ../mi-pad4-desktop.service /etc/systemd/system/multi-user.target.wants/mi-pad4-desktop.service && \
         install -Dm755 /tmp/mi-pad4/dolphin-safe /usr/local/bin/dolphin && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
@@ -356,7 +360,9 @@ EOT
 mkdir -p /etc/systemd/system/multi-user.target.wants
 GUEST_SYSTEMD_PATH="/usr/lib/systemd/system"
 
-if [ -f "$GUEST_SYSTEMD_PATH/dbus.service" ]; then
+if [ -f "/etc/systemd/system/dbus.service" ]; then
+    ln -sf ../dbus.service "/etc/systemd/system/multi-user.target.wants/dbus.service"
+elif [ -f "$GUEST_SYSTEMD_PATH/dbus.service" ]; then
     ln -sf "$GUEST_SYSTEMD_PATH/dbus.service" "/etc/systemd/system/multi-user.target.wants/dbus.service"
 fi
 

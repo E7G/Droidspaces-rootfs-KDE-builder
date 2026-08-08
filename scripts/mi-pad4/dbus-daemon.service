@@ -1,0 +1,17 @@
+[Unit]
+Description=D-Bus System Message Bus (legacy kernel compatible)
+Documentation=man:dbus-daemon(1)
+After=local-fs.target
+Before=basic.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/dbus-daemon --system --nofork --nopidfile
+Restart=on-failure
+RestartSec=1s
+OOMScoreAdjust=-900
+LimitNOFILE=16384
+
+[Install]
+WantedBy=multi-user.target
