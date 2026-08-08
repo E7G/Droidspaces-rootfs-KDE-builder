@@ -1,0 +1,13 @@
+#!/bin/bash
+
+set -u
+
+export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+export FD_FORCE_KGSL=1
+export FD_KGSL_ENABLE_DMABUF=1
+export XWAYLAND_FORCE_KGSL_SURFACELESS=1
+export KWIN_DISABLE_VULKAN=1
+export LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so
+
+exec /usr/bin/kwin_wayland --anland --socket "${WAYLAND_DISPLAY:-wayland-0}" \
+  --no-lockscreen --no-global-shortcuts "$@"

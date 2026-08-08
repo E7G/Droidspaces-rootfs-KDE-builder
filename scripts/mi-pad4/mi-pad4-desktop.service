@@ -5,10 +5,10 @@ Wants=dbus.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/mi-pad4-start-wayland
+ExecStart=/usr/local/bin/mi-pad4-start-wayland child
 Restart=on-failure
 RestartSec=2s
-KillMode=process
+KillMode=control-group
 TimeoutStopSec=10s
 Environment=SYSTEMD_DROIDSPACES_COMPAT=1
 

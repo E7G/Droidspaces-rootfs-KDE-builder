@@ -59,13 +59,13 @@ RUN printf '%s\n' \
     # 最小化KDE
     if [ "$BUILD_KDE" = "min" ]; then \
         pacman -S --noconfirm --needed \
-        xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
+        xorg-xrandr xkeyboard-config noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
         dolphin kate kinfocenter mesa-utils libpulse vulkan-tools firefox; \
     fi && \
     # 精简KDE
     if [ "$BUILD_KDE" = "conc" ]; then \
         pacman -S --noconfirm --needed \
-        xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
+        xorg-xrandr xkeyboard-config noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
         dolphin kate kinfocenter mesa-utils libpulse vulkan-tools aha clinfo dmidecode wayland-utils xorg-server \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
         kimageformats plasma-browser-integration plasma-mobile plasma-keyboard libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium firefox; \
@@ -231,6 +231,9 @@ EOF_RUN
 RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         install -Dm755 /tmp/mi-pad4/droidspaces-init /sbin/droidspaces-init && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-start-wayland /usr/local/bin/mi-pad4-start-wayland && \
+        install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland /usr/local/bin/mi-pad4-kwin-wayland && \
+        install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland-wrapper /usr/sbin/kwin_wayland_wrapper && \
+        ln -sfn ../xkeyboard-config-2 /usr/share/X11/xkb && \
         install -Dm644 /tmp/mi-pad4/mi-pad4-desktop.service /etc/systemd/system/mi-pad4-desktop.service && \
         install -Dm644 /tmp/mi-pad4/dbus-daemon.service /etc/systemd/system/dbus.service && \
         ln -sfn /dev/null /etc/systemd/system/dbus.socket && \
