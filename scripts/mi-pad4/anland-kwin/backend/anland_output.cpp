@@ -25,6 +25,11 @@ AnlandOutput::AnlandOutput(AnlandBackend *parent, const QString &name)
         .name = name,
         .manufacturer = QStringLiteral("anland"),
         .model = QStringLiteral("anland"),
+        // Mi Pad 4: 8-inch 16:10 panel (about 283 ppi).  A null physical size
+        // becomes -1x-1 mm in wl_output. Plasma then replaces the initial
+        // QScreen after output-management discovery and remaps a still-pending
+        // layer surface, permanently hiding its panel on this Qt/KWin stack.
+        .physicalSize = QSize(172, 108),
         .internal = true,
     });
 }

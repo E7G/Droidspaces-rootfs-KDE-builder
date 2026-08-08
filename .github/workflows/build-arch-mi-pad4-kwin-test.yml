@@ -14,7 +14,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build patched KIO package
+      - name: Build patched KIO and KWin packages
         shell: bash
         run: |
           set -euo pipefail
@@ -30,7 +30,7 @@ jobs:
               cp -a /repo/scripts/mi-pad4 /tmp/mi-pad4
               chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh
               BUILD_KDE=min \
-              BUILD_KWIN=false \
+              BUILD_KWIN=true \
               BUILD_XWAYLAND=false \
               ANLAND_PACKAGE_OUTPUT_DIR=/out \
                 /tmp/mi-pad4/build-arch-anland-kwin.sh
