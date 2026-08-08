@@ -22,6 +22,14 @@ unset ANLAND_DRM_DEVICE
 # the 4.4 kernel. Anland uses ANLAND_SOCKET independently, so keep the Linux
 # session socket graph in the container's normal /run tmpfs.
 export XDG_RUNTIME_DIR=/run/droidspaces-runtime/user-0
+# KDE cache lock files on HOME's Android /data bind mount can become unreadable
+# (ENOKEY) on the clover 4.4 kernel. KConfig then recursively creates
+# *.rmlock files and blocks KWin's event loop, so keep all disposable XDG cache
+# data in the container-owned /run tmpfs.
+export XDG_CACHE_HOME=/run/droidspaces-cache/user-0
+# Plasma's KUserFeedback and Dolphin also take KConfig locks below XDG state.
+# Keep those transient state files off the same fscrypt-affected bind mount.
+export XDG_STATE_HOME=/run/droidspaces-state/user-0
 export XKB_CONFIG_ROOT=/usr/share/X11/xkb
 export XKB_DEFAULT_RULES=evdev
 export XKB_DEFAULT_MODEL=pc105
@@ -68,14 +76,19 @@ unset INVOCATION_ID NOTIFY_SOCKET WATCHDOG_PID WATCHDOG_USEC SYSTEMD_EXEC_PID
 if [[ "$EUID" -eq 0 ]]; then
   # The 4.4 container lacks CAP_SETUID/CAP_SETGID under Enforcing.  Do not
   # call runuser or chown here; use a private writable runtime/home instead.
-  mkdir -p "$XDG_RUNTIME_DIR" "$HOME/.cache/fontconfig" \
+  mkdir -p "$XDG_RUNTIME_DIR" "$XDG_CACHE_HOME/fontconfig" "$XDG_STATE_HOME" \
     "$HOME/.local/share/kactivitymanagerd" /tmp/.X11-unix /tmp/.ICE-unix 2>/dev/null || true
-  chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+  chmod 700 "$XDG_RUNTIME_DIR" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" 2>/dev/null || true
   chmod 1777 /tmp/.X11-unix /tmp/.ICE-unix 2>/dev/null || true
 else
-  mkdir -p "$XDG_RUNTIME_DIR" "$HOME/.cache/fontconfig" "$HOME/.local/share/kactivitymanagerd"
-  chmod 700 "$XDG_RUNTIME_DIR"
+  mkdir -p "$XDG_RUNTIME_DIR" "$XDG_CACHE_HOME/fontconfig" "$XDG_STATE_HOME" "$HOME/.local/share/kactivitymanagerd"
+  chmod 700 "$XDG_RUNTIME_DIR" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
 fi
+
+# Reclaim only the broken transient KDE lock chain left by older images. The
+# actual user configuration and normal cache entries are left untouched.
+find "$HOME/.cache" -maxdepth 1 -type f -name 'ksycoca*.lock*' -delete 2>/dev/null || true
+find "$HOME/.local/state" -maxdepth 1 -type f -name 'UserFeedback*.lock*' -delete 2>/dev/null || true
 
 # Arch xkeyboard-config 2.48 stores its data under xkeyboard-config-2. Xwayland
 # still resolves the traditional X11/xkb path; recreate the compatibility link
@@ -112,10 +125,9 @@ if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; t
   # Dolphin stores dock/window state separately from dolphinrc. A forced
   # container stop can leave an invalid Qt save-state blob; Dolphin then logs
   # "Unknown class" and can block while restoring its first window.
-  if [[ -f "$HOME/.local/state/dolphinstaterc" ]]; then
-    mkdir -p "$HOME/.local/state"
-    mv -f "$HOME/.local/state/dolphinstaterc" \
-      "$HOME/.local/state/dolphinstaterc.pre-mi-pad4-$profile_revision" 2>/dev/null || true
+  if [[ -f "$XDG_STATE_HOME/dolphinstaterc" ]]; then
+    mv -f "$XDG_STATE_HOME/dolphinstaterc" \
+      "$XDG_STATE_HOME/dolphinstaterc.pre-mi-pad4-$profile_revision" 2>/dev/null || true
   fi
   rm -f "$HOME"/.cache/drkonqi/application-not-responding/dolphin.*.json 2>/dev/null || true
   printf '%s\n' "$profile_revision" >"$profile_stamp"
@@ -124,7 +136,7 @@ fi
 # KIO worker sockets and Dolphin session state are transient. Clean them on
 # every container start, including upgrades where the profile stamp matches.
 rm -f "$HOME/.config/session/dolphin_dolphin_dolphin" 2>/dev/null || true
-rm -f "$HOME/.local/state/dolphinstaterc" 2>/dev/null || true
+rm -f "$XDG_STATE_HOME/dolphinstaterc" 2>/dev/null || true
 rm -f "$XDG_RUNTIME_DIR"/dolphin*.kioworker.socket 2>/dev/null || true
 
 live_plasmashell_pid() {
@@ -245,6 +257,20 @@ if [[ "${1:-}" = session ]]; then
   # in the writable runtime tmpfs instead.
   plasma_config_home=/run/mi-pad4-plasma-config
   mkdir -p "$plasma_config_home"
+  # XDG_CONFIG_HOME points at tmpfs to avoid Android fscrypt lock failures, so
+  # Plasma cannot see the packaged/persistent panel layout unless it is seeded
+  # here before plasma_session starts plasmashell. Without this file KWin works
+  # and submits frames to Anland, but the visible output is only a black desktop.
+  if [[ ! -s "$plasma_config_home/plasma-org.kde.plasma.desktop-appletsrc" ]]; then
+    for layout in \
+      "$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc" \
+      /home/user/.config/plasma-org.kde.plasma.desktop-appletsrc; do
+      if [[ -s "$layout" ]]; then
+        cp -f "$layout" "$plasma_config_home/plasma-org.kde.plasma.desktop-appletsrc"
+        break
+      fi
+    done
+  fi
   printf '%s\n' '[General]' 'systemdBoot=false' >"$plasma_config_home/startkderc"
   export XDG_CONFIG_HOME="$plasma_config_home"
   export KDEWM='/usr/bin/bash /usr/local/bin/mi-pad4-kwin-wayland'
@@ -268,7 +294,8 @@ if [[ "${1:-}" = session ]]; then
   sleep 3
   shell_pid="$(live_plasmashell_pid || true)"
   if [[ -z "$shell_pid" ]]; then
-    /usr/bin/plasmashell -p org.kde.plasma.desktop &
+    /usr/bin/plasmashell -p org.kde.plasma.desktop \
+      >/run/mi-pad4-plasmashell.log 2>&1 &
     shell_pid=$!
   fi
   wait "$shell_pid"
