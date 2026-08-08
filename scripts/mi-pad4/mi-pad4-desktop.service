@@ -5,11 +5,29 @@ Wants=dbus.service
 
 [Service]
 Type=simple
+# Droidspaces' legacy cgroup compatibility layer cannot always reap descendants
+# which plasma_session reparents to PID 1. Remove only this desktop's stale
+# processes before and after a service cycle so a dead compositor cannot retain
+# wayland-0 or the Anland producer connection.
+ExecStartPre=-/usr/bin/pkill -KILL -x kwin_wayland
+ExecStartPre=-/usr/bin/pkill -KILL -x plasmashell
+ExecStartPre=-/usr/bin/pkill -KILL -x plasma_session
+ExecStartPre=-/usr/bin/pkill -KILL -f ^/usr/bin/startplasma-wayland
 ExecStart=/usr/local/bin/mi-pad4-start-wayland child
+ExecStopPost=-/usr/bin/pkill -KILL -x kwin_wayland
+ExecStopPost=-/usr/bin/pkill -KILL -x plasmashell
+ExecStopPost=-/usr/bin/pkill -KILL -x plasma_session
+ExecStopPost=-/usr/bin/pkill -KILL -f ^/usr/bin/startplasma-wayland
 Restart=on-failure
-RestartSec=2s
+RestartSec=10s
 KillMode=control-group
+# Android fscrypt v1 keeps directory keys in the inherited session keyring.
+# systemd's private service keyring makes files below /data intermittently fail
+# with ENOKEY (often reported by ld.so as "No such file or directory").
+KeyringMode=inherit
 TimeoutStopSec=10s
+StandardOutput=append:/run/mi-pad4-desktop.log
+StandardError=append:/run/mi-pad4-desktop.log
 Environment=SYSTEMD_DROIDSPACES_COMPAT=1
 
 [Install]
