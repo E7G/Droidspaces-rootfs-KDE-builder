@@ -126,7 +126,9 @@ RUN printf '%s\n' \
 # 配置 Locale 与 SSH
 RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
     if [ "$ENABLE_zh_tz_ARG" = "true" ]; then \
-        ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+        rm -f /etc/localtime && \
+        install -Dm644 /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+        echo "Asia/Shanghai" > /etc/timezone && \
         echo "zh_CN.UTF-8 UTF-8" >> /etc/locale.gen && \
         locale-gen && \
         echo "LANG=zh_CN.UTF-8" > /etc/locale.conf && \
