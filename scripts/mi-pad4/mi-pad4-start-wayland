@@ -347,6 +347,13 @@ if [[ "${1:-}" = session ]]; then
     --group PlasmaViews --group 'Panel 2' --key floating 0 2>/dev/null || true
   /usr/bin/kwriteconfig6 --file "$plasma_config_home/plasmashellrc" \
     --group PlasmaViews --group 'Panel 2' --key floatingApplets 0 2>/dev/null || true
+  # Existing Anland KWin builds expose the bridge as virtual PipeWire nodes.
+  # Plasma PA hides those by default, so keep them visible during upgrades too.
+  /usr/bin/kwriteconfig6 \
+    --file "$plasma_config_home/plasma-org.kde.plasma.desktop-appletsrc" \
+    --group Containments --group 2 --group Applets --group 5 --group Applets \
+    --group 7 --group Configuration --group General \
+    --key showVirtualDevices true 2>/dev/null || true
   export XDG_CONFIG_HOME="$plasma_config_home"
   export KDEWM='/usr/bin/bash /usr/local/bin/mi-pad4-kwin-wayland'
 

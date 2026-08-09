@@ -467,10 +467,14 @@ static int build_pw(struct anland_audio *a)
         return -1;
     pw_core_add_listener(a->core, &a->core_listener, &core_events, a);
 
-    /* Own a virtual sink so the container has a real output device instead of only
+    /* Own a sink so the container has a real output device instead of only
      * the auto-null "Dummy Output": apps play into this Audio/Sink, WirePlumber makes
      * it the default (high priority beats auto_null), and on_capture_process receives
-     * the mixed PCM directly -- no monitor capture, nothing bound to the dummy. */
+     * the mixed PCM directly -- no monitor capture, nothing bound to the dummy.
+     *
+     * Do not mark this user-facing endpoint as virtual. Plasma PA hides virtual
+     * devices by default, which made both Anland endpoints look missing even though
+     * PipeWire and pactl could already use them. */
     a->capture = pw_stream_new(a->core, "anland-speaker",
         pw_properties_new(
             PW_KEY_MEDIA_TYPE, "Audio",
@@ -478,7 +482,7 @@ static int build_pw(struct anland_audio *a)
             PW_KEY_NODE_NAME, "anland-speaker",
             PW_KEY_NODE_DESCRIPTION, "Anland remote speaker",
             PW_KEY_NODE_DRIVER, "true",
-            PW_KEY_NODE_VIRTUAL, "true",
+            PW_KEY_NODE_VIRTUAL, "false",
             PW_KEY_PRIORITY_SESSION, "1010",   /* outrank the auto-null dummy sink */
             PW_KEY_PRIORITY_DRIVER, "1010",
             NULL));
@@ -494,7 +498,7 @@ static int build_pw(struct anland_audio *a)
             PW_KEY_NODE_NAME, "anland-mic",
             PW_KEY_NODE_DESCRIPTION, "Anland remote microphone",
             PW_KEY_NODE_DRIVER, "true",
-            PW_KEY_NODE_VIRTUAL, "true",
+            PW_KEY_NODE_VIRTUAL, "false",
             PW_KEY_PRIORITY_SESSION, "1010",   /* outrank the auto-null dummy source */
             PW_KEY_PRIORITY_DRIVER, "1010",
             NULL));
