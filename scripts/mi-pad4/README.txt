@@ -10,7 +10,9 @@ For KernelSU/ReKSU enforcing mode, install `mi-pad4-sepolicy.rule` as the
 module's `sepolicy.rule`; it contains no `permissive` rule.
 Start the existing Ubuntu container, then open the Anland Android app.
 Audio is provided by Anland and the PipeWire/PulseAudio compatibility stack.
-Firefox uses msm_vidc hardware decoding for validated H.264 and HEVC streams.
+Firefox is source-built for Clover. H.264/HEVC frames pass directly from
+msm_vidc ION DMABUFs to WebRender; its legacy-KGSL retire wait prevents decoder
+buffer reuse before GPU sampling completes.
 
 This profile installs patched systemd 257 as PID 1. Set
 SYSTEMD_DROIDSPACES_COMPAT=1 (already exported by droidspaces-init) to disable

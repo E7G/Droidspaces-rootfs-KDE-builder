@@ -70,6 +70,22 @@ RUN printf '%s\n' \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
         kimageformats plasma-browser-integration plasma-mobile plasma-keyboard libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium firefox; \
     fi && \
+    # Replace the generic browser with the source-built Clover variant. Its
+    # decoded ION dmabufs go directly from msm_vidc to WebRender, with the
+    # missing Linux 4.4 KGSL completion ordering implemented in Firefox.
+    if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
+        cp /etc/pacman.conf /tmp/pacman-firefox.conf && \
+        sed -i '/^LocalFileSigLevel[[:space:]]*=/d; /^\[options\]$/a LocalFileSigLevel = Never' /tmp/pacman-firefox.conf && \
+        pacman --config /tmp/pacman-firefox.conf -U --noconfirm \
+            /tmp/local-packages-mi-pad4/firefox-153.0.3-1.1-aarch64.pkg.tar.* && \
+        rm -f /tmp/pacman-firefox.conf && \
+        mkdir -p /usr/share/droidspaces && \
+        printf '%s\n' \
+            'firefox=153.0.3-1.1' \
+            'video=msm_vidc-ion-dmabuf-webrender' \
+            'sync=legacy-kgsl-retire-wait' \
+            > /usr/share/droidspaces/firefox-clover-direct; \
+    fi && \
     # Arch 强制安装，但是这玩意不开硬件访问会导致桌面闪退
     if [ "$BUILD_KDE" = "conc" ] || [ "$BUILD_KDE" = "min" ] ; then \
         for service in /usr/share/dbus-1/services/org.freedesktop.portal*.service; do \

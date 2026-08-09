@@ -25,7 +25,87 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  firefox:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 720
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore Clover Firefox package
+        id: firefox-cache
+        uses: actions/cache@v4
+        with:
+          path: firefox-mi-pad4
+          key: firefox-clover-153.0.3-1.1-${{ hashFiles('scripts/mi-pad4/firefox/**') }}
+
+      - name: Build Firefox 153 for Clover
+        if: steps.firefox-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf .ci/firefox firefox-mi-pad4
+
+          git clone \
+            --depth 1 \
+            --branch 153.0.3-1 \
+            https://gitlab.archlinux.org/archlinux/packaging/packages/firefox.git \
+            .ci/firefox
+
+          cp \
+            scripts/mi-pad4/firefox/0002-mi-pad4-clover-direct-dmabuf.patch \
+            scripts/mi-pad4/firefox/customize-pkgbuild.py \
+            .ci/firefox/
+
+          (
+            cd .ci/firefox
+            python3 customize-pkgbuild.py
+          )
+
+          docker run \
+            --privileged \
+            --rm \
+            -v "$PWD/.ci/firefox:/src" \
+            lfdevs/archlinuxarm:base-devel \
+            bash -lc '
+              set -euo pipefail
+
+              pacman -Syyu --noconfirm
+              pacman -S --needed --noconfirm sudo base-devel git
+
+              useradd -m -s /bin/bash builder
+              echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
+              chmod 0440 /etc/sudoers.d/builder
+              chown -R builder:builder /src
+
+              sudo -u builder bash -lc "
+                set -euo pipefail
+                cd /src
+                makepkg -s --noconfirm --needed --skippgpcheck
+              "
+            '
+
+          mkdir -p firefox-mi-pad4
+          cp -v \
+            .ci/firefox/firefox-153.0.3-1.1-aarch64.pkg.tar.* \
+            firefox-mi-pad4/
+
+          sha256sum \
+            firefox-mi-pad4/firefox-153.0.3-1.1-aarch64.pkg.tar.* \
+            | tee firefox-mi-pad4/FIREFOX-SHA256SUMS
+
+      - name: Upload Clover Firefox package
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefox-mi-pad4
+          path: firefox-mi-pad4/
+          if-no-files-found: error
+          retention-days: 30
+
   build:
+    needs: firefox
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
 
@@ -165,6 +245,12 @@ jobs:
           sha256sum \
             local-packages-mi-pad4/*.pkg.tar.* \
             | tee local-packages-mi-pad4/SHA256SUMS
+
+      - name: Download Clover Firefox package
+        uses: actions/download-artifact@v4
+        with:
+          name: firefox-mi-pad4
+          path: local-packages-mi-pad4
 
       - name: Build Arch rootfs
         shell: bash
@@ -324,6 +410,7 @@ jobs:
             etc/systemd/system/multi-user.target.wants/mi-pad4-desktop.service \
             usr/local/bin/dolphin \
             usr/local/bin/mi-pad4-firefox \
+            usr/share/droidspaces/firefox-clover-direct \
             usr/local/lib/libion-legacy-shim.so \
             usr/local/lib/firefox-vaapi/libva-drm.so.2 \
             usr/lib/dri/v4l2_drv_video.so \
@@ -372,6 +459,22 @@ jobs:
             rootfs-files.txt \
             || {
               echo "Expected Pango 1:1.58.2-1 is not installed" >&2
+              exit 1
+            }
+
+          grep -Eq \
+            '^var/lib/pacman/local/firefox-153\.0\.3-1\.1/' \
+            rootfs-files.txt \
+            || {
+              echo "Expected Clover Firefox 153.0.3-1.1 is not installed" >&2
+              exit 1
+            }
+
+          tar_cat \
+            usr/share/droidspaces/firefox-clover-direct \
+            | grep -Fxq 'sync=legacy-kgsl-retire-wait' \
+            || {
+              echo "Missing Clover Firefox DMABUF synchronization marker" >&2
               exit 1
             }
 

@@ -1,0 +1,105 @@
+diff --git a/dom/media/platforms/ffmpeg/FFmpegVideoFramePool.cpp b/dom/media/platforms/ffmpeg/FFmpegVideoFramePool.cpp
+index 36f39d1d5f27..ccb06f99c113 100644
+--- a/dom/media/platforms/ffmpeg/FFmpegVideoFramePool.cpp
++++ b/dom/media/platforms/ffmpeg/FFmpegVideoFramePool.cpp
+@@ -7,8 +7,6 @@
+ #include "FFmpegLog.h"
+ #include "PlatformDecoderModule.h"
+ #include "libavutil/pixfmt.h"
+-#include "mozilla/StaticPrefs_media.h"
+-#include "mozilla/gfx/gfxVars.h"
+ #include "mozilla/widget/DMABufDevice.h"
+ #include "mozilla/widget/va_drmcommon.h"
+ 
+@@ -28,10 +28,6 @@ extern mozilla::LazyLogModule gDmabufLog;
+ #  define DMABUF_LOG(args)
+ #endif /* MOZ_LOGGING */
+ 
+-// Start copying surfaces when free ffmpeg surface count is below 1/4 of all
+-// available surfaces.
+-#define SURFACE_COPY_THRESHOLD (1.0f / 4.0f)
+-
+ constexpr static VASurfaceID sInvalidFFMPEGSurfaceID = -1;
+ 
+ namespace mozilla {
+@@ -235,41 +231,18 @@ VideoFramePool<LIBAV_VER>::GetFreeVideoFrameSurfaceLocked(
+ }
+ 
+ bool VideoFramePool<LIBAV_VER>::ShouldCopySurface() {
+-  // Number of used HW surfaces.
+-  int surfacesUsed = 0;
+-  int surfacesUsedFFmpeg = 0;
+-  for (const auto& surface : mDMABufSurfaces) {
+-    if (surface->IsUsedByRenderer()) {
+-      surfacesUsed++;
+-      if (surface->IsFFMPEGSurface()) {
+-        DMABUF_LOG("Used HW surface UID {} FFMPEG ID 0x{:x}\n",
+-                   surface->mSurface->GetUID(), surface->mFFMPEGSurfaceID);
+-        surfacesUsedFFmpeg++;
+-      }
+-    } else {
+-      if (surface->IsFFMPEGSurface()) {
+-        DMABUF_LOG("Free HW surface UID {} FFMPEG ID 0x{:x}\n",
+-                   surface->mSurface->GetUID(), surface->mFFMPEGSurfaceID);
+-      }
+-    }
+-  }
+-
+-  // mMaxFFMPEGPoolSize can be zero for dynamic pools,
+-  // we don't do copy in that case unless it's requested by HW setup.
+-  float freeRatio =
+-      mMaxFFMPEGPoolSize
+-          ? 1.0f - (surfacesUsedFFmpeg / (float)mMaxFFMPEGPoolSize)
+-          : 1.0;
+-  DMABUF_LOG(
+-      "Surface pool size {} used copied {} used ffmpeg {} (max {}) free ratio "
+-      "{}",
+-      static_cast<int>(mDMABufSurfaces.Length()),
+-      surfacesUsed - surfacesUsedFFmpeg, surfacesUsedFFmpeg, mMaxFFMPEGPoolSize,
+-      freeRatio);
+-  if (!gfx::gfxVars::HwDecodedVideoZeroCopy()) {
+-    return true;
+-  }
+-  return freeRatio < SURFACE_COPY_THRESHOLD;
++  // Clover's msm_vidc CAPTURE queue already provides Venus NV12 in ION
++  // dmabufs. Copying it into a second GPU surface costs bandwidth twice and
++  // is the main source of dropped frames at the tablet's native resolution.
++  // Keep the decoder-owned VA surface pinned by VideoFrameSurface and import
++  // it directly. RenderDMABUFTextureHost performs the missing legacy-KGSL
++  // completion wait before releasing the cross-process reference.
++  //
++  // This browser package is built only for Xiaomi clover, so remove the
++  // generic pool-pressure copy policy instead of hiding the path behind a
++  // preference. Existing UpdateYUVData failure handling remains the
++  // compatibility fallback for unsupported descriptors.
++  return false;
+ }
+ 
+ RefPtr<VideoFrameSurface<LIBAV_VER>>
+diff --git a/gfx/webrender_bindings/RenderDMABUFTextureHost.cpp b/gfx/webrender_bindings/RenderDMABUFTextureHost.cpp
+index 027a6c7a7069..1358a0671055 100644
+--- a/gfx/webrender_bindings/RenderDMABUFTextureHost.cpp
++++ b/gfx/webrender_bindings/RenderDMABUFTextureHost.cpp
+@@ -80,6 +80,22 @@ gfx::IntSize RenderDMABUFTextureHost::GetSize(uint8_t aChannelIndex) const {
+ void RenderDMABUFTextureHost::Unlock() {}
+ 
+ void RenderDMABUFTextureHost::DeleteTextureHandle() {
++  // Linux 4.4 KGSL/ION has no dma_resv based implicit fence propagation
++  // between freedreno and msm_vidc. Without a completion wait the RDD process
++  // observes the global dmabuf reference dropping, requeues the CAPTURE buffer
++  // and the decoder overwrites NV12 while WebRender is still sampling it.
++  // Resolution switches and 1080p playback then show split green/magenta
++  // frames.
++  //
++  // Wait only when retiring a decoded YUV texture. The wait happens after the
++  // last WebRender use and before DMABufSurface's cross-process reference is
++  // released. UI/RGBA surfaces and steady-state texture sampling are not
++  // serialized. Modern kernels normally obtain this ordering from implicit
++  // dma-buf fences; Clover needs it explicitly.
++  if (mGL && mSurface->GetAsDMABufSurfaceYUV() && mGL->MakeCurrent()) {
++    mGL->fFinish();
++  }
++
+   mSurface->ReleaseTextures();
+ }
+ 

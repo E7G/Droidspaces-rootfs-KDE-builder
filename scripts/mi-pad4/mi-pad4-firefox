@@ -100,9 +100,6 @@ user_pref("accessibility.force_disabled", 1);
 user_pref("media.hardware-video-decoding.enabled", true);
 user_pref("media.hardware-video-decoding.force-enabled", true);
 user_pref("media.ffmpeg.vaapi.enabled", true);
-// msm_vidc's Venus buffers cannot be imported reliably by legacy KGSL.
-// Keep decode in hardware but copy completed frames into WebRender textures.
-user_pref("media.ffmpeg.vaapi.force-surface-zero-copy", 0);
 user_pref("media.ffvpx.enabled", true);
 user_pref("media.ffvpx.hw.enabled", false);
 user_pref("media.rdd-ffmpeg.enabled", true);
