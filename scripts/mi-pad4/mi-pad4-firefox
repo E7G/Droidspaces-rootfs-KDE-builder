@@ -2,60 +2,17 @@
 
 set -u
 
-# Plasma uses software Qt rendering on the 4.4/KGSL desktop path. Firefox has
-# its own GTK/Wayland renderer; inheriting LIBGL_ALWAYS_SOFTWARE makes page
-# scrolling and video decoding needlessly CPU-bound.
+# Firefox 153 corrupts animated/video surfaces on the legacy KGSL stack even
+# after dmabuf export is disabled. Keep Firefox on SWGL/SHM; KWin still uses
+# KGSL for final desktop composition.
 export MOZ_ENABLE_WAYLAND=1
 export GDK_BACKEND=wayland
-export LIBVA_DRIVER_NAME=v4l2
-export LIBVA_DRIVERS_PATH=/usr/lib/dri
-export LIBVA_V4L2_VIDEO_PATH=/dev/video32
-export LIBVA_DRM_X11_DISPLAY="${DISPLAY:-:0}"
-export LD_LIBRARY_PATH="/usr/local/lib/firefox-vaapi${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export EGL_PLATFORM=wayland
-export MOZ_DRM_DEVICE=/dev/dri/renderD128
-# Plasma's session DISPLAY is not the Xwayland display used by the VA shim.
-# Read both values from the live Xwayland process; selecting the first xauth
-# file is unsafe because fast restarts leave many stale files behind.
-xwayland_pid="$(pgrep -n -x Xwayland 2>/dev/null || true)"
-xwayland_has_xauth=0
-if [[ -n "$xwayland_pid" ]]; then
-    xwayland_env="$(strings "/proc/$xwayland_pid/environ" 2>/dev/null || true)"
-    xwayland_display="$(printf '%s\n' "$xwayland_env" | sed -n 's/^DISPLAY=//p' | head -n 1)"
-    if printf '%s\n' "$xwayland_env" | grep -q '^XAUTHORITY='; then
-        xwayland_has_xauth=1
-        xwayland_xauth="$(printf '%s\n' "$xwayland_env" | sed -n 's/^XAUTHORITY=//p' | head -n 1)"
-    else
-        xwayland_xauth=
-    fi
-    if [[ -n "$xwayland_display" ]]; then
-        export DISPLAY="$xwayland_display"
-        export LIBVA_DRM_X11_DISPLAY="$xwayland_display"
-    fi
-    if [[ "$xwayland_has_xauth" = 1 ]]; then
-        if [[ -n "$xwayland_xauth" ]]; then
-            export XAUTHORITY="$xwayland_xauth"
-        else
-            unset XAUTHORITY
-        fi
-    fi
-fi
-if [[ "$xwayland_has_xauth" = 0 && -z "${XAUTHORITY:-}" ]]; then
-    XAUTHORITY="$(find "${XDG_RUNTIME_DIR:-/tmp/droidspaces-runtime/user-0}" -maxdepth 1 -name 'xauth_*' -type f -print -quit 2>/dev/null || true)"
-fi
-[[ -n "${XAUTHORITY:-}" ]] && export XAUTHORITY
-export DISPLAY="${DISPLAY:-:0}"
-# Firefox is launched by plasmashell, not by KWin's KGSL environment. Select
-# the patched freedreno path explicitly so Wayland compositing does not fall
-# back to llvmpipe/software EGL.
-export MESA_LOADER_DRIVER_OVERRIDE=kgsl
-export FD_FORCE_KGSL=1
-export FD_KGSL_ENABLE_DMABUF=1
-export XWAYLAND_FORCE_KGSL_SURFACELESS=1
-# RDD's generic seccomp policy blocks legacy ION and Qualcomm private V4L2
-# ioctls. This only disables the dedicated media-process sandbox.
-export MOZ_DISABLE_RDD_SANDBOX=1
-unset LIBGL_ALWAYS_SOFTWARE
+unset EGL_PLATFORM MOZ_DRM_DEVICE
+unset LIBVA_DRIVER_NAME LIBVA_DRIVERS_PATH LIBVA_V4L2_VIDEO_PATH
+unset LIBVA_DRM_X11_DISPLAY MOZ_DISABLE_RDD_SANDBOX
+unset MESA_LOADER_DRIVER_OVERRIDE FD_FORCE_KGSL FD_KGSL_ENABLE_DMABUF
+unset XWAYLAND_FORCE_KGSL_SURFACELESS
+export LIBGL_ALWAYS_SOFTWARE=1
 unset QT_QUICK_BACKEND
 unset QT_OPENGL
 
@@ -80,19 +37,18 @@ user_pref("browser.urlbar.speculativeConnect.enabled", false);
 user_pref("toolkit.cosmeticAnimations.enabled", false);
 user_pref("ui.prefersReducedMotion", 1);
 user_pref("layout.frame_rate", 30);
-user_pref("media.hardware-video-decoding.enabled", true);
-user_pref("media.hardware-video-decoding.force-enabled", true);
-user_pref("media.ffmpeg.vaapi.enabled", true);
-user_pref("media.ffvpx.enabled", false);
-user_pref("media.ffvpx.hw.enabled", true);
+user_pref("media.hardware-video-decoding.enabled", false);
+user_pref("media.hardware-video-decoding.force-enabled", false);
+user_pref("media.ffmpeg.vaapi.enabled", false);
+user_pref("media.ffvpx.enabled", true);
+user_pref("media.ffvpx.hw.enabled", false);
 user_pref("media.rdd-ffmpeg.enabled", true);
 user_pref("media.av1.enabled", false);
 user_pref("gfx.webrender.all", false);
 user_pref("gfx.webrender.force-disabled", false);
-user_pref("gfx.webrender.software", false);
-// Firefox 153's Wayland dmabuf buffers corrupt/flicker on the legacy KGSL
-// synchronization path. Use stable SHM presentation; VA-API stays enabled and
-// decoded frames are copied instead of exported as dmabufs.
+user_pref("gfx.webrender.software", true);
+// Firefox 153's GPU-rendered and hardware-decoded surfaces corrupt/flicker on
+// the legacy KGSL synchronization path. Use stable SWGL/SHM presentation.
 user_pref("gfx.webrender.compositor", false);
 user_pref("gfx.webrender.compositor.force-enabled", false);
 user_pref("widget.dmabuf.force-enabled", false);
