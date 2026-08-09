@@ -67,10 +67,11 @@ jobs:
           # Rust LTO/PGO peaks above runner RAM while linking libxul on arm64.
           # Keep PGO instead of shipping a slower build; provide swap and cap
           # compile fan-out so the kernel does not SIGKILL rustc.
-          sudo fallocate -l 16G /swapfile
-          sudo chmod 0600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          swapfile=/mnt/firefox-build.swap
+          sudo fallocate -l 16G "$swapfile"
+          sudo chmod 0600 "$swapfile"
+          sudo mkswap "$swapfile"
+          sudo swapon "$swapfile"
           free -h
 
           docker run \
