@@ -61,7 +61,9 @@ fi
 
 cat >"$profile/user.js" <<'EOF'
 // Mi Pad 4: keep Firefox responsive with 4 GB RAM and a 4.4 kernel.
-user_pref("dom.ipc.processCount", 1);
+// Two content processes keep a heavy tab from blocking the whole browser while
+// remaining small enough for the tablet's 4 GB RAM.
+user_pref("dom.ipc.processCount", 2);
 user_pref("dom.ipc.processCount.webIsolated", 1);
 user_pref("dom.ipc.processPrelaunch.enabled", false);
 user_pref("fission.autostart", false);
@@ -116,7 +118,10 @@ user_pref("gfx.webrender.allow-partial-present-buffer-age", false);
 user_pref("gfx.webrender.force-partial-present", false);
 user_pref("gfx.webrender.compositor", false);
 user_pref("gfx.webrender.compositor.force-enabled", false);
-user_pref("widget.dmabuf.force-enabled", true);
+// Do not force Firefox's window-wide dmabuf path: it presents stale buffers on
+// Clover's legacy KGSL sync implementation and causes full-window flashing.
+// VA-API remains enabled and uses its explicit copy path above.
+user_pref("widget.dmabuf.force-enabled", false);
 user_pref("widget.dmabuf-webgl.enabled", false);
 user_pref("widget.wayland.vsync.enabled", true);
 user_pref("widget.wayland.opaque-region.enabled", false);
