@@ -18,15 +18,22 @@ def replace_once(old: str, new: str) -> None:
 
 replace_once("pkgrel=1\n", "pkgrel=1.1\n")
 replace_once("arch=(x86_64)\n", "arch=(aarch64)\n")
+replace_once("  onnxruntime\n", "")
 replace_once(
     "ac_add_options --enable-crashreporter\n",
     "ac_add_options --disable-crashreporter\n"
-    "ac_add_options --disable-debug-symbols\n",
+    "ac_add_options --disable-debug-symbols\n"
+    "ac_add_options --without-onnx-runtime\n",
 )
 replace_once(
     '  echo -n "$_google_api_key" >google-api-key\n',
     '  patch -Np1 <../0002-mi-pad4-clover-direct-dmabuf.patch\n\n'
     '  echo -n "$_google_api_key" >google-api-key\n',
+)
+replace_once(
+    "  # Link up system ONNX runtime\n"
+    '  ln -srv "$pkgdir/usr/lib/libonnxruntime.so" -t "$appdir"\n\n',
+    "",
 )
 
 path.write_text(text)
