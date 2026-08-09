@@ -290,6 +290,10 @@ install_program() {
 
     cat > /usr/bin/usb-manager <<'EOF'
 #!/usr/bin/env bash
+# PyQt5's Wayland platform plugin aborts during QGuiApplication startup with
+# the Plasma 6 software-rendering environment used by the Mi Pad 4 session.
+# Give Qt a supported Xwayland fallback instead of crashing the launcher.
+export QT_QPA_PLATFORM='wayland;xcb'
 exec python3 /usr/share/usb-manager/usb-manager.py "$@"
 EOF
     chmod 0755 /usr/bin/usb-manager

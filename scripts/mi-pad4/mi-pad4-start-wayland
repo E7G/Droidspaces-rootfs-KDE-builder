@@ -35,11 +35,11 @@ export XKB_DEFAULT_RULES=evdev
 export XKB_DEFAULT_MODEL=pc105
 export XKB_DEFAULT_LAYOUT=us
 unset XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS
-export XMODIFIERS=@im=fcitx
-export GTK_IM_MODULE=fcitx
-export QT_IM_MODULE=fcitx
-export SDL_IM_MODULE=fcitx
-export GLFW_IM_MODULE=fcitx
+# Plasma Keyboard talks to KWin over the Wayland text-input/input-method
+# protocols.  Global Fcitx toolkit modules bypass that path, trigger Fcitx's
+# Wayland diagnostic popup, and can make candidate windows flicker.
+unset XMODIFIERS GTK_IM_MODULE QT_IM_MODULE SDL_IM_MODULE GLFW_IM_MODULE
+export QT_IM_MODULES=wayland
 export LIBGL_ALWAYS_SOFTWARE=1
 export QT_QUICK_BACKEND=software
 export QT_OPENGL=software
@@ -104,7 +104,7 @@ fi
 # HOME is an Android bind mount, not /home/user. Apply profile defaults once per
 # revision so upgrades can repair known-bad Plasma state without resetting user
 # changes on every start.
-profile_revision=20260809-3
+profile_revision=20260810-1
 profile_stamp="$HOME/.config/.mi-pad4-profile-revision"
 profile_defaults=/usr/share/droidspaces/mi-pad4-profile
 if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; then
@@ -159,6 +159,11 @@ if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; t
   rm -f "$HOME"/.cache/drkonqi/application-not-responding/dolphin.*.json 2>/dev/null || true
   printf '%s\n' "$profile_revision" >"$profile_stamp"
 fi
+
+# Plasma Keyboard is started by KWin as its privileged Wayland input-method
+# client.  Remove the old standalone Fcitx autostart entry; it has no KWin
+# WAYLAND_SOCKET and conflicts with the compositor-owned on-screen keyboard.
+rm -f "$HOME/.config/autostart/fcitx5.desktop" 2>/dev/null || true
 
 # KIO worker sockets and Dolphin session state are transient. Clean them on
 # every container start, including upgrades where the profile stamp matches.
@@ -331,6 +336,14 @@ if [[ "${1:-}" = session ]]; then
     /usr/bin/kwriteconfig6 --file "$plasma_config_home/kwinrc" \
       --group Plugins --key "${effect}Enabled" false 2>/dev/null || true
   done
+  # Equivalent to selecting Plasma Keyboard in its Virtual Keyboard KCM. Mode 2
+  # allows the keyboard for both touch and pointer-focused text fields, which is
+  # required because Anland can report synthesized pointer input for a tap.
+  /usr/bin/kwriteconfig6 --file "$plasma_config_home/kwinrc" \
+    --group Wayland --key InputMethod \
+    /usr/share/applications/org.kde.plasma.keyboard.desktop 2>/dev/null || true
+  /usr/bin/kwriteconfig6 --file "$plasma_config_home/kwinrc" \
+    --group Wayland --key VirtualKeyboardMode 2 2>/dev/null || true
   export XDG_CONFIG_HOME="$plasma_config_home"
   export KDEWM='/usr/bin/bash /usr/local/bin/mi-pad4-kwin-wayland'
 
