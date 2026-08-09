@@ -22,6 +22,7 @@
 #define DEFAULT_RATE          48000
 #define DEFAULT_PLAY_CHANNELS 2
 #define DEFAULT_CAP_CHANNELS  1
+#define DEFAULT_QUANTUM       480
 /* ~1s of stereo S16 mic audio; bounds added latency, old samples drop on overflow.
  * Sized for the worst case (stereo) so the ring never under-allocates. */
 #define MIC_RING_BYTES        (48000 * 2 * (int)sizeof(int16_t))
@@ -35,6 +36,8 @@ struct anland_audio {
     struct pw_core        *core;
     struct spa_hook        core_listener;
     struct spa_source     *reconnect_timer;
+    struct spa_source     *capture_timer;
+    struct spa_source     *source_timer;
     bool                   pw_connected;   /* core + streams are up */
 
     struct pw_stream      *capture;   /* virtual Audio/Sink  -> socket (playback) */
@@ -68,6 +71,7 @@ static int connect_stream(struct pw_stream *stream, enum spa_direction direction
 static const struct spa_pod *build_format(struct spa_pod_builder *bld,
                                           uint32_t rate, uint32_t channels);
 static void set_latency(struct pw_stream *stream, uint32_t quantum, uint32_t rate);
+static void update_driver_timer(struct anland_audio *a, bool playback, bool enabled);
 
 /* ---- mic ring buffer (single-threaded: loop thread only) ---- */
 
@@ -161,13 +165,80 @@ static void on_source_process(void *data)
     pw_stream_queue_buffer(a->source, b);
 }
 
+/* A PipeWire driver represents a hardware clock. Anland has no ALSA device whose
+ * interrupt could advance the graph, so generate that clock from the negotiated
+ * period. Without this trigger links look active but no process callback ever runs. */
+static void on_capture_timer(void *data, uint64_t expirations)
+{
+    struct anland_audio *a = data;
+    (void)expirations;
+    if (a->capture)
+        pw_stream_trigger_process(a->capture);
+}
+
+static void on_source_timer(void *data, uint64_t expirations)
+{
+    struct anland_audio *a = data;
+    (void)expirations;
+    if (a->source)
+        pw_stream_trigger_process(a->source);
+}
+
+static void update_driver_timer(struct anland_audio *a, bool playback, bool enabled)
+{
+    struct spa_source *timer = playback ? a->capture_timer : a->source_timer;
+    if (!timer)
+        return;
+
+    if (!enabled) {
+        pw_loop_update_timer(pw_thread_loop_get_loop(a->loop), timer,
+                             NULL, NULL, false);
+        return;
+    }
+
+    const uint32_t rate = playback ? a->play_rate : a->cap_rate;
+    const uint32_t quantum = playback ? a->play_quantum : a->cap_quantum;
+    uint64_t period_ns = 1000000000ULL * (quantum ? quantum : DEFAULT_QUANTUM) /
+                         (rate ? rate : DEFAULT_RATE);
+    if (period_ns < 1000000ULL)
+        period_ns = 1000000ULL;
+
+    struct timespec first = { .tv_sec = 0, .tv_nsec = 1 };
+    struct timespec interval = {
+        .tv_sec = (time_t)(period_ns / 1000000000ULL),
+        .tv_nsec = (long)(period_ns % 1000000000ULL),
+    };
+    pw_loop_update_timer(pw_thread_loop_get_loop(a->loop), timer,
+                         &first, &interval, false);
+}
+
+static void on_capture_state_changed(void *data, enum pw_stream_state old,
+                                     enum pw_stream_state state, const char *error)
+{
+    struct anland_audio *a = data;
+    (void)old;
+    (void)error;
+    update_driver_timer(a, true, state == PW_STREAM_STATE_STREAMING);
+}
+
+static void on_source_state_changed(void *data, enum pw_stream_state old,
+                                    enum pw_stream_state state, const char *error)
+{
+    struct anland_audio *a = data;
+    (void)old;
+    (void)error;
+    update_driver_timer(a, false, state == PW_STREAM_STATE_STREAMING);
+}
+
 static const struct pw_stream_events capture_events = {
     PW_VERSION_STREAM_EVENTS,
+    .state_changed = on_capture_state_changed,
     .process = on_capture_process,
 };
 
 static const struct pw_stream_events source_events = {
     PW_VERSION_STREAM_EVENTS,
+    .state_changed = on_source_state_changed,
     .process = on_source_process,
 };
 
@@ -226,6 +297,9 @@ static void apply_format(struct anland_audio *a, const struct audio_format *f)
         /* Latency-only tweak: node.latency in place, nothing renegotiates. */
         set_latency(stream, f->quantum, rate);
     }
+
+    if (pw_stream_get_state(stream, NULL) == PW_STREAM_STATE_STREAMING)
+        update_driver_timer(a, playback, true);
 }
 
 /* Stop polling a disconnected borrowed fd. EPOLLHUP is level-triggered, so leaving
@@ -366,6 +440,8 @@ static int connect_stream(struct pw_stream *stream, enum spa_direction direction
  * ring and audio-socket io source intact. Idempotent. */
 static void teardown_pw(struct anland_audio *a)
 {
+    update_driver_timer(a, true, false);
+    update_driver_timer(a, false, false);
     if (a->capture) {
         spa_hook_remove(&a->capture_listener);
         pw_stream_destroy(a->capture);
@@ -513,6 +589,12 @@ int anland_audio_start(void)
                                            on_reconnect_timer, a);
     if (!a->reconnect_timer)
         goto fail;
+    a->capture_timer = pw_loop_add_timer(pw_thread_loop_get_loop(a->loop),
+                                         on_capture_timer, a);
+    a->source_timer = pw_loop_add_timer(pw_thread_loop_get_loop(a->loop),
+                                        on_source_timer, a);
+    if (!a->capture_timer || !a->source_timer)
+        goto fail;
 
     if (pw_thread_loop_start(a->loop) < 0)
         goto fail;
@@ -557,6 +639,10 @@ void anland_audio_stop(void)
         pw_loop_destroy_source(pw_thread_loop_get_loop(a->loop), a->io);
     if (a->reconnect_timer)
         pw_loop_destroy_source(pw_thread_loop_get_loop(a->loop), a->reconnect_timer);
+    if (a->capture_timer)
+        pw_loop_destroy_source(pw_thread_loop_get_loop(a->loop), a->capture_timer);
+    if (a->source_timer)
+        pw_loop_destroy_source(pw_thread_loop_get_loop(a->loop), a->source_timer);
     if (a->context)
         pw_context_destroy(a->context);
     if (a->loop)
