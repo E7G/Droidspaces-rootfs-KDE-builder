@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=文件管理器
+Name[en]=File Manager
+Comment=轻量稳定的文件管理器
+Comment[en]=Lightweight stable file manager
+Exec=/usr/local/bin/mi-pad4-file-manager %U
+Icon=system-file-manager
+Terminal=false
+StartupNotify=true
+Categories=FileManager;Utility;Core;Qt;
+MimeType=inode/directory;
+X-KDE-SubstituteUID=false

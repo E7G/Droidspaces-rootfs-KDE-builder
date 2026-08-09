@@ -263,7 +263,7 @@ if [[ "${1:-}" = child ]]; then
   /usr/bin/pkill -KILL -f '^/usr/sbin/kwin_wayland_wrapper( |$)' 2>/dev/null || true
   /usr/bin/pkill -KILL -f '^/usr/(sbin|bin)/kded6( |$)' 2>/dev/null || true
   /usr/bin/pkill -KILL -f '^/usr/bin/startplasma-wayland( |$)' 2>/dev/null || true
-  for process in kwin_wayland Xwayland plasmashell plasma_session ksmserver; do
+  for process in kwin_wayland Xwayland plasmashell plasma_session ksmserver dolphin pcmanfm-qt; do
     /usr/bin/pkill -KILL -x "$process" 2>/dev/null || true
   done
   mkdir -p "$XDG_RUNTIME_DIR" "$HOME" 2>/dev/null || true

@@ -1,0 +1,15 @@
+#!/bin/bash
+set -u
+
+config_root="${XDG_CONFIG_HOME:-${HOME:-/tmp/droidspaces-home}/.config}"
+profile=/usr/share/droidspaces/mi-pad4-profile/pcmanfm-qt-settings.conf
+mkdir -p "$config_root/pcmanfm-qt/default"
+if [[ -s "$profile" ]]; then
+    cp -f "$profile" "$config_root/pcmanfm-qt/default/settings.conf"
+fi
+
+if (( $# == 0 )); then
+    set -- "${HOME:-/tmp/droidspaces-home}"
+fi
+
+exec /usr/bin/pcmanfm-qt "$@"

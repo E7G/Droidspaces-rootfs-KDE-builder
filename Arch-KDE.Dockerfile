@@ -60,13 +60,13 @@ RUN printf '%s\n' \
     if [ "$BUILD_KDE" = "min" ]; then \
         pacman -S --noconfirm --needed \
         xorg-xrandr xkeyboard-config noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
-        dolphin kate kinfocenter mesa-utils libpulse vulkan-tools firefox; \
+        dolphin pcmanfm-qt kate kinfocenter mesa-utils libpulse vulkan-tools firefox; \
     fi && \
     # 精简KDE
     if [ "$BUILD_KDE" = "conc" ]; then \
         pacman -S --noconfirm --needed \
         xorg-xrandr xkeyboard-config noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
-        dolphin kate kinfocenter mesa-utils libpulse vulkan-tools aha clinfo dmidecode wayland-utils xorg-server \
+        dolphin pcmanfm-qt kate kinfocenter mesa-utils libpulse vulkan-tools aha clinfo dmidecode wayland-utils xorg-server \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
         kimageformats plasma-browser-integration plasma-mobile plasma-keyboard libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium firefox; \
     fi && \
@@ -247,7 +247,10 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         mkdir -p /etc/systemd/system/multi-user.target.wants && \
         ln -sfn ../dbus.service /etc/systemd/system/multi-user.target.wants/dbus.service && \
         ln -sfn ../mi-pad4-desktop.service /etc/systemd/system/multi-user.target.wants/mi-pad4-desktop.service && \
-        install -Dm755 /tmp/mi-pad4/dolphin-safe /usr/local/bin/dolphin && \
+        install -Dm755 /tmp/mi-pad4/mi-pad4-file-manager /usr/local/bin/mi-pad4-file-manager && \
+        ln -sfn mi-pad4-file-manager /usr/local/bin/dolphin && \
+        install -Dm644 /tmp/mi-pad4/org.kde.dolphin.desktop /usr/local/share/applications/org.kde.dolphin.desktop && \
+        install -Dm644 /tmp/mi-pad4/pcmanfm-qt-settings.conf /usr/share/droidspaces/mi-pad4-profile/pcmanfm-qt-settings.conf && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
         install -Dm644 /tmp/mi-pad4/dolphinrc /usr/share/droidspaces/mi-pad4-profile/dolphinrc && \
         install -Dm644 /tmp/mi-pad4/dolphin-global-viewproperties /usr/share/droidspaces/mi-pad4-profile/dolphin-global-viewproperties && \
