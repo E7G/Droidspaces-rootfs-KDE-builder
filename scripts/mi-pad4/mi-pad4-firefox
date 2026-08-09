@@ -8,8 +8,17 @@ export MOZ_ENABLE_WAYLAND=1
 export GDK_BACKEND=wayland
 export EGL_PLATFORM=wayland
 export MOZ_DRM_DEVICE=/dev/dri/renderD128
-unset LIBVA_DRIVER_NAME LIBVA_DRIVERS_PATH LIBVA_V4L2_VIDEO_PATH
-unset LIBVA_DRM_X11_DISPLAY MOZ_DISABLE_RDD_SANDBOX
+# Route H.264/HEVC through the stateful V4L2 VA-API driver and Clover's
+# Qualcomm decoder. The driver uses X11 only to obtain a DRM display handle;
+# Firefox itself remains a native Wayland client.
+export LIBVA_DRIVER_NAME=v4l2
+export LIBVA_DRIVERS_PATH=/usr/lib/dri
+export LIBVA_V4L2_VIDEO_PATH=/dev/video32
+export LIBVA_DRM_X11_DISPLAY="${DISPLAY:-:0}"
+export LD_LIBRARY_PATH="/usr/local/lib/firefox-vaapi${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# Arch Firefox's generic RDD sandbox does not whitelist Qualcomm's legacy
+# msm_vidc and ION ioctls. This affects only the media decoder process.
+export MOZ_DISABLE_RDD_SANDBOX=1
 export MESA_LOADER_DRIVER_OVERRIDE=kgsl
 export FD_FORCE_KGSL=1
 export FD_KGSL_ENABLE_DMABUF=1
@@ -86,13 +95,18 @@ user_pref("general.smoothScroll", false);
 user_pref("apz.overscroll.enabled", false);
 user_pref("layout.frame_rate", -1);
 user_pref("accessibility.force_disabled", 1);
-user_pref("media.hardware-video-decoding.enabled", false);
-user_pref("media.hardware-video-decoding.force-enabled", false);
-user_pref("media.ffmpeg.vaapi.enabled", false);
+user_pref("media.hardware-video-decoding.enabled", true);
+user_pref("media.hardware-video-decoding.force-enabled", true);
+user_pref("media.ffmpeg.vaapi.enabled", true);
+// msm_vidc's Venus buffers cannot be imported reliably by legacy KGSL.
+// Keep decode in hardware but copy completed frames into WebRender textures.
+user_pref("media.ffmpeg.vaapi.force-surface-zero-copy", 0);
 user_pref("media.ffvpx.enabled", true);
 user_pref("media.ffvpx.hw.enabled", false);
 user_pref("media.rdd-ffmpeg.enabled", true);
 user_pref("media.av1.enabled", false);
+// Prefer H.264 on MSE sites such as YouTube; this decoder does not expose VP9.
+user_pref("media.mediasource.vp9.enabled", false);
 user_pref("gfx.color_management.mode", 0);
 user_pref("gfx.webrender.low-quality-pinch-zoom", true);
 // Full-frame presentation avoids stale/corrupt regions on legacy KGSL. Keep
@@ -102,6 +116,7 @@ user_pref("gfx.webrender.allow-partial-present-buffer-age", false);
 user_pref("gfx.webrender.force-partial-present", false);
 user_pref("gfx.webrender.compositor", false);
 user_pref("gfx.webrender.compositor.force-enabled", false);
+user_pref("widget.dmabuf.force-enabled", true);
 user_pref("widget.dmabuf-webgl.enabled", false);
 user_pref("widget.wayland.vsync.enabled", true);
 user_pref("widget.wayland.opaque-region.enabled", false);
