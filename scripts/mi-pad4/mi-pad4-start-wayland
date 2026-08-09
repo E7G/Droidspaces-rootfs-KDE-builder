@@ -341,6 +341,12 @@ if [[ "${1:-}" = session ]]; then
     --group Wayland --key InputMethod --delete 2>/dev/null || true
   /usr/bin/kwriteconfig6 --file "$plasma_config_home/kwinrc" \
     --group Wayland --key VirtualKeyboardMode 0 2>/dev/null || true
+  # Plasma 6 defaults to a floating panel, exposing a wallpaper-colored strip
+  # along the physical bottom edge. Use an edge-attached panel on this tablet.
+  /usr/bin/kwriteconfig6 --file "$plasma_config_home/plasmashellrc" \
+    --group PlasmaViews --group 'Panel 2' --key floating 0 2>/dev/null || true
+  /usr/bin/kwriteconfig6 --file "$plasma_config_home/plasmashellrc" \
+    --group PlasmaViews --group 'Panel 2' --key floatingApplets 0 2>/dev/null || true
   export XDG_CONFIG_HOME="$plasma_config_home"
   export KDEWM='/usr/bin/bash /usr/local/bin/mi-pad4-kwin-wayland'
 
