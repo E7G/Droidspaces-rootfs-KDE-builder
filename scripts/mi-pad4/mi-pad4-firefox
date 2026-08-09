@@ -2,17 +2,24 @@
 
 set -u
 
-# KGSL WebRender blanks or flickers while scrolling on the legacy explicit-sync
-# path. Use stable SWGL/SHM, paced by Wayland frame callbacks instead of a
-# latency-heavy fixed 30 Hz timer.
+# Use FD512/KGSL for WebRender. Full-frame presentation below avoids the stale
+# partial-buffer damage that caused flicker on the legacy explicit-sync path.
 export MOZ_ENABLE_WAYLAND=1
 export GDK_BACKEND=wayland
-unset EGL_PLATFORM MOZ_DRM_DEVICE
+export EGL_PLATFORM=wayland
+export MOZ_DRM_DEVICE=/dev/dri/renderD128
 unset LIBVA_DRIVER_NAME LIBVA_DRIVERS_PATH LIBVA_V4L2_VIDEO_PATH
 unset LIBVA_DRM_X11_DISPLAY MOZ_DISABLE_RDD_SANDBOX
-unset MESA_LOADER_DRIVER_OVERRIDE FD_FORCE_KGSL FD_KGSL_ENABLE_DMABUF
-unset XWAYLAND_FORCE_KGSL_SURFACELESS
-export LIBGL_ALWAYS_SOFTWARE=1
+export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+export FD_FORCE_KGSL=1
+export FD_KGSL_ENABLE_DMABUF=1
+# Firefox's generic Linux GPU sandbox does not allow legacy KGSL/ION private
+# ioctls. Keep content and network sandboxes intact; only the GPU process needs
+# direct access to the render node.
+export MOZ_DISABLE_GPU_SANDBOX=1
+export LD_PRELOAD="/usr/local/lib/libion-legacy-shim.so${LD_PRELOAD:+:$LD_PRELOAD}"
+unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER
+unset XWAYLAND_FORCE_KGSL_SURFACELESS MOZ_X11_EGL
 unset QT_QUICK_BACKEND
 unset QT_OPENGL
 
@@ -20,8 +27,29 @@ unset QT_OPENGL
 # sandbox/content-process startup on a kernel without close_range().
 ulimit -n 8192
 
-profile="${HOME:-/tmp/droidspaces-home}/.mozilla/firefox/mi-pad4.default-release"
+firefox_root="${HOME:-/tmp/droidspaces-home}/.mozilla/firefox"
+legacy_profile="$firefox_root/mi-pad4.default-release"
+profile="$firefox_root/mi-pad4.fd512"
 mkdir -p "$profile"
+
+# Start from clean runtime state: the old profile accumulated incompatible GPU,
+# extension and crash-session state. Migrate personal data once, but deliberately
+# leave preferences, extensions, caches and session restore behind.
+if [[ ! -e "$profile/.mi-pad4-migrated" ]]; then
+    for file in places.sqlite favicons.sqlite cookies.sqlite permissions.sqlite \
+                logins.json key4.db cert9.db; do
+        [[ -f "$legacy_profile/$file" ]] && cp -p "$legacy_profile/$file" "$profile/$file"
+    done
+    : >"$profile/.mi-pad4-migrated"
+fi
+
+# Remove only stale graphics overrides if this profile survives a future tuning
+# change; history, bookmarks, cookies and passwords stay untouched.
+prefs="$profile/prefs.js"
+if [[ -f "$prefs" ]]; then
+    sed -i -E '/^user_pref\("(gfx\.(webrender|canvas|x11-egl)|layers\.acceleration|webgl|widget\.(dmabuf|wayland))([."].*)/d' "$prefs"
+fi
+
 cat >"$profile/user.js" <<'EOF'
 // Mi Pad 4: keep Firefox responsive with 4 GB RAM and a 4.4 kernel.
 user_pref("dom.ipc.processCount", 1);
@@ -30,10 +58,16 @@ user_pref("dom.ipc.processPrelaunch.enabled", false);
 user_pref("fission.autostart", false);
 user_pref("browser.tabs.unloadOnLowMemory", true);
 user_pref("browser.sessionhistory.max_total_viewers", 2);
-user_pref("browser.cache.disk.capacity", 65536);
-user_pref("browser.cache.memory.capacity", 65536);
+// XDG_CACHE_HOME is a RAM-backed /run directory. A second 64 MiB "disk" cache
+// only increases memory pressure and swap I/O on this 4 GB device.
+user_pref("browser.cache.disk.enable", false);
+user_pref("browser.cache.disk.capacity", 0);
+user_pref("browser.cache.memory.capacity", 32768);
 user_pref("media.cache_size", 32768);
-user_pref("browser.sessionstore.interval", 60000);
+user_pref("browser.sessionstore.interval", 120000);
+user_pref("browser.sessionstore.max_tabs_undo", 3);
+user_pref("browser.sessionstore.max_windows_undo", 1);
+user_pref("browser.pagethumbnails.capturing_disabled", true);
 user_pref("toolkit.startup.max_resumed_crashes", 0);
 user_pref("browser.sessionstore.resume_from_crash", false);
 user_pref("browser.startup.page", 0);
@@ -59,16 +93,15 @@ user_pref("media.ffvpx.enabled", true);
 user_pref("media.ffvpx.hw.enabled", false);
 user_pref("media.rdd-ffmpeg.enabled", true);
 user_pref("media.av1.enabled", false);
-user_pref("gfx.webrender.all", true);
-user_pref("gfx.webrender.force-disabled", false);
-user_pref("gfx.webrender.software", true);
 user_pref("gfx.color_management.mode", 0);
-// Keep every Firefox surface on copied SHM. KWin still uses KGSL for final
-// desktop composition.
+user_pref("gfx.webrender.low-quality-pinch-zoom", true);
+// Full-frame presentation avoids stale/corrupt regions on legacy KGSL. Keep
+// native multi-plane composition and dmabuf WebGL/video surfaces disabled.
+user_pref("gfx.webrender.max-partial-present-rects", 0);
+user_pref("gfx.webrender.allow-partial-present-buffer-age", false);
+user_pref("gfx.webrender.force-partial-present", false);
 user_pref("gfx.webrender.compositor", false);
 user_pref("gfx.webrender.compositor.force-enabled", false);
-user_pref("widget.dmabuf.force-enabled", false);
-user_pref("widget.dmabuf.enabled", false);
 user_pref("widget.dmabuf-webgl.enabled", false);
 user_pref("widget.wayland.vsync.enabled", true);
 user_pref("widget.wayland.opaque-region.enabled", false);

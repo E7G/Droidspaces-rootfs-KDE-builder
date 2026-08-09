@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = kwin
+
+[Action]
+Description = Restoring the Mi Pad 4 Anland/KGSL KWin wrapper...
+When = PostTransaction
+Exec = /usr/bin/install -m755 /usr/local/libexec/mi-pad4-kwin-wayland-wrapper /usr/sbin/kwin_wayland_wrapper

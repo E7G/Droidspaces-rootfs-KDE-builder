@@ -238,7 +238,9 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         install -Dm755 /tmp/mi-pad4/droidspaces-init /sbin/droidspaces-init && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-start-wayland /usr/local/bin/mi-pad4-start-wayland && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland /usr/local/bin/mi-pad4-kwin-wayland && \
+        install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland-wrapper /usr/local/libexec/mi-pad4-kwin-wayland-wrapper && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland-wrapper /usr/sbin/kwin_wayland_wrapper && \
+        install -Dm644 /tmp/mi-pad4/mi-pad4-kwin-wrapper.hook /etc/pacman.d/hooks/mi-pad4-kwin-wrapper.hook && \
         ln -sfn ../xkeyboard-config-2 /usr/share/X11/xkb && \
         install -Dm644 /tmp/mi-pad4/mi-pad4-desktop.service /etc/systemd/system/mi-pad4-desktop.service && \
         install -Dm644 /tmp/mi-pad4/dbus-daemon.service /etc/systemd/system/dbus.service && \
@@ -294,6 +296,7 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
 RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh && \
         BUILD_KDE="$BUILD_KDE" /tmp/mi-pad4/build-arch-anland-kwin.sh && \
+        install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland-wrapper /usr/local/libexec/mi-pad4-kwin-wayland-wrapper && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland-wrapper /usr/sbin/kwin_wayland_wrapper; \
     else \
         printf '%s\n' 'patched-kwin=not-requested' > /usr/share/droidspaces/anland-kwin-package; \
