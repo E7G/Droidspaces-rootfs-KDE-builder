@@ -26,6 +26,7 @@ for package in (
     "wasi-libc++abi",
 ):
     replace_once(f"  {package}\n", "")
+replace_once("ac_add_options --with-wasi-sysroot=/usr/share/wasi-sysroot\n", "")
 replace_once(
     "ac_add_options --enable-crashreporter\n",
     "ac_add_options --disable-crashreporter\n"
