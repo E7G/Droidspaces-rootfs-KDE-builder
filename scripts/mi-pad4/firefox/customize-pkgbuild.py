@@ -45,4 +45,9 @@ replace_once(
     "",
 )
 
+build_command = "  ./mach build --priority normal\n"
+if text.count(build_command) != 2:
+    raise SystemExit("expected two Firefox build commands")
+text = text.replace(build_command, "  ./mach build -j2 --priority normal\n")
+
 path.write_text(text)
