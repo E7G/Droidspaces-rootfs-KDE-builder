@@ -124,6 +124,7 @@ void AnlandOutput::onConsumerReady()
     if (m_awaitingPresent) {
         m_awaitingPresent = false;
         completeFrame();
+        return;
     }
     // Do not unconditionally repaint here. Scene damage schedules its own frame,
     // and AnlandEglLayer schedules the extra frames needed to refresh every
@@ -131,6 +132,10 @@ void AnlandOutput::onConsumerReady()
     // a permanent 30 fps full-screen render loop on an otherwise idle desktop,
     // wasting CPU/GPU and rotating unchanged buffers (visible as intermittent
     // flashes on the legacy KGSL/ION stack).
+    // The one exception is an unsolicited ready event (normally the initial
+    // buffer-ready after connection): no frame is in flight, so schedule one
+    // repaint to publish scene changes that accumulated during startup.
+    m_renderLoop->scheduleRepaint();
 }
 
 void AnlandOutput::resize(const QSize &newSize)

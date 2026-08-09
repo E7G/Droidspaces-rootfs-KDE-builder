@@ -50,7 +50,7 @@ public:
     void setRefreshRate(int refresh);
 
     /** Consumer signalled buffer-ready (buf_ready_efd): complete the in-flight
-     *  frame. Scene/layer damage schedules another frame when one is needed. */
+     *  frame, or schedule one initial repaint if no frame was submitted. */
     void onConsumerReady();
 
     /** Reconfigure the output when the consumer uses a different buffer size
