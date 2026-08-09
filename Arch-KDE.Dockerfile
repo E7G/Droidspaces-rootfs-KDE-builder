@@ -59,7 +59,7 @@ RUN printf '%s\n' \
     # 最小化KDE
     if [ "$BUILD_KDE" = "min" ]; then \
         pacman -S --noconfirm --needed \
-        xorg-xrandr xkeyboard-config noto-fonts-cjk noto-fonts-emoji plasma-desktop plasma-keyboard pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
+        xorg-xrandr xkeyboard-config noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
         dolphin pcmanfm-qt kate kinfocenter mesa-utils libpulse vulkan-tools firefox; \
     fi && \
     # 精简KDE

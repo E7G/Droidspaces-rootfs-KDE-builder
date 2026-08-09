@@ -35,9 +35,9 @@ export XKB_DEFAULT_RULES=evdev
 export XKB_DEFAULT_MODEL=pc105
 export XKB_DEFAULT_LAYOUT=us
 unset XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS
-# Plasma Keyboard talks to KWin over the Wayland text-input/input-method
-# protocols.  Global Fcitx toolkit modules bypass that path, trigger Fcitx's
-# Wayland diagnostic popup, and can make candidate windows flicker.
+# Android's IME is bridged by Anland. Keep native Wayland text-input enabled so
+# KWin can notify the Anland backend when a Linux text field gains focus, while
+# avoiding a second Linux virtual keyboard and Fcitx candidate-window flicker.
 unset XMODIFIERS GTK_IM_MODULE QT_IM_MODULE SDL_IM_MODULE GLFW_IM_MODULE
 export QT_IM_MODULES=wayland
 export LIBGL_ALWAYS_SOFTWARE=1
@@ -160,9 +160,8 @@ if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; t
   printf '%s\n' "$profile_revision" >"$profile_stamp"
 fi
 
-# Plasma Keyboard is started by KWin as its privileged Wayland input-method
-# client.  Remove the old standalone Fcitx autostart entry; it has no KWin
-# WAYLAND_SOCKET and conflicts with the compositor-owned on-screen keyboard.
+# Android's keyboard is the only on-screen keyboard. Remove the old standalone
+# Fcitx autostart entry so it cannot compete for text-input focus.
 rm -f "$HOME/.config/autostart/fcitx5.desktop" 2>/dev/null || true
 
 # KIO worker sockets and Dolphin session state are transient. Clean them on
@@ -336,14 +335,12 @@ if [[ "${1:-}" = session ]]; then
     /usr/bin/kwriteconfig6 --file "$plasma_config_home/kwinrc" \
       --group Plugins --key "${effect}Enabled" false 2>/dev/null || true
   done
-  # Equivalent to selecting Plasma Keyboard in its Virtual Keyboard KCM. Mode 2
-  # allows the keyboard for both touch and pointer-focused text fields, which is
-  # required because Anland can report synthesized pointer input for a tap.
+  # Do not start a Linux virtual keyboard.  Anland forwards KWin's text-input
+  # activation to Android and commits Android IME text back into KWin.
   /usr/bin/kwriteconfig6 --file "$plasma_config_home/kwinrc" \
-    --group Wayland --key InputMethod \
-    /usr/share/applications/org.kde.plasma.keyboard.desktop 2>/dev/null || true
+    --group Wayland --key InputMethod --delete 2>/dev/null || true
   /usr/bin/kwriteconfig6 --file "$plasma_config_home/kwinrc" \
-    --group Wayland --key VirtualKeyboardMode 2 2>/dev/null || true
+    --group Wayland --key VirtualKeyboardMode 0 2>/dev/null || true
   export XDG_CONFIG_HOME="$plasma_config_home"
   export KDEWM='/usr/bin/bash /usr/local/bin/mi-pad4-kwin-wayland'
 

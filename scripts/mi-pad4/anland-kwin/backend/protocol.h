@@ -136,6 +136,10 @@ struct OutputEvent{
             uint32_t type;
             uint32_t args[3]; //support 3 args
         } resources_request;
+        struct {
+            uint32_t var;
+            uint32_t value;
+        } set_consumer_var;
         struct
         {
             uint32_t padding[4];
@@ -146,6 +150,10 @@ struct OutputEvent{
 
 #define OUTPUT_TYPE_CLIPBOARD 1
 #define OUTPUT_TYPE_RESOURCES_REQUEST 2
+#define OUTPUT_TYPE_SET_CONSUMER_VAR 3
+
+#define CONSUMER_VAR_CAPTURE_MOUSE 1
+#define CONSUMER_VAR_ANDROID_IME 2
 
 /*
  * Audio runs on its own dedicated bidirectional socketpair (hello fd slot 4),

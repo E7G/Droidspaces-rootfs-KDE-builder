@@ -102,6 +102,12 @@ private:
     // Inject UTF-8 text from the consumer's IME into the focused KWin client.
     void sendTextInputToKWin(const QByteArray &text);
 
+    // Direct Android IME bridge. Exact Wayland/internal text-input enable state is
+    // mirrored to the consumer and resent after every daemon reconnect.
+    void setupAndroidImeTracking();
+    void updateAndroidImeVar();
+    void sendConsumerVar(uint32_t var, uint32_t value);
+
     static void fallbackTrampoline(void *data);
 
     QString m_socketPath;
@@ -122,6 +128,8 @@ private:
     // consumer sets the same text on Android -> consumer sends back to KWin).
     // QByteArray is trivially sent over the data channel as UTF-8.
     QByteArray m_clipboardText;
+    bool m_androidImeTrackingReady = false;
+    bool m_androidImeActive = false;
 };
 
 } // namespace KWin

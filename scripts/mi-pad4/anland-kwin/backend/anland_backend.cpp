@@ -15,6 +15,7 @@
 #include "core/drmdevice.h"
 #include "core/renderdevice.h"
 #include "core/renderloop.h"
+#include "internalinputmethodcontext.h"
 #include "inputmethod.h"
 #include "main.h"
 #include "opengl/egldisplay.h"
@@ -23,6 +24,8 @@
 #include "wayland/abstract_data_source.h"
 #include "wayland/display.h"
 #include "wayland/seat.h"
+#include "wayland/textinput_v2.h"
+#include "wayland/textinput_v3.h"
 #include "wayland_server.h"
 
 #include <QFutureWatcher>
@@ -193,6 +196,12 @@ bool AnlandBackend::initialize()
             onClipboardChanged();
         });
     }
+
+    // The backend initializes before ApplicationWayland creates InputMethod.
+    // workspaceCreated is emitted later, after both InputMethod and its text-input
+    // protocol objects exist.
+    connect(kwinApp(), &Application::workspaceCreated,
+            this, &AnlandBackend::setupAndroidImeTracking);
 
     return true;
 }
@@ -521,10 +530,75 @@ void AnlandBackend::onReconnectTimer()
     // has the camera disabled it simply never registers the service and never replies,
     // so this is a harmless no-op in that case.
     push_resources_request(m_display, SERVICE_TYPE_CAMERA, nullptr);
+    // Consumer vars are connection-local state. Restore the current text focus
+    // immediately after every reconnect, even if it did not change meanwhile.
+    sendConsumerVar(CONSUMER_VAR_ANDROID_IME, m_androidImeActive ? 1 : 0);
     m_outputs[0]->resumeRendering();
     if (layer) {
         layer->scheduleRepaint(nullptr);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Android system IME direct wake
+// ---------------------------------------------------------------------------
+
+void AnlandBackend::setupAndroidImeTracking()
+{
+    if (m_androidImeTrackingReady)
+        return;
+
+    SeatInterface *seat = waylandServer()->seat();
+    InputMethod *inputMethod = kwinApp()->inputMethod();
+    if (!seat || !inputMethod)
+        return;
+
+    TextInputV2Interface *textInputV2 = seat->textInputV2();
+    TextInputV3Interface *textInputV3 = seat->textInputV3();
+    InternalInputMethodContext *internal = inputMethod->internalContext();
+    if (!textInputV2 || !textInputV3 || !internal)
+        return;
+
+    connect(textInputV2, &TextInputV2Interface::enabledChanged,
+            this, &AnlandBackend::updateAndroidImeVar);
+    connect(textInputV3, &TextInputV3Interface::enabledChanged,
+            this, &AnlandBackend::updateAndroidImeVar);
+    connect(internal, &InternalInputMethodContext::enabledChanged,
+            this, &AnlandBackend::updateAndroidImeVar);
+    m_androidImeTrackingReady = true;
+    updateAndroidImeVar();
+}
+
+void AnlandBackend::updateAndroidImeVar()
+{
+    SeatInterface *seat = waylandServer()->seat();
+    InputMethod *inputMethod = kwinApp()->inputMethod();
+    if (!seat || !inputMethod)
+        return;
+
+    TextInputV2Interface *textInputV2 = seat->textInputV2();
+    TextInputV3Interface *textInputV3 = seat->textInputV3();
+    InternalInputMethodContext *internal = inputMethod->internalContext();
+    const bool active = (textInputV2 && textInputV2->isEnabled())
+        || (textInputV3 && textInputV3->isEnabled())
+        || (internal && internal->isEnabled());
+    if (active == m_androidImeActive)
+        return;
+
+    m_androidImeActive = active;
+    sendConsumerVar(CONSUMER_VAR_ANDROID_IME, active ? 1 : 0);
+}
+
+void AnlandBackend::sendConsumerVar(uint32_t var, uint32_t value)
+{
+    if (m_inFallback)
+        return;
+
+    const OutputEvent ev = {
+        .type = OUTPUT_TYPE_SET_CONSUMER_VAR,
+        .set_consumer_var = { .var = var, .value = value },
+    };
+    push_output_event(m_display, &ev);
 }
 
 // ---------------------------------------------------------------------------

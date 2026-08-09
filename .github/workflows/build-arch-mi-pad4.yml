@@ -427,9 +427,7 @@ jobs:
             usr/lib/firefox/glxtest \
             usr/lib/firefox/glxtest.real \
             usr/bin/startplasma-wayland \
-            usr/bin/kwin_wayland \
-            usr/bin/plasma-keyboard \
-            usr/share/applications/org.kde.plasma.keyboard.desktop
+            usr/bin/kwin_wayland
           do
             grep -Fxq \
               "$path" \
