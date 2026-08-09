@@ -358,7 +358,7 @@ static int connect_stream(struct pw_stream *stream, enum spa_direction direction
 
     return pw_stream_connect(stream, direction, PW_ID_ANY,
                              PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS |
-                                 PW_STREAM_FLAG_RT_PROCESS,
+                                 PW_STREAM_FLAG_RT_PROCESS | PW_STREAM_FLAG_DRIVER,
                              params, 1);
 }
 
@@ -401,6 +401,8 @@ static int build_pw(struct anland_audio *a)
             PW_KEY_MEDIA_CLASS, "Audio/Sink",
             PW_KEY_NODE_NAME, "anland-speaker",
             PW_KEY_NODE_DESCRIPTION, "Anland remote speaker",
+            PW_KEY_NODE_DRIVER, "true",
+            PW_KEY_NODE_VIRTUAL, "true",
             PW_KEY_PRIORITY_SESSION, "1010",   /* outrank the auto-null dummy sink */
             PW_KEY_PRIORITY_DRIVER, "1010",
             NULL));
@@ -415,6 +417,8 @@ static int build_pw(struct anland_audio *a)
             PW_KEY_MEDIA_CLASS, "Audio/Source",
             PW_KEY_NODE_NAME, "anland-mic",
             PW_KEY_NODE_DESCRIPTION, "Anland remote microphone",
+            PW_KEY_NODE_DRIVER, "true",
+            PW_KEY_NODE_VIRTUAL, "true",
             PW_KEY_PRIORITY_SESSION, "1010",   /* outrank the auto-null dummy source */
             PW_KEY_PRIORITY_DRIVER, "1010",
             NULL));
