@@ -118,10 +118,9 @@ user_pref("gfx.webrender.allow-partial-present-buffer-age", false);
 user_pref("gfx.webrender.force-partial-present", false);
 user_pref("gfx.webrender.compositor", false);
 user_pref("gfx.webrender.compositor.force-enabled", false);
-// Do not force Firefox's window-wide dmabuf path: it presents stale buffers on
-// Clover's legacy KGSL sync implementation and causes full-window flashing.
-// VA-API remains enabled and uses its explicit copy path above.
-user_pref("widget.dmabuf.force-enabled", false);
+// Leave the window-wide dmabuf feature at Firefox's runtime default. Forcing it
+// either on or off bypasses its Wayland capability checks on this old stack.
+// The wrapper removes any persisted override before each launch.
 user_pref("widget.dmabuf-webgl.enabled", false);
 user_pref("widget.wayland.vsync.enabled", true);
 user_pref("widget.wayland.opaque-region.enabled", false);
