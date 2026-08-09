@@ -18,17 +18,33 @@ export MOZ_DRM_DEVICE=/dev/dri/renderD128
 # Read both values from the live Xwayland process; selecting the first xauth
 # file is unsafe because fast restarts leave many stale files behind.
 xwayland_pid="$(pgrep -n -x Xwayland 2>/dev/null || true)"
+xwayland_has_xauth=0
 if [[ -n "$xwayland_pid" ]]; then
     xwayland_env="$(strings "/proc/$xwayland_pid/environ" 2>/dev/null || true)"
     xwayland_display="$(printf '%s\n' "$xwayland_env" | sed -n 's/^DISPLAY=//p' | head -n 1)"
-    xwayland_xauth="$(printf '%s\n' "$xwayland_env" | sed -n 's/^XAUTHORITY=//p' | head -n 1)"
-    [[ -n "$xwayland_display" ]] && export LIBVA_DRM_X11_DISPLAY="$xwayland_display"
-    [[ -z "${XAUTHORITY:-}" && -n "$xwayland_xauth" ]] && XAUTHORITY="$xwayland_xauth"
+    if printf '%s\n' "$xwayland_env" | grep -q '^XAUTHORITY='; then
+        xwayland_has_xauth=1
+        xwayland_xauth="$(printf '%s\n' "$xwayland_env" | sed -n 's/^XAUTHORITY=//p' | head -n 1)"
+    else
+        xwayland_xauth=
+    fi
+    if [[ -n "$xwayland_display" ]]; then
+        export DISPLAY="$xwayland_display"
+        export LIBVA_DRM_X11_DISPLAY="$xwayland_display"
+    fi
+    if [[ "$xwayland_has_xauth" = 1 ]]; then
+        if [[ -n "$xwayland_xauth" ]]; then
+            export XAUTHORITY="$xwayland_xauth"
+        else
+            unset XAUTHORITY
+        fi
+    fi
 fi
-if [[ -z "${XAUTHORITY:-}" ]]; then
+if [[ "$xwayland_has_xauth" = 0 && -z "${XAUTHORITY:-}" ]]; then
     XAUTHORITY="$(find "${XDG_RUNTIME_DIR:-/tmp/droidspaces-runtime/user-0}" -maxdepth 1 -name 'xauth_*' -type f -print -quit 2>/dev/null || true)"
 fi
-export XAUTHORITY
+[[ -n "${XAUTHORITY:-}" ]] && export XAUTHORITY
+export DISPLAY="${DISPLAY:-:0}"
 # Firefox is launched by plasmashell, not by KWin's KGSL environment. Select
 # the patched freedreno path explicitly so Wayland compositing does not fall
 # back to llvmpipe/software EGL.
@@ -56,12 +72,14 @@ user_pref("browser.cache.disk.capacity", 65536);
 user_pref("browser.cache.memory.capacity", 32768);
 user_pref("media.cache_size", 32768);
 user_pref("browser.sessionstore.interval", 60000);
+user_pref("toolkit.startup.max_resumed_crashes", 3);
 user_pref("network.prefetch-next", false);
 user_pref("network.dns.disablePrefetch", true);
 user_pref("network.http.speculative-parallel-limit", 0);
 user_pref("browser.urlbar.speculativeConnect.enabled", false);
 user_pref("toolkit.cosmeticAnimations.enabled", false);
 user_pref("ui.prefersReducedMotion", 1);
+user_pref("layout.frame_rate", 30);
 user_pref("media.hardware-video-decoding.enabled", true);
 user_pref("media.hardware-video-decoding.force-enabled", true);
 user_pref("media.ffmpeg.vaapi.enabled", true);
@@ -69,10 +87,19 @@ user_pref("media.ffvpx.enabled", false);
 user_pref("media.ffvpx.hw.enabled", true);
 user_pref("media.rdd-ffmpeg.enabled", true);
 user_pref("media.av1.enabled", false);
-user_pref("gfx.webrender.all", true);
+user_pref("gfx.webrender.all", false);
 user_pref("gfx.webrender.force-disabled", false);
 user_pref("gfx.webrender.software", false);
-user_pref("widget.dmabuf.force-enabled", true);
+// Firefox 153's Wayland dmabuf buffers corrupt/flicker on the legacy KGSL
+// synchronization path. Use stable SHM presentation; VA-API stays enabled and
+// decoded frames are copied instead of exported as dmabufs.
+user_pref("gfx.webrender.compositor", false);
+user_pref("gfx.webrender.compositor.force-enabled", false);
+user_pref("widget.dmabuf.force-enabled", false);
+user_pref("widget.dmabuf.enabled", false);
+user_pref("widget.dmabuf-webgl.enabled", false);
+user_pref("widget.wayland.vsync.enabled", false);
+user_pref("widget.wayland.opaque-region.enabled", false);
 user_pref("toolkit.telemetry.enabled", false);
 user_pref("datareporting.healthreport.uploadEnabled", false);
 user_pref("browser.newtabpage.activity-stream.feeds.telemetry", false);
