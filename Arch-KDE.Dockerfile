@@ -210,6 +210,12 @@ EOF
         /home/${USERNAME}/.config/plasma-org.kde.plasma.desktop-appletsrc
     install -m600 -o ${USERNAME} -g ${USERNAME} /tmp/mi-pad4/baloofilerc \
         /home/${USERNAME}/.config/baloofilerc
+    install -m600 -o ${USERNAME} -g ${USERNAME} /tmp/mi-pad4/dolphinrc \
+        /home/${USERNAME}/.config/dolphinrc
+    install -Dm600 -o ${USERNAME} -g ${USERNAME} /tmp/mi-pad4/dolphin-global-viewproperties \
+        /home/${USERNAME}/.local/share/dolphin/view_properties/global/.directory
+    install -Dm600 -o ${USERNAME} -g ${USERNAME} /tmp/mi-pad4/user-places.xbel \
+        /home/${USERNAME}/.local/share/user-places.xbel
     rm -f /home/${USERNAME}/.config/autostart/fcitx5.desktop
     mkdir -p /home/${USERNAME}/.config/autostart
     for service in baloo_file powerdevil polkit-kde-authentication-agent-1; do
@@ -243,6 +249,9 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         ln -sfn ../mi-pad4-desktop.service /etc/systemd/system/multi-user.target.wants/mi-pad4-desktop.service && \
         install -Dm755 /tmp/mi-pad4/dolphin-safe /usr/local/bin/dolphin && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
+        install -Dm644 /tmp/mi-pad4/dolphinrc /usr/share/droidspaces/mi-pad4-profile/dolphinrc && \
+        install -Dm644 /tmp/mi-pad4/dolphin-global-viewproperties /usr/share/droidspaces/mi-pad4-profile/dolphin-global-viewproperties && \
+        install -Dm644 /tmp/mi-pad4/user-places.xbel /usr/share/droidspaces/mi-pad4-profile/user-places.xbel && \
         for desktop in /usr/share/applications/firefox*.desktop; do \
             [ -f "$desktop" ] || continue; \
             sed -i 's#Exec=/usr/lib/firefox/firefox#Exec=/usr/local/bin/mi-pad4-firefox#g' "$desktop"; \

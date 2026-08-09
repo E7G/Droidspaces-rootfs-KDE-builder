@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xbel>
+<xbel xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks" xmlns:kdepriv="http://www.kde.org/kdepriv">
+ <info>
+  <metadata owner="http://www.kde.org">
+   <kde_places_version>4</kde_places_version>
+   <GroupState-Places-IsHidden>false</GroupState-Places-IsHidden>
+   <GroupState-Remote-IsHidden>true</GroupState-Remote-IsHidden>
+   <GroupState-Devices-IsHidden>false</GroupState-Devices-IsHidden>
+   <GroupState-RemovableDevices-IsHidden>false</GroupState-RemovableDevices-IsHidden>
+   <GroupState-Tags-IsHidden>true</GroupState-Tags-IsHidden>
+   <GroupState-SearchFor-IsHidden>true</GroupState-SearchFor-IsHidden>
+   <GroupState-RecentlySaved-IsHidden>true</GroupState-RecentlySaved-IsHidden>
+   <withBaloo>false</withBaloo>
+   <withRecentlyUsed>false</withRecentlyUsed>
+  </metadata>
+ </info>
+ <bookmark href="file:///tmp/droidspaces-home">
+  <title>主目录</title>
+  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="user-home"/></metadata></info>
+ </bookmark>
+ <bookmark href="file:///tmp/droidspaces-home/Desktop">
+  <title>桌面</title>
+  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="user-desktop"/></metadata></info>
+ </bookmark>
+ <bookmark href="file:///tmp/droidspaces-home/下载">
+  <title>下载</title>
+  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="folder-download"/></metadata></info>
+ </bookmark>
+ <bookmark href="trash:/">
+  <title>回收站</title>
+  <info><metadata owner="http://freedesktop.org"><bookmark:icon name="user-trash"/></metadata></info>
+ </bookmark>
+</xbel>

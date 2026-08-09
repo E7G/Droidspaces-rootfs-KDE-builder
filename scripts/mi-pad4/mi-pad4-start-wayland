@@ -67,6 +67,10 @@ export XDG_SESSION_TYPE=wayland
 export QT_WAYLAND_RECONNECT=1
 export _JAVA_AWT_WM_NONREPARENTING=1
 export KDE_USE_SYSTEMD=0
+# KIO's in-process file worker is faster but a worker fault terminates Dolphin.
+# The Android/fscrypt-backed rootfs can return ENOKEY during metadata probes, so
+# keep file workers out of process and let Dolphin survive a failed worker.
+export KIO_ENABLE_WORKER_THREADS=0
 
 # systemd's service-manager variables make Plasma 6 treat this system service
 # as a user session. The old kernel has no usable user manager, so do not pass
@@ -100,13 +104,16 @@ fi
 # HOME is an Android bind mount, not /home/user. Apply profile defaults once per
 # revision so upgrades can repair known-bad Plasma state without resetting user
 # changes on every start.
-profile_revision=20260809-1
+profile_revision=20260809-3
 profile_stamp="$HOME/.config/.mi-pad4-profile-revision"
+profile_defaults=/usr/share/droidspaces/mi-pad4-profile
 if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; then
   mkdir -p "$HOME/.config"
   for config in kwinrc kscreenlockerrc plasma-localerc \
-      plasma-org.kde.plasma.desktop-appletsrc baloofilerc; do
-    if [[ -f "/home/user/.config/$config" ]]; then
+      plasma-org.kde.plasma.desktop-appletsrc baloofilerc dolphinrc; do
+    if [[ -f "$profile_defaults/$config" ]]; then
+      cp -f "$profile_defaults/$config" "$HOME/.config/$config"
+    elif [[ -f "/home/user/.config/$config" ]]; then
       cp -f "/home/user/.config/$config" "$HOME/.config/$config"
     fi
   done
@@ -120,6 +127,26 @@ if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; t
   if [[ -f /usr/share/applications/firefox.desktop ]]; then
     cp -f /usr/share/applications/firefox.desktop "$HOME/Desktop/firefox.desktop"
     chmod 0755 "$HOME/Desktop/firefox.desktop"
+  fi
+
+  # Keep Dolphin away from services that are unavailable in this container.
+  # Baloo tags, remote discovery and recent/timeline KIO workers otherwise get
+  # created merely by opening the Places panel and can stall on the 4.4 guest.
+  if [[ -f "$profile_defaults/user-places.xbel" ]]; then
+    mkdir -p "$HOME/.local/share"
+    cp -f "$profile_defaults/user-places.xbel" "$HOME/.local/share/user-places.xbel"
+  elif [[ -f /home/user/.local/share/user-places.xbel ]]; then
+    mkdir -p "$HOME/.local/share"
+    cp -f /home/user/.local/share/user-places.xbel "$HOME/.local/share/user-places.xbel"
+  fi
+  if [[ -f "$profile_defaults/dolphin-global-viewproperties" ]]; then
+    mkdir -p "$HOME/.local/share/dolphin/view_properties/global"
+    cp -f "$profile_defaults/dolphin-global-viewproperties" \
+      "$HOME/.local/share/dolphin/view_properties/global/.directory"
+  elif [[ -f /home/user/.local/share/dolphin/view_properties/global/.directory ]]; then
+    mkdir -p "$HOME/.local/share/dolphin/view_properties/global"
+    cp -f /home/user/.local/share/dolphin/view_properties/global/.directory \
+      "$HOME/.local/share/dolphin/view_properties/global/.directory"
   fi
 
   # Dolphin stores dock/window state separately from dolphinrc. A forced
@@ -257,6 +284,22 @@ if [[ "${1:-}" = session ]]; then
   # in the writable runtime tmpfs instead.
   plasma_config_home=/run/mi-pad4-plasma-config
   mkdir -p "$plasma_config_home"
+  # XDG_CONFIG_HOME is a tmpfs because config locks on Android's fscrypt mount
+  # fail with ENOKEY. Seed every performance/stability setting before KWin and
+  # Plasma start; otherwise they silently regenerate expensive defaults here.
+  for config in kwinrc kscreenlockerrc plasma-localerc kdeglobals \
+      dolphinrc baloofilerc kxkbrc mimeapps.list; do
+    if [[ -s "$HOME/.config/$config" ]]; then
+      cp -f "$HOME/.config/$config" "$plasma_config_home/$config"
+    elif [[ -s "/home/user/.config/$config" ]]; then
+      cp -f "/home/user/.config/$config" "$plasma_config_home/$config"
+    fi
+  done
+  # Dolphin migrates Version and panel state after its first run. Always seed
+  # the immutable low-overhead defaults, not the already-migrated HOME copy.
+  if [[ -s "$profile_defaults/dolphinrc" ]]; then
+    cp -f "$profile_defaults/dolphinrc" "$plasma_config_home/dolphinrc"
+  fi
   # XDG_CONFIG_HOME points at tmpfs to avoid Android fscrypt lock failures, so
   # Plasma cannot see the packaged/persistent panel layout unless it is seeded
   # here before plasma_session starts plasmashell. Without this file KWin works
@@ -272,6 +315,12 @@ if [[ "${1:-}" = session ]]; then
     done
   fi
   printf '%s\n' '[General]' 'systemdBoot=false' >"$plasma_config_home/startkderc"
+  /usr/bin/kwriteconfig6 --file "$plasma_config_home/kdeglobals" \
+    --group KDE --key AnimationDurationFactor 0 2>/dev/null || true
+  for effect in blur contrast translucency slide slidingpopups; do
+    /usr/bin/kwriteconfig6 --file "$plasma_config_home/kwinrc" \
+      --group Plugins --key "${effect}Enabled" false 2>/dev/null || true
+  done
   export XDG_CONFIG_HOME="$plasma_config_home"
   export KDEWM='/usr/bin/bash /usr/local/bin/mi-pad4-kwin-wayland'
 

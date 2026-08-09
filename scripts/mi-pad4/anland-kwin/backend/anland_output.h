@@ -4,12 +4,12 @@
 
     SPDX-License-Identifier: GPL-2.0-or-later
 
-    Native output for the "anland" backend. The render cycle is paced by the
+    Native output for the "anland" backend. Submitted frames are paced by the
     display daemon's transport, not a software timer: present() hands the buffer
     to the consumer (a render-done message on the dedicated fence channel) and the
     consumer's buffer-ready signal (buf_ready_efd) completes the frame — mirroring
     how the DRM backend completes a frame on a page-flip event. This keeps KWin's
-    compositing in lockstep with the frontend instead of free-running on a vsync timer.
+    compositing in lockstep with the frontend without free-running while idle.
 */
 #pragma once
 
@@ -50,7 +50,7 @@ public:
     void setRefreshRate(int refresh);
 
     /** Consumer signalled buffer-ready (buf_ready_efd): complete the in-flight
-     *  frame and schedule the next one, keeping the cycle consumer-paced. */
+     *  frame. Scene/layer damage schedules another frame when one is needed. */
     void onConsumerReady();
 
     /** Reconfigure the output when the consumer uses a different buffer size

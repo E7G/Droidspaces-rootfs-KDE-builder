@@ -125,9 +125,12 @@ void AnlandOutput::onConsumerReady()
         m_awaitingPresent = false;
         completeFrame();
     }
-    // Render the next frame in lockstep with the consumer, exactly as the 5.27
-    // backend did: the consumer's buffer-ready drives scheduleRepaint().
-    m_renderLoop->scheduleRepaint();
+    // Do not unconditionally repaint here. Scene damage schedules its own frame,
+    // and AnlandEglLayer schedules the extra frames needed to refresh every
+    // rotated dmabuf. Driving a new repaint from every buffer-ready event creates
+    // a permanent 30 fps full-screen render loop on an otherwise idle desktop,
+    // wasting CPU/GPU and rotating unchanged buffers (visible as intermittent
+    // flashes on the legacy KGSL/ION stack).
 }
 
 void AnlandOutput::resize(const QSize &newSize)
