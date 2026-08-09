@@ -256,6 +256,16 @@ chmod 666 "$XDG_RUNTIME_DIR"/wayland-*.lock 2>/dev/null || true
 # Only this child receives KGSL and the legacy ION shim; the desktop shell helper
 # below stays on stable software/shared-memory buffers.
 if [[ "${1:-}" = child ]]; then
+  # D-Bus activated KDE helpers can escape the service cgroup on the legacy
+  # kernel. If a previous session was force-stopped, their main thread may exit
+  # while a QDBus thread spins forever as a PID-1 child. Remove the whole stale
+  # desktop generation before creating the new session.
+  /usr/bin/pkill -KILL -f '^/usr/sbin/kwin_wayland_wrapper( |$)' 2>/dev/null || true
+  /usr/bin/pkill -KILL -f '^/usr/(sbin|bin)/kded6( |$)' 2>/dev/null || true
+  /usr/bin/pkill -KILL -f '^/usr/bin/startplasma-wayland( |$)' 2>/dev/null || true
+  for process in kwin_wayland Xwayland plasmashell plasma_session ksmserver; do
+    /usr/bin/pkill -KILL -x "$process" 2>/dev/null || true
+  done
   mkdir -p "$XDG_RUNTIME_DIR" "$HOME" 2>/dev/null || true
   chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
   # Droidspaces exposes this bind-mounted rootfs with an execution restriction
