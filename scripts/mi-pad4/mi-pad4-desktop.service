@@ -23,6 +23,10 @@ ExecStopPost=-/usr/bin/pkill -KILL -f "dbus-daemon --nofork --print-address.*--s
 Restart=on-failure
 RestartSec=10s
 KillMode=control-group
+# Android can pass a near-INT_MAX descriptor limit into the container. Besides
+# wasting kernel memory, this makes daemons such as menu-cached loop over more
+# than one billion close() calls during startup.
+LimitNOFILE=8192
 # Android fscrypt v1 keeps directory keys in the inherited session keyring.
 # systemd's private service keyring makes files below /data intermittently fail
 # with ENOKEY (often reported by ld.so as "No such file or directory").

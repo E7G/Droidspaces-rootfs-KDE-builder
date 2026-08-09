@@ -12,4 +12,8 @@ if (( $# == 0 )); then
     set -- "${HOME:-/tmp/droidspaces-home}"
 fi
 
+# Android may expose a near-INT_MAX RLIMIT_NOFILE. menu-cached closes every
+# possible descriptor while daemonizing, which otherwise spins for hours.
+ulimit -n 8192
+
 exec /usr/bin/pcmanfm-qt "$@"
