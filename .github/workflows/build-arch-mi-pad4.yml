@@ -584,6 +584,16 @@ jobs:
             exit 1
           fi
 
+          # Android IME is bridged directly by Anland. A second Linux IME wastes
+          # RAM/storage and can steal Wayland text-input focus.
+          if grep -Eq \
+              '^var/lib/pacman/local/(fcitx5($|-)|libime-)' \
+              rootfs-files.txt
+          then
+            echo "Unexpected Linux input-method packages found in RootFS" >&2
+            exit 1
+          fi
+
           #
           # Create release checksum
           #
