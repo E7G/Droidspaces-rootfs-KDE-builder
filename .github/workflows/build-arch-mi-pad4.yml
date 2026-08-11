@@ -63,7 +63,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: firefox-mi-pad4
-          key: firefox-clover-153.0.3-1.2-${{ hashFiles('scripts/mi-pad4/firefox/**') }}
+          key: firefox-clover-153.0.3-1.3-${{ hashFiles('scripts/mi-pad4/firefox/**') }}
 
       - name: Build Firefox 153 for Clover
         if: steps.firefox-cache.outputs.cache-hit != 'true'
@@ -124,11 +124,11 @@ jobs:
 
           mkdir -p firefox-mi-pad4
           cp -v \
-            .ci/firefox/firefox-153.0.3-1.2-aarch64.pkg.tar.* \
+            .ci/firefox/firefox-153.0.3-1.3-aarch64.pkg.tar.* \
             firefox-mi-pad4/
 
           sha256sum \
-            firefox-mi-pad4/firefox-153.0.3-1.2-aarch64.pkg.tar.* \
+            firefox-mi-pad4/firefox-153.0.3-1.3-aarch64.pkg.tar.* \
             | tee firefox-mi-pad4/FIREFOX-SHA256SUMS
 
       - name: Upload Clover Firefox package
@@ -498,10 +498,10 @@ jobs:
             }
 
           grep -Eq \
-            '^var/lib/pacman/local/firefox-153\.0\.3-1\.2/' \
+            '^var/lib/pacman/local/firefox-153\.0\.3-1\.3/' \
             rootfs-files.txt \
             || {
-              echo "Expected Clover Firefox 153.0.3-1.2 is not installed" >&2
+              echo "Expected Clover Firefox 153.0.3-1.3 is not installed" >&2
               exit 1
             }
 

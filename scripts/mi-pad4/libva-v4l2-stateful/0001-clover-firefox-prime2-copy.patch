@@ -1,15 +1,566 @@
+diff --git a/src/h264.c b/src/h264.c
+index 76a8cc0..340e07d 100644
+--- a/src/h264.c
++++ b/src/h264.c
+@@ -230,7 +230,10 @@ static size_t h264_generate_sps(VAPictureParameterBufferH264 *pic, uint8_t *buf,
+ /*
+  * Generate PPS NAL unit from VAPictureParameterBufferH264
+  */
+-static size_t h264_generate_pps(VAPictureParameterBufferH264 *pic, uint8_t *buf, size_t bufsize) {
++static size_t h264_generate_pps(VAPictureParameterBufferH264 *pic,
++                                unsigned int l0_active_minus1,
++                                unsigned int l1_active_minus1,
++                                uint8_t *buf, size_t bufsize) {
+     BitWriter bw;
+     bw_init(&bw, buf, bufsize);
+ 
+@@ -245,9 +248,8 @@ static size_t h264_generate_pps(VAPictureParameterBufferH264 *pic, uint8_t *buf,
+     bw_put_bits(&bw, pic->pic_fields.bits.pic_order_present_flag, 1);
+     bw_put_ue(&bw, 0);  /* num_slice_groups_minus1 (FMO not supported) */
+ 
+-    /* Use reasonable defaults for ref_idx */
+-    bw_put_ue(&bw, 0);  /* num_ref_idx_l0_default_active_minus1 */
+-    bw_put_ue(&bw, 0);  /* num_ref_idx_l1_default_active_minus1 */
++    bw_put_ue(&bw, l0_active_minus1);
++    bw_put_ue(&bw, l1_active_minus1);
+ 
+     bw_put_bits(&bw, pic->pic_fields.bits.weighted_pred_flag, 1);
+     bw_put_bits(&bw, pic->pic_fields.bits.weighted_bipred_idc, 2);
+@@ -275,16 +277,24 @@ static void h264_handle_picture_params(V4L2Context *ctx, V4L2Buffer *buf)
+ {
+     VAPictureParameterBufferH264 *pic = (VAPictureParameterBufferH264 *)buf->data;
+ 
++    ctx->current_timestamp = (uint32_t)pic->CurrPic.TopFieldOrderCnt;
++    ctx->h264.last_pic = *pic;
++    ctx->h264.have_picture_params = true;
++
+     /* Generate and cache SPS/PPS */
+     ctx->h264.last_sps_size = h264_generate_sps(pic, ctx->h264.last_sps, sizeof(ctx->h264.last_sps));
+-    ctx->h264.last_pps_size = h264_generate_pps(pic, ctx->h264.last_pps, sizeof(ctx->h264.last_pps));
++    ctx->h264.last_pps_size = h264_generate_pps(
++        pic, 0, 0, ctx->h264.last_pps, sizeof(ctx->h264.last_pps));
+ 
+-    LOG("H.264: Got picture params: %dx%d MBs, profile=%d, level=%d, refs=%d",
++    LOG("H.264: Got picture params: %dx%d MBs, profile=%d, level=%d, refs=%d, surface=%u, top_poc=%d, bottom_poc=%d",
+         pic->picture_width_in_mbs_minus1 + 1,
+         pic->picture_height_in_mbs_minus1 + 1,
+         h264_detect_profile(pic),
+         h264_calc_level(pic),
+-        pic->num_ref_frames);
++        pic->num_ref_frames,
++        pic->CurrPic.picture_id,
++        pic->CurrPic.TopFieldOrderCnt,
++        pic->CurrPic.BottomFieldOrderCnt);
+ }
+ 
+ /*
+@@ -299,6 +309,36 @@ static void h264_handle_slice_data(V4L2Context *ctx, V4L2Buffer *buf)
+         return;
+     }
+ 
++    if (ctx->last_slice_count > 0 && ctx->h264.have_picture_params) {
++        VASliceParameterBufferH264 *first = &slice_params[0];
++        uint8_t *first_data = (uint8_t *)buf->data + first->slice_data_offset;
++        uint8_t first_nal_type = first_data[0] & 0x1f;
++
++        ctx->h264.last_pps_size = h264_generate_pps(
++            &ctx->h264.last_pic,
++            first->num_ref_idx_l0_active_minus1,
++            first->num_ref_idx_l1_active_minus1,
++            ctx->h264.last_pps, sizeof(ctx->h264.last_pps));
++
++        if (first_nal_type == 5 && !ctx->h264.sps_pps_sent &&
++            ctx->h264.last_sps_size > 0) {
++            bitstream_append(&ctx->bitstream, NAL_START_CODE,
++                             sizeof(NAL_START_CODE));
++            bitstream_append(&ctx->bitstream, ctx->h264.last_sps,
++                             ctx->h264.last_sps_size);
++            LOG("H.264: Prepended SPS (%zu bytes)",
++                ctx->h264.last_sps_size);
++        }
++        if (ctx->h264.last_pps_size > 0) {
++            bitstream_append(&ctx->bitstream, NAL_START_CODE,
++                             sizeof(NAL_START_CODE));
++            bitstream_append(&ctx->bitstream, ctx->h264.last_pps,
++                             ctx->h264.last_pps_size);
++        }
++        if (first_nal_type == 5)
++            ctx->h264.sps_pps_sent = true;
++    }
++
+     for (unsigned int i = 0; i < ctx->last_slice_count; i++) {
+         VASliceParameterBufferH264 *sp = &slice_params[i];
+         uint8_t *slice_data = (uint8_t *)buf->data + sp->slice_data_offset;
+@@ -306,23 +346,11 @@ static void h264_handle_slice_data(V4L2Context *ctx, V4L2Buffer *buf)
+         /* Check NAL unit type from first byte */
+         uint8_t nal_type = slice_data[0] & 0x1f;
+ 
+-        /* For IDR slices (type 5), prepend SPS/PPS */
+-        if (nal_type == 5 && !ctx->h264.sps_pps_sent) {
+-            /* Append SPS */
+-            if (ctx->h264.last_sps_size > 0) {
+-                bitstream_append(&ctx->bitstream, NAL_START_CODE, sizeof(NAL_START_CODE));
+-                bitstream_append(&ctx->bitstream, ctx->h264.last_sps, ctx->h264.last_sps_size);
+-                LOG("H.264: Prepended SPS (%zu bytes)", ctx->h264.last_sps_size);
+-            }
+-
+-            /* Append PPS */
+-            if (ctx->h264.last_pps_size > 0) {
+-                bitstream_append(&ctx->bitstream, NAL_START_CODE, sizeof(NAL_START_CODE));
+-                bitstream_append(&ctx->bitstream, ctx->h264.last_pps, ctx->h264.last_pps_size);
+-                LOG("H.264: Prepended PPS (%zu bytes)", ctx->h264.last_pps_size);
+-            }
+-
+-            ctx->h264.sps_pps_sent = true;
++        if (!ctx->h264.timestamp_epoch_set_for_frame) {
++            if (nal_type == 5)
++                ctx->h264.timestamp_epoch++;
++            ctx->current_timestamp |= ctx->h264.timestamp_epoch << 32;
++            ctx->h264.timestamp_epoch_set_for_frame = true;
+         }
+ 
+         /* Prepend NAL start code and append slice data */
+diff --git a/src/v4l2-backend.c b/src/v4l2-backend.c
+index 48ece67..30844b4 100644
+--- a/src/v4l2-backend.c
++++ b/src/v4l2-backend.c
+@@ -43,10 +43,9 @@
+ #ifndef V4L2_CID_MPEG_VIDC_VIDEO_OUTPUT_ORDER
+ #define V4L2_CID_MPEG_VIDC_VIDEO_OUTPUT_ORDER 0x00992007
+ #endif
+-#ifndef V4L2_MPEG_VIDC_VIDEO_OUTPUT_ORDER_DECODE
+-#define V4L2_MPEG_VIDC_VIDEO_OUTPUT_ORDER_DECODE 1
++#ifndef V4L2_CID_MPEG_VIDC_VIDEO_ALLOC_MODE_OUTPUT
++#define V4L2_CID_MPEG_VIDC_VIDEO_ALLOC_MODE_OUTPUT 0x0099201f
+ #endif
+-
+ /* Qualcomm Android 4.4 uses the legacy 64-bit ION userspace ABI. */
+ #define ION_IOC_ALLOC_LEGACY 0xc0204900UL
+ #define ION_IOC_FREE_LEGACY  0xc0084901UL
+@@ -73,6 +72,9 @@ struct ion_free_legacy {
+     uint64_t handle;
+ };
+ 
++static void v4l2_enable_decode_output_order(V4L2Context *ctx);
++
++
+ static int ion_release_buffer(V4L2Context *ctx, V4L2MmapBuffer *buffer,
+                               uint32_t plane)
+ {
+@@ -194,21 +196,6 @@ static void v4l2_enable_continue_data_transfer(V4L2Context *ctx)
+     }
+ }
+ 
+-static void v4l2_enable_decode_output_order(V4L2Context *ctx)
+-{
+-    struct v4l2_control control;
+-
+-    memset(&control, 0, sizeof(control));
+-    control.id = V4L2_CID_MPEG_VIDC_VIDEO_OUTPUT_ORDER;
+-    control.value = V4L2_MPEG_VIDC_VIDEO_OUTPUT_ORDER_DECODE;
+-    if (ioctl(ctx->v4l2_fd, VIDIOC_S_CTRL, &control) < 0) {
+-        LOG("Failed to enable msm_vidc decode output order: %s",
+-            strerror(errno));
+-    } else {
+-        LOG("Enabled msm_vidc decode output order");
+-    }
+-}
+-
+ /* CIX Sky1 VPU fourcc values */
+ #define V4L2_PIX_FMT_AV1  v4l2_fourcc('A', 'V', '0', '1')
+ 
+@@ -411,9 +398,15 @@ int v4l2_setup_output_queue(V4L2Context *ctx)
+         return -1;
+     }
+ 
+-    /* VA render targets are submitted in decode order. Avoid firmware DPB
+-     * display-order latency and preserve a one-to-one FIFO surface mapping. */
+     v4l2_enable_decode_output_order(ctx);
++    struct v4l2_control alloc_mode = {
++        .id = V4L2_CID_MPEG_VIDC_VIDEO_ALLOC_MODE_OUTPUT,
++        .value = 2,
++    };
++    if (ioctl(ctx->v4l2_fd, VIDIOC_S_CTRL, &alloc_mode) < 0)
++        LOG("msm_vidc dynamic CAPTURE mode unavailable: %s", strerror(errno));
++    else
++        LOG("Enabled msm_vidc dynamic CAPTURE mode");
+ 
+     uint32_t output_planes = fmt.fmt.pix_mp.num_planes ?: 1;
+     size_t output_size = fmt.fmt.pix_mp.plane_fmt[0].sizeimage;
+@@ -591,7 +584,8 @@ static void v4l2_reclaim_output_buffers(V4L2Context *ctx)
+ /*
+  * Queue bitstream data for decoding
+  */
+-int v4l2_queue_bitstream(V4L2Context *ctx, void *data, size_t size)
++int v4l2_queue_bitstream(V4L2Context *ctx, void *data, size_t size,
++                         uint64_t sequence)
+ {
+     /* First try to reclaim any completed OUTPUT buffers */
+     v4l2_reclaim_output_buffers(ctx);
+@@ -665,6 +659,8 @@ int v4l2_queue_bitstream(V4L2Context *ctx, void *data, size_t size)
+     buf.index = buf_idx;
+     buf.length = outbuf->num_planes;
+     buf.m.planes = planes;
++    buf.timestamp.tv_sec = sequence / 1000000ULL;
++    buf.timestamp.tv_usec = sequence % 1000000ULL;
+     fill_userptr_plane(&planes[0], outbuf, 0);
+     planes[0].bytesused = size;
+ 
+@@ -743,12 +739,30 @@ int v4l2_queue_bitstream(V4L2Context *ctx, void *data, size_t size)
+ /*
+  * Dequeue decoded frame with poll() for proper waiting
+  */
+-int v4l2_dequeue_frame(V4L2Context *ctx, V4L2Surface *surface)
++int v4l2_dequeue_frame(V4L2Context *ctx, int timeout_ms)
+ {
+     struct v4l2_buffer buf;
+     struct v4l2_plane planes[VIDEO_MAX_PLANES];
+ 
+-    /* Use poll() to wait for a decoded frame (up to 500ms) */
++    memset(&buf, 0, sizeof(buf));
++    memset(&planes, 0, sizeof(planes));
++    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++    buf.memory = V4L2_MEMORY_USERPTR;
++    buf.length = ctx->capture_buffers[0].num_planes;
++    buf.m.planes = planes;
++
++    /* msm_vidc's old poll implementation is edge-triggered in practice: when
++     * more than one CAPTURE buffer completes, draining one can consume the
++     * wakeup for the rest.  Always try DQBUF first so an already completed
++     * frame cannot be stranded behind a lost POLLIN edge. */
++    if (ioctl(ctx->v4l2_fd, VIDIOC_DQBUF, &buf) == 0)
++        goto got_buffer;
++    if (errno != EAGAIN) {
++        LOG("Failed to dequeue CAPTURE buffer: %s", strerror(errno));
++        return -1;
++    }
++
++    /* EndPicture only probes. SyncSurface performs the bounded wait. */
+     struct pollfd pfd = {
+         .fd = ctx->v4l2_fd,
+         .events = POLLIN | POLLPRI,
+@@ -756,7 +770,7 @@ int v4l2_dequeue_frame(V4L2Context *ctx, V4L2Surface *surface)
+ 
+     int retries = 10; /* Handle a pending sequence event before a frame. */
+     while (retries-- > 0) {
+-        int ret = poll(&pfd, 1, 500);
++        int ret = poll(&pfd, 1, timeout_ms);
+         if (ret <= 0) {
+             if (ret == 0) {
+                 LOG("poll() timeout - no frame ready");
+@@ -809,14 +823,26 @@ int v4l2_dequeue_frame(V4L2Context *ctx, V4L2Surface *surface)
+         return -1;
+     }
+ 
++got_buffer:
++    ctx->capture_buffers[buf.index].queued = false;
++    uint64_t sequence = (uint64_t)buf.timestamp.tv_sec * 1000000ULL +
++                        (uint64_t)buf.timestamp.tv_usec;
++    V4L2Surface *surface = v4l2_take_pending_surface(ctx, sequence);
++    if (!surface) {
++        LOG("No pending surface for CAPTURE buffer %u timestamp=%llu",
++            buf.index, (unsigned long long)sequence);
++        v4l2_requeue_capture(ctx, buf.index);
++        return -1;
++    }
++
+     pthread_mutex_lock(&surface->mutex);
+     surface->capture_idx = buf.index;
+     surface->decoded = true;
+     pthread_cond_broadcast(&surface->cond);
+     pthread_mutex_unlock(&surface->mutex);
+-    ctx->capture_buffers[buf.index].queued = false;
+-    LOG("Dequeued CAPTURE buffer %u for surface %p, bytesused=%u",
+-        buf.index, surface, planes[0].bytesused);
++    LOG("Dequeued CAPTURE buffer %u for surface id=%u sequence=%llu, bytesused=%u",
++        buf.index, surface->id, (unsigned long long)sequence,
++        planes[0].bytesused);
+ 
+     return 0;
+ }
+@@ -871,6 +897,54 @@ int v4l2_export_dmabuf(V4L2Context *ctx, int capture_idx)
+                  F_DUPFD_CLOEXEC, 3);
+ }
+ 
++static void v4l2_enable_decode_output_order(V4L2Context *ctx)
++{
++    struct v4l2_control control;
++
++    memset(&control, 0, sizeof(control));
++    control.id = V4L2_CID_MPEG_VIDC_VIDEO_OUTPUT_ORDER;
++    control.value = 1;
++    if (ioctl(ctx->v4l2_fd, VIDIOC_S_CTRL, &control) < 0)
++        LOG("msm_vidc decode-order mode unavailable: %s", strerror(errno));
++    else
++        LOG("Enabled msm_vidc decode-order mode");
++}
++
++int v4l2_copy_capture_dmabuf(V4L2Context *ctx, int capture_idx)
++{
++    if (capture_idx < 0 || capture_idx >= ctx->num_capture_buffers)
++        return -1;
++
++    V4L2MmapBuffer *capture = &ctx->capture_buffers[capture_idx];
++    if (!capture->plane_ptr[0] || capture->plane_len[0] == 0)
++        return -1;
++
++    V4L2MmapBuffer copy;
++    memset(&copy, 0, sizeof(copy));
++    for (uint32_t p = 0; p < VIDEO_MAX_PLANES; p++)
++        copy.plane_fd[p] = -1;
++    copy.fd = -1;
++    copy.num_planes = 1;
++
++    if (ion_alloc_buffer(ctx, &copy, 0, capture->plane_len[0]) < 0)
++        return -1;
++
++    memcpy(copy.plane_ptr[0], capture->plane_ptr[0], capture->plane_len[0]);
++    int fd = copy.plane_fd[0];
++
++    munmap(copy.plane_ptr[0], copy.plane_len[0]);
++    copy.plane_ptr[0] = NULL;
++    copy.plane_fd[0] = -1;
++    if (copy.ion_handle[0] && ctx->ion_fd >= 0) {
++        struct ion_free_legacy free_data = {
++            .handle = copy.ion_handle[0],
++        };
++        ioctl(ctx->ion_fd, ION_IOC_FREE_LEGACY, &free_data);
++    }
++
++    return fd;
++}
++
+ void v4l2_release_ion_buffers(V4L2Context *ctx)
+ {
+     for (int i = 0; i < ctx->num_output_buffers; i++)
 diff --git a/src/vabackend.c b/src/vabackend.c
-index a0be460..bbf6e5a 100644
+index a0be460..3472458 100644
 --- a/src/vabackend.c
 +++ b/src/vabackend.c
-@@ -1109,7 +1109,9 @@ static VAStatus v4l2_DestroyImage(
+@@ -402,6 +402,7 @@ static VAStatus v4l2_CreateSurfaces(
+         if (surface == NULL)
+             return VA_STATUS_ERROR_ALLOCATION_FAILED;
+ 
++        surface->id = id;
+         surface->width = width;
+         surface->height = height;
+         surface->fourcc = V4L2_PIX_FMT_NV12;  /* Default to NV12 */
+@@ -729,6 +730,10 @@ static VAStatus v4l2_BeginPicture(
+     if (surface->context && surface->capture_idx >= 0) {
+         v4l2_requeue_capture(surface->context, surface->capture_idx);
+     }
++    if (surface->dmabuf_fd >= 0) {
++        close(surface->dmabuf_fd);
++        surface->dmabuf_fd = -1;
++    }
+     surface->capture_idx = -1;
+ 
+     /* Reset bitstream buffer for this picture */
+@@ -737,6 +742,8 @@ static VAStatus v4l2_BeginPicture(
+     context->last_slice_params = NULL;
+     context->last_slice_count = 0;
+     context->num_frame_buffers = 0;
++    context->current_timestamp = 0;
++    context->h264.timestamp_epoch_set_for_frame = false;
+ 
+     surface->context = context;
+     surface->decoded = false;
+@@ -766,15 +773,27 @@ static int pending_surface_push(V4L2Context *context, V4L2Surface *surface)
+     return 0;
+ }
+ 
+-static void pending_surface_pop(V4L2Context *context)
++V4L2Surface *v4l2_take_pending_surface(V4L2Context *context,
++                                       uint64_t sequence)
+ {
+-    if (context->num_pending_surfaces == 0)
+-        return;
++    for (int i = 0; i < context->num_pending_surfaces; i++) {
++        int index = (context->pending_surface_head + i) % MAX_SURFACES;
++        V4L2Surface *surface = context->pending_surfaces[index];
++        if (!surface || surface->submit_sequence != sequence)
++            continue;
+ 
+-    context->pending_surfaces[context->pending_surface_head] = NULL;
+-    context->pending_surface_head =
+-        (context->pending_surface_head + 1) % MAX_SURFACES;
+-    context->num_pending_surfaces--;
++        for (int j = i; j + 1 < context->num_pending_surfaces; j++) {
++            int to = (context->pending_surface_head + j) % MAX_SURFACES;
++            int from = (context->pending_surface_head + j + 1) % MAX_SURFACES;
++            context->pending_surfaces[to] = context->pending_surfaces[from];
++        }
++        int tail = (context->pending_surface_head +
++                    context->num_pending_surfaces - 1) % MAX_SURFACES;
++        context->pending_surfaces[tail] = NULL;
++        context->num_pending_surfaces--;
++        return surface;
++    }
++    return NULL;
+ }
+ 
+ static VAStatus v4l2_RenderPicture(
+@@ -848,27 +867,32 @@ static VAStatus v4l2_EndPicture(
+ 
+     /* Submit bitstream to V4L2 OUTPUT queue */
+     if (context->bitstream.size > 0) {
++        if (!context->render_target ||
++            context->num_pending_surfaces >= MAX_SURFACES) {
++            pthread_mutex_unlock(&context->mutex);
++            return VA_STATUS_ERROR_MAX_NUM_EXCEEDED;
++        }
++        uint64_t sequence = context->current_timestamp;
++        if (sequence == 0)
++            sequence = ++context->next_submit_sequence;
++        context->render_target->submit_sequence = sequence;
+         int ret = v4l2_queue_bitstream(context, context->bitstream.data,
+-                                        context->bitstream.size);
++                                        context->bitstream.size, sequence);
+         if (ret < 0) {
+             LOG("Failed to queue bitstream");
+             pthread_mutex_unlock(&context->mutex);
+             return VA_STATUS_ERROR_OPERATION_FAILED;
+         }
+ 
+-        if (context->render_target &&
+-            pending_surface_push(context, context->render_target) < 0) {
++        if (pending_surface_push(context, context->render_target) < 0) {
+             LOG("Pending surface queue is full");
+             pthread_mutex_unlock(&context->mutex);
+             return VA_STATUS_ERROR_MAX_NUM_EXCEEDED;
+         }
+     }
+ 
+-    /* Stateful decoders can delay output. Bind the next decoded frame to the
+-     * oldest submitted surface, not to the frame currently being submitted. */
+-    V4L2Surface *pending = pending_surface_front(context);
+-    if (pending && v4l2_dequeue_frame(context, pending) == 0)
+-        pending_surface_pop(context);
++    if (pending_surface_front(context))
++        v4l2_dequeue_frame(context, 5);
+ 
+     pthread_mutex_unlock(&context->mutex);
+     return VA_STATUS_SUCCESS;
+@@ -901,9 +925,8 @@ static VAStatus v4l2_SyncSurface(
+         pthread_mutex_unlock(&surface->mutex);
+ 
+         pthread_mutex_lock(&context->mutex);
+-        V4L2Surface *pending = pending_surface_front(context);
+-        if (pending && v4l2_dequeue_frame(context, pending) == 0)
+-            pending_surface_pop(context);
++        if (pending_surface_front(context))
++            v4l2_dequeue_frame(context, 20);
+         pthread_mutex_unlock(&context->mutex);
+ 
+         pthread_mutex_lock(&surface->mutex);
+@@ -1109,7 +1132,7 @@ static VAStatus v4l2_DestroyImage(
      VADriverContextP ctx,
      VAImageID image)
  {
 -    return VA_STATUS_SUCCESS;
-+    /* DeriveImage allocates a normal buffer id. The old no-op leaked one id
-+     * per copied frame and eventually exhausted MAX_BUFFERS during playback. */
 +    return v4l2_DestroyBuffer(ctx, image);
  }
  
  static VAStatus v4l2_SetImagePalette(
+@@ -1185,6 +1208,11 @@ static VAStatus v4l2_GetImage(
+         memcpy(dst + row * surface->width,
+                src + row * stride, surface->width);
+ 
++    int capture_idx = surface->capture_idx;
++    if (v4l2_requeue_capture(context, capture_idx) < 0)
++        return VA_STATUS_ERROR_OPERATION_FAILED;
++    surface->capture_idx = -1;
++
+     return VA_STATUS_SUCCESS;
+ }
+ 
+@@ -1363,16 +1391,32 @@ static VAStatus v4l2_ExportSurfaceHandle(
+         return VA_STATUS_ERROR_UNSUPPORTED_MEMORY_TYPE;
+     }
+ 
+-    if (surface->context == NULL || surface->capture_idx < 0)
++    if (surface->context == NULL)
+         return VA_STATUS_ERROR_INVALID_SURFACE;
+ 
+-    /* Export DMABuf from V4L2 CAPTURE buffer */
+-    int fd = v4l2_export_dmabuf(surface->context, surface->capture_idx);
++    if (surface->capture_idx < 0 && surface->dmabuf_fd < 0) {
++        VAStatus status = v4l2_SyncSurface(ctx, surface_id);
++        if (status != VA_STATUS_SUCCESS)
++            return status;
++    }
++
++    V4L2MmapBuffer *capture = NULL;
++    if (surface->dmabuf_fd < 0) {
++        int capture_idx = surface->capture_idx;
++        capture = &surface->context->capture_buffers[capture_idx];
++        surface->dmabuf_fd =
++            v4l2_copy_capture_dmabuf(surface->context, capture_idx);
++        if (surface->dmabuf_fd < 0)
++            return VA_STATUS_ERROR_OPERATION_FAILED;
++        if (v4l2_requeue_capture(surface->context, capture_idx) < 0)
++            return VA_STATUS_ERROR_OPERATION_FAILED;
++        surface->capture_idx = -1;
++    } else {
++        capture = &surface->context->capture_buffers[0];
++    }
++    int fd = fcntl(surface->dmabuf_fd, F_DUPFD_CLOEXEC, 3);
+     if (fd < 0)
+         return VA_STATUS_ERROR_OPERATION_FAILED;
+-
+-    V4L2MmapBuffer *capture =
+-        &surface->context->capture_buffers[surface->capture_idx];
+     uint32_t stride = (surface->width + 127U) & ~127U;
+     uint32_t y_scanlines = (surface->height + 31U) & ~31U;
+ 
+diff --git a/src/vabackend.h b/src/vabackend.h
+index d84163f..f81ef3e 100644
+--- a/src/vabackend.h
++++ b/src/vabackend.h
+@@ -91,6 +91,8 @@ typedef struct {
+ 
+ /* Decoded surface (maps to CAPTURE buffer) */
+ typedef struct V4L2Surface {
++    VASurfaceID     id;
++    uint64_t        submit_sequence;
+     uint32_t        width;
+     uint32_t        height;
+     uint32_t        fourcc;         /* V4L2 pixel format */
+@@ -149,6 +151,8 @@ typedef struct V4L2Context {
+     V4L2Surface         *pending_surfaces[MAX_SURFACES];
+     int                 pending_surface_head;
+     int                 num_pending_surfaces;
++    uint64_t            next_submit_sequence;
++    uint64_t            current_timestamp;
+     BitstreamBuffer     bitstream;
+     const V4L2Codec     *codec;
+ 
+@@ -163,6 +167,10 @@ typedef struct V4L2Context {
+         size_t          last_sps_size;
+         uint8_t         last_pps[64];
+         size_t          last_pps_size;
++        VAPictureParameterBufferH264 last_pic;
++        bool            have_picture_params;
++        uint64_t        timestamp_epoch;
++        bool            timestamp_epoch_set_for_frame;
+     } h264;
+ 
+     /* HEVC codec-specific state */
+@@ -233,10 +241,14 @@ void v4l2_close_device(V4L2Driver *drv, int fd);
+ int v4l2_probe_capabilities(V4L2Driver *drv, int fd);
+ int v4l2_setup_output_queue(V4L2Context *ctx);
+ int v4l2_setup_capture_queue(V4L2Context *ctx);
+-int v4l2_queue_bitstream(V4L2Context *ctx, void *data, size_t size);
+-int v4l2_dequeue_frame(V4L2Context *ctx, V4L2Surface *surface);
++int v4l2_queue_bitstream(V4L2Context *ctx, void *data, size_t size,
++                         uint64_t sequence);
++int v4l2_dequeue_frame(V4L2Context *ctx, int timeout_ms);
+ int v4l2_requeue_capture(V4L2Context *ctx, int capture_idx);
+ int v4l2_export_dmabuf(V4L2Context *ctx, int capture_idx);
++int v4l2_copy_capture_dmabuf(V4L2Context *ctx, int capture_idx);
++V4L2Surface *v4l2_take_pending_surface(V4L2Context *ctx,
++                                       uint64_t sequence);
+ void v4l2_release_ion_buffers(V4L2Context *ctx);
+ 
+ /* Codec registration */
+

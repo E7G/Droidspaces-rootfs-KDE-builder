@@ -16,7 +16,7 @@ def replace_once(old: str, new: str) -> None:
     text = text.replace(old, new, 1)
 
 
-replace_once("pkgrel=1\n", "pkgrel=1.2\n")
+replace_once("pkgrel=1\n", "pkgrel=1.3\n")
 replace_once("arch=(x86_64)\n", "arch=(aarch64)\n")
 replace_once("  onnxruntime\n", "")
 replace_once("  jack\n", "")
