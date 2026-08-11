@@ -345,6 +345,10 @@ if [[ "${1:-}" = session ]]; then
     --group PlasmaViews --group 'Panel 2' --key floating 0 2>/dev/null || true
   /usr/bin/kwriteconfig6 --file "$plasma_config_home/plasmashellrc" \
     --group PlasmaViews --group 'Panel 2' --key floatingApplets 0 2>/dev/null || true
+  # Keep the panel fully opaque. Adaptive/translucent panel backgrounds repaint on
+  # every video frame on the legacy Anland compositor and visibly pulse.
+  /usr/bin/kwriteconfig6 --file "$plasma_config_home/plasmashellrc" \
+    --group PlasmaViews --group 'Panel 2' --key panelOpacity 1 2>/dev/null || true
   # Existing Anland KWin builds expose the bridge as virtual PipeWire nodes.
   # Plasma PA hides those by default, so keep them visible during upgrades too.
   /usr/bin/kwriteconfig6 \

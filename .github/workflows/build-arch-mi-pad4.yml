@@ -284,7 +284,7 @@ jobs:
             -d false \
             -e true \
             -f false \
-            -h true \
+            -h false \
             -j false \
             -n true \
             -S true \
@@ -619,7 +619,7 @@ jobs:
           display=Anland-Wayland
           gpu=KGSL-legacy-ION-shim
           audio=Anland
-          input=Fcitx5-Pinyin
+          input=Android-IME
           locale=zh_CN.UTF-8
           default_user=user
           systemd_compat=257-pid1-droidspaces
@@ -664,6 +664,6 @@ jobs:
             Display: Anland Wayland
             GPU: KGSL + legacy ION shim
             Audio: Anland
-            Input: Fcitx5 Pinyin
+            Input: Android IME
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
