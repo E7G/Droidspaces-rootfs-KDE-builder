@@ -124,18 +124,24 @@ void AnlandOutput::onConsumerReady()
     if (m_awaitingPresent) {
         m_awaitingPresent = false;
         completeFrame();
+    }
+
+    // A buffer-ready event means the consumer has already selected its *next*
+    // dmabuf and is blocked in refresh_done() waiting for exactly one reply. If
+    // this buffer still carries old/undefined contents, render the current scene
+    // into it. This walks all rotation buffers after damage without free-running
+    // once they are synchronized.
+    if (m_eglLayer && m_eglLayer->needsRepaint()) {
+        m_renderLoop->scheduleRepaint();
         return;
     }
-    // Do not unconditionally repaint here. Scene damage schedules its own frame,
-    // and AnlandEglLayer schedules the extra frames needed to refresh every
-    // rotated dmabuf. Driving a new repaint from every buffer-ready event creates
-    // a permanent 30 fps full-screen render loop on an otherwise idle desktop,
-    // wasting CPU/GPU and rotating unchanged buffers (visible as intermittent
-    // flashes on the legacy KGSL/ION stack).
-    // The one exception is an unsolicited ready event (normally the initial
-    // buffer-ready after connection): no frame is in flight, so schedule one
-    // repaint to publish scene changes that accumulated during startup.
-    m_renderLoop->scheduleRepaint();
+
+    // Idle scene: acknowledge the selected clean buffer without rendering. The
+    // old code returned after completing the previous OutputFrame and left this
+    // new request unanswered; the consumer hit its five-second safety timeout,
+    // tore down every dmabuf and reconnected, producing the periodic full-screen
+    // flash. A bare refresh message keeps BufferQueue alive while the GPU sleeps.
+    m_backend->notifyFramePresented();
 }
 
 void AnlandOutput::resize(const QSize &newSize)

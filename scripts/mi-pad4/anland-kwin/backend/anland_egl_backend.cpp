@@ -223,6 +223,11 @@ bool AnlandEglLayer::importBuffers(int count)
     return true;
 }
 
+bool AnlandEglLayer::needsRepaint() const
+{
+    return m_damageFlags != 0;
+}
+
 void AnlandEglLayer::onOutputTransformChanged()
 {
     const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);

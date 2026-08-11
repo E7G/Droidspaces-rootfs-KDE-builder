@@ -52,6 +52,11 @@ public:
     bool importBuffers(int count);
     void releaseBuffers() override;
 
+    /** True while at least one consumer-owned dmabuf still needs the current
+     *  scene. Used by the output handshake to render dirty rotation buffers but
+     *  acknowledge clean ones without running the GPU continuously. */
+    bool needsRepaint() const;
+
 private:
     void onOutputTransformChanged();
 

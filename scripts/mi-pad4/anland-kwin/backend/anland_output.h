@@ -49,8 +49,8 @@ public:
      *  pacing and the OutputMode so currentMode() stays consistent. */
     void setRefreshRate(int refresh);
 
-    /** Consumer signalled buffer-ready (buf_ready_efd): complete the in-flight
-     *  frame, or schedule one initial repaint if no frame was submitted. */
+    /** Consumer selected its next buffer: complete the in-flight frame, render
+     *  dirty rotation buffers, or acknowledge a clean buffer without GPU work. */
     void onConsumerReady();
 
     /** Reconfigure the output when the consumer uses a different buffer size
