@@ -226,9 +226,9 @@ if [[ "${1:-}" != child && "${1:-}" != shell && "${1:-}" != session ]]; then
   rm -f "$XDG_RUNTIME_DIR"/wayland-* \
     "$XDG_RUNTIME_DIR"/wayland-*.lock 2>/dev/null || true
   start_system_bus || true
-  "$0" child >>/var/log/plasma-conc-wayland.log 2>&1 &
+  /usr/bin/bash "$0" child >>/var/log/plasma-conc-wayland.log 2>&1 &
   child_pid=$!
-  "$0" shell >>"$HOME/plasma-conc-shell.log" 2>&1 &
+  /usr/bin/bash "$0" shell >>"$HOME/plasma-conc-shell.log" 2>&1 &
   shell_pid=$!
 
   cleanup() {
@@ -249,17 +249,15 @@ if [[ "${1:-}" != child && "${1:-}" != shell && "${1:-}" != session ]]; then
   exit 1
 fi
 
-# The legacy guest has no user manager to remove stale compositor locks after
-# a forced container stop. Clean all transient Wayland endpoints before KWin
-# binds the fixed Anland display name.
-rm -f "$XDG_RUNTIME_DIR"/wayland-* \
-  "$XDG_RUNTIME_DIR"/wayland-*.lock 2>/dev/null || true
-chmod 666 "$XDG_RUNTIME_DIR"/wayland-*.lock 2>/dev/null || true
-
 # Keep KWin at its packaged path so its internal QPA plugin resolves correctly.
 # Only this child receives KGSL and the legacy ION shim; the desktop shell helper
 # below stays on stable software/shared-memory buffers.
 if [[ "${1:-}" = child ]]; then
+  # Only the compositor branch may remove stale Wayland endpoints. The shell
+  # branch starts concurrently; letting it perform this cleanup can unlink the
+  # new socket after KWin has bound it and cause a restart/black-screen loop.
+  rm -f "$XDG_RUNTIME_DIR"/wayland-* \
+    "$XDG_RUNTIME_DIR"/wayland-*.lock 2>/dev/null || true
   # D-Bus activated KDE helpers can escape the service cgroup on the legacy
   # kernel. If a previous session was force-stopped, their main thread may exit
   # while a QDBus thread spins forever as a PID-1 child. Remove the whole stale
