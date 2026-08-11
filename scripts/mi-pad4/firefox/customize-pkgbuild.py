@@ -16,9 +16,10 @@ def replace_once(old: str, new: str) -> None:
     text = text.replace(old, new, 1)
 
 
-replace_once("pkgrel=1\n", "pkgrel=1.1\n")
+replace_once("pkgrel=1\n", "pkgrel=1.2\n")
 replace_once("arch=(x86_64)\n", "arch=(aarch64)\n")
 replace_once("  onnxruntime\n", "")
+replace_once("  jack\n", "")
 for package in (
     "wasi-compiler-rt",
     "wasi-libc",
@@ -33,6 +34,21 @@ replace_once(
     "ac_add_options --disable-debug-symbols\n"
     "ac_add_options --without-onnx-runtime\n"
     "ac_add_options --without-wasm-sandboxed-libraries\n",
+)
+replace_once(
+    "ac_add_options --enable-alsa\n"
+    "ac_add_options --enable-jack\n",
+    "# Clover uses Anland's PipeWire-Pulse bridge. Remove unused audio backends.\n"
+    "ac_add_options --enable-pulseaudio\n"
+    "ac_add_options --disable-alsa\n"
+    "ac_add_options --disable-jack\n"
+    "# Tablet-only build: remove large services not used by normal browsing.\n"
+    "ac_add_options --disable-accessibility\n"
+    "ac_add_options --disable-webrtc\n"
+    "ac_add_options --disable-backgroundtasks\n"
+    "ac_add_options --disable-webdriver\n"
+    "ac_add_options --disable-profiling\n"
+    "ac_add_options --enable-mobile-optimize\n",
 )
 replace_once(
     '  echo -n "$_google_api_key" >google-api-key\n',

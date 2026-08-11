@@ -1,0 +1,146 @@
+diff --git a/src/v4l2-backend.c b/src/v4l2-backend.c
+index d50116b..7ffec4f 100644
+--- a/src/v4l2-backend.c
++++ b/src/v4l2-backend.c
+@@ -576,7 +576,9 @@ int v4l2_export_dmabuf(V4L2Context *ctx, int capture_idx)
+         return -1;
+     }
+ 
+-    ctx->capture_buffers[capture_idx].fd = expbuf.fd;
++    /* The exported fd belongs to the VA client. Do not cache it here: clients
++     * close every descriptor after import, and closing the same integer again
++     * during context teardown can hit an unrelated, subsequently reused fd. */
+     return expbuf.fd;
+ }
+ 
+diff --git a/src/vabackend.c b/src/vabackend.c
+index aa13c73..4cbb19d 100644
+--- a/src/vabackend.c
++++ b/src/vabackend.c
+@@ -922,8 +922,10 @@ static VAStatus v4l2_SyncSurface(
+         }
+     }
+ 
+-    /* Mark as ready after timeout to prevent hangs */
+-    surface->decoded = true;
++    if (!surface->decoded) {
++        pthread_mutex_unlock(&surface->mutex);
++        return VA_STATUS_ERROR_OPERATION_FAILED;
++    }
+     pthread_mutex_unlock(&surface->mutex);
+ 
+     return VA_STATUS_SUCCESS;
+@@ -1109,7 +1111,9 @@ static VAStatus v4l2_DestroyImage(
+     VADriverContextP ctx,
+     VAImageID image)
+ {
+-    return VA_STATUS_SUCCESS;
++    /* DeriveImage allocates an ordinary driver buffer id. The old no-op leaked
++     * one slot per decoded frame and eventually exhausted MAX_BUFFERS. */
++    return v4l2_DestroyBuffer(ctx, image);
+ }
+ 
+ static VAStatus v4l2_SetImagePalette(
+@@ -1409,37 +1413,75 @@ static VAStatus v4l2_ExportSurfaceHandle(
+     if (surface->context == NULL || surface->capture_idx < 0)
+         return VA_STATUS_ERROR_INVALID_SURFACE;
+ 
+-    /* Export DMABuf from V4L2 CAPTURE buffer */
+-    int fd = v4l2_export_dmabuf(surface->context, surface->capture_idx);
+-    if (fd < 0)
++    V4L2Context *context = surface->context;
++    struct v4l2_format fmt;
++    struct v4l2_buffer buf;
++    struct v4l2_plane planes[VIDEO_MAX_PLANES];
++    memset(&fmt, 0, sizeof(fmt));
++    memset(&buf, 0, sizeof(buf));
++    memset(planes, 0, sizeof(planes));
++
++    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++    if (ioctl(context->v4l2_fd, VIDIOC_G_FMT, &fmt) < 0)
+         return VA_STATUS_ERROR_OPERATION_FAILED;
+ 
+-    if (mem_type == VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME) {
+-        /* Simple DRM PRIME export - just return the fd */
+-        VADRMPRIMESurfaceDescriptor *desc = (VADRMPRIMESurfaceDescriptor *)descriptor;
+-        memset(desc, 0, sizeof(*desc));
+-        desc->fourcc = VA_FOURCC_NV12;
+-        desc->width = surface->width;
+-        desc->height = surface->height;
+-        desc->num_objects = 1;
+-        desc->objects[0].fd = fd;
+-        desc->objects[0].size = surface->width * surface->height * 3 / 2;
+-        desc->objects[0].drm_format_modifier = DRM_FORMAT_MOD_LINEAR;
+-        desc->num_layers = 2;
+-        /* Y plane */
+-        desc->layers[0].drm_format = DRM_FORMAT_R8;
+-        desc->layers[0].num_planes = 1;
+-        desc->layers[0].object_index[0] = 0;
+-        desc->layers[0].offset[0] = 0;
+-        desc->layers[0].pitch[0] = surface->width;
+-        /* UV plane */
+-        desc->layers[1].drm_format = DRM_FORMAT_RG88;
+-        desc->layers[1].num_planes = 1;
+-        desc->layers[1].object_index[0] = 0;
+-        desc->layers[1].offset[0] = surface->width * surface->height;
+-        desc->layers[1].pitch[0] = surface->width;
++    uint32_t plane_count = fmt.fmt.pix_mp.num_planes;
++    if (plane_count == 0 || plane_count > 2)
++        return VA_STATUS_ERROR_UNSUPPORTED_RT_FORMAT;
++
++    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++    buf.memory = V4L2_MEMORY_MMAP;
++    buf.index = surface->capture_idx;
++    buf.length = plane_count;
++    buf.m.planes = planes;
++    if (ioctl(context->v4l2_fd, VIDIOC_QUERYBUF, &buf) < 0)
++        return VA_STATUS_ERROR_OPERATION_FAILED;
++
++    VADRMPRIMESurfaceDescriptor *desc =
++        (VADRMPRIMESurfaceDescriptor *)descriptor;
++    memset(desc, 0, sizeof(*desc));
++    desc->fourcc = VA_FOURCC_NV12;
++    desc->width = fmt.fmt.pix_mp.width;
++    desc->height = fmt.fmt.pix_mp.height;
++    desc->num_objects = plane_count;
++
++    for (uint32_t p = 0; p < plane_count; p++) {
++        struct v4l2_exportbuffer expbuf;
++        memset(&expbuf, 0, sizeof(expbuf));
++        expbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++        expbuf.index = surface->capture_idx;
++        expbuf.plane = p;
++        expbuf.flags = O_RDONLY | O_CLOEXEC;
++        if (ioctl(context->v4l2_fd, VIDIOC_EXPBUF, &expbuf) < 0) {
++            for (uint32_t i = 0; i < p; i++)
++                close(desc->objects[i].fd);
++            memset(desc, 0, sizeof(*desc));
++            return VA_STATUS_ERROR_OPERATION_FAILED;
++        }
++        desc->objects[p].fd = expbuf.fd;
++        desc->objects[p].size = planes[p].length;
++        /* msm_vidc does not advertise a DRM modifier. INVALID means implicit
++         * layout and avoids falsely claiming linear Venus memory. */
++        desc->objects[p].drm_format_modifier = DRM_FORMAT_MOD_INVALID;
+     }
+ 
++    desc->num_layers = 2;
++    desc->layers[0].drm_format = DRM_FORMAT_R8;
++    desc->layers[0].num_planes = 1;
++    desc->layers[0].object_index[0] = 0;
++    desc->layers[0].offset[0] = 0;
++    desc->layers[0].pitch[0] = fmt.fmt.pix_mp.plane_fmt[0].bytesperline;
++
++    desc->layers[1].drm_format = DRM_FORMAT_GR88;
++    desc->layers[1].num_planes = 1;
++    desc->layers[1].object_index[0] = plane_count == 1 ? 0 : 1;
++    desc->layers[1].offset[0] = plane_count == 1
++        ? fmt.fmt.pix_mp.plane_fmt[0].bytesperline * fmt.fmt.pix_mp.height
++        : 0;
++    desc->layers[1].pitch[0] = plane_count == 1
++        ? fmt.fmt.pix_mp.plane_fmt[0].bytesperline
++        : fmt.fmt.pix_mp.plane_fmt[1].bytesperline;
++
+     return VA_STATUS_SUCCESS;
+ }
+ 

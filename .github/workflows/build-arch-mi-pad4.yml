@@ -33,12 +33,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate Clover V4L2 VA-API bridge
+        shell: bash
+        env:
+          V4L2_VAAPI_COMMIT: 1be35ad2fc1bc66c76842d735b6ec91e11944a44
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libdrm-dev \
+            libva-dev \
+            meson \
+            ninja-build
+
+          git clone --no-checkout \
+            https://github.com/E7G/libva-v4l2-stateful.git \
+            .ci/libva-v4l2-stateful
+          git -C .ci/libva-v4l2-stateful checkout "$V4L2_VAAPI_COMMIT"
+          git -C .ci/libva-v4l2-stateful apply \
+            "$GITHUB_WORKSPACE/scripts/mi-pad4/libva-v4l2-stateful/0001-clover-firefox-prime2-copy.patch"
+          meson setup \
+            .ci/libva-v4l2-stateful/build \
+            .ci/libva-v4l2-stateful
+          meson compile -C .ci/libva-v4l2-stateful/build
+
       - name: Restore Clover Firefox package
         id: firefox-cache
         uses: actions/cache@v4
         with:
           path: firefox-mi-pad4
-          key: firefox-clover-153.0.3-1.1-${{ hashFiles('scripts/mi-pad4/firefox/**') }}
+          key: firefox-clover-153.0.3-1.2-${{ hashFiles('scripts/mi-pad4/firefox/**') }}
 
       - name: Build Firefox 153 for Clover
         if: steps.firefox-cache.outputs.cache-hit != 'true'
@@ -99,11 +124,11 @@ jobs:
 
           mkdir -p firefox-mi-pad4
           cp -v \
-            .ci/firefox/firefox-153.0.3-1.1-aarch64.pkg.tar.* \
+            .ci/firefox/firefox-153.0.3-1.2-aarch64.pkg.tar.* \
             firefox-mi-pad4/
 
           sha256sum \
-            firefox-mi-pad4/firefox-153.0.3-1.1-aarch64.pkg.tar.* \
+            firefox-mi-pad4/firefox-153.0.3-1.2-aarch64.pkg.tar.* \
             | tee firefox-mi-pad4/FIREFOX-SHA256SUMS
 
       - name: Upload Clover Firefox package
@@ -473,16 +498,16 @@ jobs:
             }
 
           grep -Eq \
-            '^var/lib/pacman/local/firefox-153\.0\.3-1\.1/' \
+            '^var/lib/pacman/local/firefox-153\.0\.3-1\.2/' \
             rootfs-files.txt \
             || {
-              echo "Expected Clover Firefox 153.0.3-1.1 is not installed" >&2
+              echo "Expected Clover Firefox 153.0.3-1.2 is not installed" >&2
               exit 1
             }
 
           tar_cat \
             usr/share/droidspaces/firefox-clover-direct \
-            | grep -Fxq 'sync=legacy-kgsl-retire-wait' \
+            | grep -Fxq 'transfer=prime2-gpu-copy' \
             || {
               echo "Missing Clover Firefox DMABUF synchronization marker" >&2
               exit 1

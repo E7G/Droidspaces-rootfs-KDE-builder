@@ -24,6 +24,7 @@ COPY scripts/install-usb-manager.sh /usr/local/sbin/install-droidspaces-usb-mana
 COPY scripts/systemd257.sh /usr/local/sbin/systemd257
 COPY scripts/systemd257/ /usr/local/share/droidspaces/systemd257/
 COPY scripts/ion-legacy-shim.c /tmp/ion-legacy-shim.c
+COPY scripts/mi-pad4/libva-v4l2-stateful/0001-clover-firefox-prime2-copy.patch /tmp/libva-v4l2-stateful.patch
 COPY mesa-mi-pad4/ /tmp/mesa-mi-pad4/
 COPY local-packages-mi-pad4/ /tmp/local-packages-mi-pad4/
 
@@ -70,20 +71,21 @@ RUN printf '%s\n' \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
         kimageformats plasma-browser-integration plasma-mobile plasma-keyboard libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium firefox; \
     fi && \
-    # Replace the generic browser with the source-built Clover variant. Its
-    # decoded ION dmabufs go directly from msm_vidc to WebRender, with the
-    # missing Linux 4.4 KGSL completion ordering implemented in Firefox.
+    # Replace the generic browser with the source-built Clover variant. msm_vidc
+    # decodes in hardware; PRIME_2 transfers decoded NV12 to a renderer-owned
+    # dmabuf so the 16-buffer V4L2 CAPTURE queue cannot deadlock.
     if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         cp /etc/pacman.conf /tmp/pacman-firefox.conf && \
         sed -i '/^LocalFileSigLevel[[:space:]]*=/d; /^\[options\]$/a LocalFileSigLevel = Never' /tmp/pacman-firefox.conf && \
         pacman --config /tmp/pacman-firefox.conf -U --noconfirm \
-            /tmp/local-packages-mi-pad4/firefox-153.0.3-1.1-aarch64.pkg.tar.* && \
+            /tmp/local-packages-mi-pad4/firefox-153.0.3-1.2-aarch64.pkg.tar.* && \
         rm -f /tmp/pacman-firefox.conf && \
         mkdir -p /usr/share/droidspaces && \
         printf '%s\n' \
-            'firefox=153.0.3-1.1' \
-            'video=msm_vidc-ion-dmabuf-webrender' \
-            'sync=legacy-kgsl-retire-wait' \
+            'firefox=153.0.3-1.2' \
+            'decode=msm_vidc-v4l2-hardware' \
+            'transfer=prime2-gpu-copy' \
+            'sync=anland-native-fence' \
             > /usr/share/droidspaces/firefox-clover-direct; \
     fi && \
     # Arch 强制安装，但是这玩意不开硬件访问会导致桌面闪退
@@ -292,6 +294,7 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         pacman -S --noconfirm --needed pkgconf meson ninja libva libdrm gst-plugins-bad-libs && \
         git clone https://github.com/E7G/libva-v4l2-stateful.git /tmp/libva-v4l2-stateful && \
         git -C /tmp/libva-v4l2-stateful checkout "$MI_PAD4_V4L2_VAAPI_COMMIT" && \
+        git -C /tmp/libva-v4l2-stateful apply /tmp/libva-v4l2-stateful.patch && \
         meson setup /tmp/libva-v4l2-stateful/build /tmp/libva-v4l2-stateful \
             --buildtype=release --prefix=/usr && \
         meson compile -C /tmp/libva-v4l2-stateful/build && \
