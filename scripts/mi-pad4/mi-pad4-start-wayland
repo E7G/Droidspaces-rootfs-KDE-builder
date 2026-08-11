@@ -40,9 +40,16 @@ unset XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS
 # avoiding a second Linux virtual keyboard and Fcitx candidate-window flicker.
 unset XMODIFIERS GTK_IM_MODULE QT_IM_MODULE SDL_IM_MODULE GLFW_IM_MODULE
 export QT_IM_MODULES=wayland
-export LIBGL_ALWAYS_SOFTWARE=1
-export QT_QUICK_BACKEND=software
-export QT_OPENGL=software
+# Use Freedreno/KGSL for the whole Wayland session.  The old software QtQuick
+# path uploads a partially damaged SHM panel on every video frame; its recycled
+# buffers are the source of the flashing taskbar.  Native Wayland EGL keeps
+# Plasma, KDE applications and browser windows in GPU buffers end-to-end.
+unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER QT_QUICK_BACKEND QT_OPENGL
+export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+export FD_FORCE_KGSL=1
+export FD_KGSL_ENABLE_DMABUF=1
+export QSG_RHI_BACKEND=opengl
+export QSG_RENDER_LOOP=basic
 export QT_QPA_PLATFORMTHEME=KDE
 export QT_QUICK_CONTROLS_STYLE=org.kde.breeze
 export QT_ENABLE_GLYPH_CACHE_WORKAROUND=1
@@ -160,6 +167,19 @@ if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; t
   printf '%s\n' "$profile_revision" >"$profile_stamp"
 fi
 
+# The custom Firefox package can replace /usr/share/applications/firefox.desktop
+# after the image layer first patches it.  A per-user desktop entry has higher
+# XDG precedence and also fixes the existing icon-task launcher on upgrades.
+if [[ -f /usr/share/applications/firefox.desktop ]]; then
+  mkdir -p "$HOME/.local/share/applications" "$HOME/Desktop"
+  sed 's#Exec=/usr/lib/firefox/firefox#Exec=/usr/local/bin/mi-pad4-firefox#g' \
+    /usr/share/applications/firefox.desktop \
+    >"$HOME/.local/share/applications/firefox.desktop"
+  cp -f "$HOME/.local/share/applications/firefox.desktop" \
+    "$HOME/Desktop/firefox.desktop"
+  chmod 0755 "$HOME/Desktop/firefox.desktop"
+fi
+
 # Android's keyboard is the only on-screen keyboard. Remove the old standalone
 # Fcitx autostart entry so it cannot compete for text-input focus.
 rm -f "$HOME/.config/autostart/fcitx5.desktop" 2>/dev/null || true
@@ -250,8 +270,8 @@ if [[ "${1:-}" != child && "${1:-}" != shell && "${1:-}" != session ]]; then
 fi
 
 # Keep KWin at its packaged path so its internal QPA plugin resolves correctly.
-# Only this child receives KGSL and the legacy ION shim; the desktop shell helper
-# below stays on stable software/shared-memory buffers.
+# KWin receives the legacy ION shim in its wrapper.  Plasma and applications use
+# the session-wide KGSL EGL path above, without inheriting KWin's preload shim.
 if [[ "${1:-}" = child ]]; then
   # Only the compositor branch may remove stale Wayland endpoints. The shell
   # branch starts concurrently; letting it perform this cleanup can unlink the
@@ -416,10 +436,8 @@ fi
 
 export DBUS_SESSION_BUS_ADDRESS="$dbus_address"
 export DISPLAY="${session_display:-:0}"
-export QSG_RENDER_LOOP=basic
-
 # Import only session metadata from plasma_session. Importing its full
-# environment would leak KWin's KGSL and legacy-ION settings into plasmashell.
+# environment would leak KWin's legacy-ION preload into plasmashell.
 plasma_session_pid="$(latest_live_pid '(^|/)plasma_session($| )' || true)"
 if [[ -n "$plasma_session_pid" && -r "/proc/$plasma_session_pid/environ" ]]; then
   while IFS='=' read -r name value; do

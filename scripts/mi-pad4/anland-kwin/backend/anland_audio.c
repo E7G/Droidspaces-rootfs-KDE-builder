@@ -22,7 +22,6 @@
 #define DEFAULT_RATE          48000
 #define DEFAULT_PLAY_CHANNELS 2
 #define DEFAULT_CAP_CHANNELS  1
-#define DEFAULT_QUANTUM       480
 /* ~1s of stereo S16 mic audio; bounds added latency, old samples drop on overflow.
  * Sized for the worst case (stereo) so the ring never under-allocates. */
 #define MIC_RING_BYTES        (48000 * 2 * (int)sizeof(int16_t))
@@ -407,10 +406,6 @@ static int build_pw(struct anland_audio *a)
             PW_KEY_MEDIA_CLASS, "Audio/Sink",
             PW_KEY_NODE_NAME, "anland-speaker",
             PW_KEY_NODE_DESCRIPTION, "Anland remote speaker",
-            /* This endpoint consumes graph audio; it is not a hardware clock.
-             * Let PipeWire assign Dummy-Driver. Advertising DRIVER here made the
-             * node responsible for graph timing and left its input buffers empty. */
-            PW_KEY_NODE_WANT_DRIVER, "true",
             PW_KEY_NODE_VIRTUAL, "false",
             PW_KEY_PRIORITY_SESSION, "1010",   /* outrank the auto-null dummy sink */
             PW_KEY_PRIORITY_DRIVER, "1010",
@@ -426,7 +421,6 @@ static int build_pw(struct anland_audio *a)
             PW_KEY_MEDIA_CLASS, "Audio/Source",
             PW_KEY_NODE_NAME, "anland-mic",
             PW_KEY_NODE_DESCRIPTION, "Anland remote microphone",
-            PW_KEY_NODE_WANT_DRIVER, "true",
             PW_KEY_NODE_VIRTUAL, "false",
             PW_KEY_PRIORITY_SESSION, "1010",   /* outrank the auto-null dummy source */
             PW_KEY_PRIORITY_DRIVER, "1010",
