@@ -6,6 +6,7 @@
 */
 #include "anland_output.h"
 #include "anland_backend.h"
+#include "anland_egl_backend.h"
 #include "anland_logging.h"
 
 #include "core/renderbackend.h" // OutputFrame
