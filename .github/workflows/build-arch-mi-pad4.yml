@@ -498,13 +498,51 @@ jobs:
               exit 1
             }
 
-          grep -Eq \
-            '^var/lib/pacman/local/firefox-153\.0\.3-1\.3/' \
-            rootfs-files.txt \
-            || {
-              echo "Expected Clover Firefox 153.0.3-1.3 is not installed" >&2
-              exit 1
-            }
+          # Do not assume pacman local-db directory formatting here. The
+          # package version is authoritative; directory names can differ
+          # between pacman/libalpm revisions.
+          firefox_desc_member="$(
+            awk '
+              {
+                normalized=$0
+                sub(/^\.\//, "", normalized)
+                if (normalized ~ /^var\/lib\/pacman\/local\/firefox-[^/]+\/desc$/) {
+                  print $0
+                  exit
+                }
+              }
+            ' rootfs-files-raw.txt
+          )"
+
+          if [[ -z "$firefox_desc_member" ]]; then
+            echo "Firefox pacman local-db desc is missing" >&2
+            grep -E '(^|\./)var/lib/pacman/local/firefox-[^/]+/' \
+              rootfs-files-raw.txt \
+              || true
+            exit 1
+          fi
+
+          firefox_desc="$(tar -xOf "$rootfs_archive" "$firefox_desc_member")"
+          firefox_version="$(
+            printf '%s\n' "$firefox_desc" | awk '
+              $0 == "%NAME%" {
+                getline name
+                if (name == "firefox") {
+                  getline
+                  if ($0 == "%VERSION%") {
+                    getline
+                    print
+                    exit
+                  }
+                }
+              }
+            '
+          )"
+
+          [[ "$firefox_version" == "153.0.3-1.3" ]] || {
+            echo "Expected Clover Firefox 153.0.3-1.3, found: " "$firefox_version" >&2
+            exit 1
+          }
 
           tar_cat \
             usr/share/droidspaces/firefox-clover-direct \
