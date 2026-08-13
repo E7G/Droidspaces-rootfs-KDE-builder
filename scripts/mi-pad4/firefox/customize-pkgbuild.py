@@ -52,7 +52,8 @@ replace_once(
 )
 replace_once(
     '  echo -n "$_google_api_key" >google-api-key\n',
-    '  patch -Np1 <"$srcdir/../0002-mi-pad4-clover-direct-dmabuf.patch"\n\n'
+    '  patch -Np1 <"$srcdir/../0002-mi-pad4-clover-direct-dmabuf.patch"\n'
+    '  patch -Np1 <"$srcdir/../0003-mi-pad4-clover-full-egl-damage.patch"\n\n'
     '  echo -n "$_google_api_key" >google-api-key\n',
 )
 replace_once(

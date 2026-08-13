@@ -1,0 +1,29 @@
+diff --git a/gfx/webrender_bindings/RenderCompositorEGL.cpp b/gfx/webrender_bindings/RenderCompositorEGL.cpp
+index 0000000..0000000 100644
+--- a/gfx/webrender_bindings/RenderCompositorEGL.cpp
++++ b/gfx/webrender_bindings/RenderCompositorEGL.cpp
+@@ -793,20 +793,13 @@ RenderedFrameId RenderCompositorEGL::EndFrame(
+   if (mEGLSurface != EGL_NO_SURFACE && aDirtyRects.Length() > 0) {
+     gfx::IntRegion bufferInvalid;
+     const auto bufferSize = GetBufferSize();
+-    for (const DeviceIntRect& rect : aDirtyRects) {
+-      const auto left = std::clamp(rect.min.x, 0, bufferSize.width);
+-      const auto top = std::clamp(rect.min.y, 0, bufferSize.height);
+-
+-      const auto right = std::clamp(rect.max.x, 0, bufferSize.width);
+-      const auto bottom = std::clamp(rect.max.y, 0, bufferSize.height);
+-
+-      const auto width = right - left;
+-      const auto height = bottom - top;
+-
+-      bufferInvalid.OrWith(
+-          gfx::IntRect(left, (GetBufferSize().height - bottom), width, height));
+-    }
++    // Clover's legacy KGSL/Anland compositor can retain an old EGL buffer
++    // when a small damage rectangle is submitted. Keep WebRender and native
++    // Wayland/DMABUF GPU presentation, but repaint the complete buffer so the
++    // panel and browser surface cannot expose stale scanout regions.
++    bufferInvalid =
++        gfx::IntRegion(gfx::IntRect(0, 0, bufferSize.width, bufferSize.height));
+     gl()->SetDamage(bufferInvalid);
+   }
