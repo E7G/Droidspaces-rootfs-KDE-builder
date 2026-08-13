@@ -1,5 +1,4 @@
 diff --git a/gfx/webrender_bindings/RenderCompositorEGL.cpp b/gfx/webrender_bindings/RenderCompositorEGL.cpp
-index 0000000..0000000 100644
 --- a/gfx/webrender_bindings/RenderCompositorEGL.cpp
 +++ b/gfx/webrender_bindings/RenderCompositorEGL.cpp
 @@ -793,20 +793,13 @@ RenderedFrameId RenderCompositorEGL::EndFrame(
