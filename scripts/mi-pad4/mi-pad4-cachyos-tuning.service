@@ -1,0 +1,13 @@
+[Unit]
+Description=Mi Pad 4 portable CachyOS performance tuning
+After=systemd-sysctl.service systemd-udev-trigger.service
+Before=mi-pad4-desktop.service
+ConditionPathExists=/usr/local/libexec/mi-pad4-cachyos-tuning
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/mi-pad4-cachyos-tuning
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

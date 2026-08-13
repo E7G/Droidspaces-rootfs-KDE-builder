@@ -452,6 +452,11 @@ jobs:
             usr/lib/dri/v4l2_drv_video.so \
             usr/lib/firefox/glxtest \
             usr/lib/firefox/glxtest.real \
+            usr/local/libexec/mi-pad4-cachyos-tuning \
+            usr/lib/sysctl.d/70-mi-pad4-cachyos.conf \
+            usr/lib/udev/rules.d/60-mi-pad4-ioschedulers.rules \
+            etc/systemd/system/mi-pad4-cachyos-tuning.service \
+            usr/share/droidspaces/cachyos-mi-pad4 \
             usr/bin/startplasma-wayland \
             usr/bin/kwin_wayland
           do

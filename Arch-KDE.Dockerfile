@@ -25,6 +25,12 @@ COPY scripts/systemd257.sh /usr/local/sbin/systemd257
 COPY scripts/systemd257/ /usr/local/share/droidspaces/systemd257/
 COPY scripts/ion-legacy-shim.c /tmp/ion-legacy-shim.c
 COPY scripts/mi-pad4/libva-v4l2-stateful/0001-clover-firefox-prime2-copy.patch /tmp/libva-v4l2-stateful.patch
+COPY scripts/mi-pad4/70-mi-pad4-cachyos.conf /tmp/70-mi-pad4-cachyos.conf
+COPY scripts/mi-pad4/60-mi-pad4-ioschedulers.rules /tmp/60-mi-pad4-ioschedulers.rules
+COPY scripts/mi-pad4/00-mi-pad4-journal-size.conf /tmp/00-mi-pad4-journal-size.conf
+COPY scripts/mi-pad4/10-mi-pad4-system.conf /tmp/10-mi-pad4-system.conf
+COPY scripts/mi-pad4/mi-pad4-cachyos-tuning.service /tmp/mi-pad4-cachyos-tuning.service
+COPY scripts/mi-pad4/mi-pad4-cachyos-tuning /tmp/mi-pad4-cachyos-tuning
 COPY mesa-mi-pad4/ /tmp/mesa-mi-pad4/
 COPY local-packages-mi-pad4/ /tmp/local-packages-mi-pad4/
 
@@ -266,13 +272,20 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         install -Dm644 /tmp/mi-pad4/dbus-daemon.service /etc/systemd/system/dbus.service && \
         ln -sfn /dev/null /etc/systemd/system/dbus.socket && \
         ln -sfn /dev/null /etc/systemd/system/dbus-broker.service && \
-        mkdir -p /etc/systemd/system/multi-user.target.wants && \
-        ln -sfn ../dbus.service /etc/systemd/system/multi-user.target.wants/dbus.service && \
-        ln -sfn ../mi-pad4-desktop.service /etc/systemd/system/multi-user.target.wants/mi-pad4-desktop.service && \
-        install -Dm755 /tmp/mi-pad4/mi-pad4-file-manager /usr/local/bin/mi-pad4-file-manager && \
-        ln -sfn mi-pad4-file-manager /usr/local/bin/dolphin && \
-        install -Dm644 /tmp/mi-pad4/org.kde.dolphin.desktop /usr/local/share/applications/org.kde.dolphin.desktop && \
-        install -Dm644 /tmp/mi-pad4/pcmanfm-qt-settings.conf /usr/share/droidspaces/mi-pad4-profile/pcmanfm-qt-settings.conf && \
+         mkdir -p /etc/systemd/system/multi-user.target.wants && \
+         ln -sfn ../dbus.service /etc/systemd/system/multi-user.target.wants/dbus.service && \
+         ln -sfn ../mi-pad4-desktop.service /etc/systemd/system/multi-user.target.wants/mi-pad4-desktop.service && \
+         ln -sfn ../mi-pad4-cachyos-tuning.service /etc/systemd/system/multi-user.target.wants/mi-pad4-cachyos-tuning.service && \
+         install -Dm755 /tmp/mi-pad4/mi-pad4-file-manager /usr/local/bin/mi-pad4-file-manager && \
+         ln -sfn mi-pad4-file-manager /usr/local/bin/dolphin && \
+         install -Dm644 /tmp/mi-pad4/org.kde.dolphin.desktop /usr/local/share/applications/org.kde.dolphin.desktop && \
+         install -Dm644 /tmp/70-mi-pad4-cachyos.conf /usr/lib/sysctl.d/70-mi-pad4-cachyos.conf && \
+         install -Dm644 /tmp/60-mi-pad4-ioschedulers.rules /usr/lib/udev/rules.d/60-mi-pad4-ioschedulers.rules && \
+         install -Dm644 /tmp/00-mi-pad4-journal-size.conf /usr/lib/systemd/journald.conf.d/00-mi-pad4-journal-size.conf && \
+         install -Dm644 /tmp/10-mi-pad4-system.conf /usr/lib/systemd/system.conf.d/10-mi-pad4-system.conf && \
+         install -Dm755 /tmp/mi-pad4-cachyos-tuning /usr/local/libexec/mi-pad4-cachyos-tuning && \
+         install -Dm644 /tmp/mi-pad4-cachyos-tuning.service /etc/systemd/system/mi-pad4-cachyos-tuning.service && \
+         install -Dm644 /tmp/mi-pad4/pcmanfm-qt-settings.conf /usr/share/droidspaces/mi-pad4-profile/pcmanfm-qt-settings.conf && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
         install -Dm644 /tmp/mi-pad4/dolphinrc /usr/share/droidspaces/mi-pad4-profile/dolphinrc && \
         install -Dm644 /tmp/mi-pad4/dolphin-global-viewproperties /usr/share/droidspaces/mi-pad4-profile/dolphin-global-viewproperties && \
@@ -282,9 +295,15 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
             sed -i 's#Exec=/usr/lib/firefox/firefox#Exec=/usr/local/bin/mi-pad4-firefox#g' "$desktop"; \
         done && \
         install -Dm644 /tmp/mi-pad4/container.config /usr/share/droidspaces/mi-pad4-container.config && \
-        install -Dm644 /tmp/mi-pad4/sepolicy.rule /usr/share/droidspaces/mi-pad4-sepolicy.rule && \
-        mkdir -p /etc/droidspaces && \
-        printf '%s\n' 'SYSTEMD_DROIDSPACES_COMPAT=1' 'SYSTEMD_LOG_LEVEL=warning' > /etc/droidspaces/systemd-compat.env && \
+         install -Dm644 /tmp/mi-pad4/sepolicy.rule /usr/share/droidspaces/mi-pad4-sepolicy.rule && \
+         mkdir -p /etc/droidspaces && \
+         printf '%s\n' \
+             'cachyos=portable-mi-pad4' \
+             'sysctl=memory-io-thp' \
+             'scheduler=schedutil-if-available' \
+             'firefox=portable-cachyos-profile' \
+             > /usr/share/droidspaces/cachyos-mi-pad4 && \
+         printf '%s\n' 'SYSTEMD_DROIDSPACES_COMPAT=1' 'SYSTEMD_LOG_LEVEL=warning' > /etc/droidspaces/systemd-compat.env && \
         printf '%s\n' '#!/bin/bash' 'set -u' 'echo "systemd: $(/usr/lib/systemd/systemd --version 2>/dev/null | head -n 1 || true)"' 'echo "kernel: $(uname -r)"' 'echo "pid1: $(cat /proc/1/comm 2>/dev/null || true)"' 'echo "state: $(systemctl is-system-running 2>/dev/null || true)"' 'echo "desktop: $(systemctl is-active mi-pad4-desktop.service 2>/dev/null || true)"' 'echo "mode: systemd257-droidspaces"' > /usr/local/bin/droidspaces-systemd-check && \
         chmod 755 /usr/local/bin/droidspaces-systemd-check; \
     fi
@@ -513,7 +532,10 @@ RUN if [ "$ENABLE_systemd257_ARG" = "true" ]; then \
     rm -rf /usr/local/share/droidspaces/systemd257
 
 # 彻底清理 pacman 缓存
-RUN rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/* /tmp/local-packages-mi-pad4
+RUN rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/* /tmp/local-packages-mi-pad4 && \
+    rm -f /tmp/70-mi-pad4-cachyos.conf /tmp/60-mi-pad4-ioschedulers.rules \
+          /tmp/00-mi-pad4-journal-size.conf /tmp/10-mi-pad4-system.conf \
+          /tmp/mi-pad4-cachyos-tuning /tmp/mi-pad4-cachyos-tuning.service
 # 阶段 2：将完整的根文件系统导出到 scratch（空白层），以便外部直接提取或打包成 tarfs
 FROM scratch AS export
 COPY --from=customizer / /
