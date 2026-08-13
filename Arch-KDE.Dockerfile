@@ -78,11 +78,11 @@ RUN printf '%s\n' \
         cp /etc/pacman.conf /tmp/pacman-firefox.conf && \
         sed -i '/^LocalFileSigLevel[[:space:]]*=/d; /^\[options\]$/a LocalFileSigLevel = Never' /tmp/pacman-firefox.conf && \
         pacman --config /tmp/pacman-firefox.conf -U --noconfirm \
-            /tmp/local-packages-mi-pad4/firefox-153.0.3-1.2-aarch64.pkg.tar.* && \
+            /tmp/local-packages-mi-pad4/firefox-153.0.3-1.3-aarch64.pkg.tar.* && \
         rm -f /tmp/pacman-firefox.conf && \
         mkdir -p /usr/share/droidspaces && \
         printf '%s\n' \
-            'firefox=153.0.3-1.2' \
+            'firefox=153.0.3-1.3' \
             'decode=msm_vidc-v4l2-hardware' \
             'transfer=prime2-gpu-copy' \
             'sync=anland-native-fence' \
