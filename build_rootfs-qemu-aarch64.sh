@@ -9,8 +9,9 @@ ENABLE_nosnap="false"
 ENABLE_8gen2_wayland="false"
 ENABLE_systemd257="false"
 ENABLE_MI_PAD4_PROFILE="false"
+ENABLE_MI_PAD4_FIREFOX="false"
 # 解析输入参数 (-i 指定 Dockerfile，-v 指定版本号)
-while getopts "i:v:K:L:P:a:b:c:d:e:f:g:h:j:n:S:t:u:A:M:" opt; do
+while getopts "i:v:K:L:P:a:b:c:d:e:f:g:h:j:n:S:t:u:A:M:F:" opt; do
   case $opt in
     i) DOCKERFILE="$OPTARG" ;; 
     v) VERSION="$OPTARG" ;;    
@@ -32,6 +33,7 @@ while getopts "i:v:K:L:P:a:b:c:d:e:f:g:h:j:n:S:t:u:A:M:" opt; do
     u) USERNAME="$OPTARG" ;; 
     A) ENABLE_anland_kde="$OPTARG" ;; # anland_kde 支持
     M) ENABLE_MI_PAD4_PROFILE="$OPTARG" ;; # 小米平板 4 专用 RootFS
+    F) ENABLE_MI_PAD4_FIREFOX="$OPTARG" ;;
     *) echo "用法: $0 -i <template.Dockerfile> [-v <version>] [-S <true|false>]" ; exit 1 ;;
   esac
 done
@@ -119,6 +121,7 @@ docker buildx build \
   --build-arg ENABLE_anland_kde_ARG="$ENABLE_anland_kde" \
   --build-arg ENABLE_8gen2_wayland_ARG="$ENABLE_8gen2_wayland" \
   --build-arg ENABLE_MI_PAD4_PROFILE_ARG="$ENABLE_MI_PAD4_PROFILE" \
+  --build-arg ENABLE_MI_PAD4_FIREFOX_ARG="$ENABLE_MI_PAD4_FIREFOX" \
   --build-arg USERNAME="$USERNAME" \
   -f "$DOCKERFILE" \
   .

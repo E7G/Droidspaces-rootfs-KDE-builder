@@ -17,6 +17,12 @@ on:
         type: boolean
         default: false
 
+      enable_clover_firefox:
+        description: Integrate experimental Clover Firefox into rootfs
+        required: true
+        type: boolean
+        default: false
+
 permissions:
   contents: write
 
@@ -292,6 +298,7 @@ jobs:
         shell: bash
         env:
           PROFILE: ${{ inputs.profile }}
+          ENABLE_CLOVER_FIREFOX: ${{ inputs.enable_clover_firefox }}
         run: |
           set -euo pipefail
 
@@ -317,10 +324,13 @@ jobs:
             -t false \
             -u user \
             -A true \
-            -M true
+            -M true \
+            -F "${ENABLE_CLOVER_FIREFOX}"
 
       - name: Validate rootfs
         shell: bash
+        env:
+          ENABLE_CLOVER_FIREFOX: ${{ inputs.enable_clover_firefox }}
         run: |
           set -euo pipefail
 
@@ -445,13 +455,7 @@ jobs:
             etc/systemd/system/mi-pad4-desktop.service \
             etc/systemd/system/multi-user.target.wants/mi-pad4-desktop.service \
             usr/local/bin/dolphin \
-            usr/local/bin/mi-pad4-firefox \
-            usr/share/droidspaces/firefox-clover-direct \
             usr/local/lib/libion-legacy-shim.so \
-            usr/local/lib/firefox-vaapi/libva-drm.so.2 \
-            usr/lib/dri/v4l2_drv_video.so \
-            usr/lib/firefox/glxtest \
-            usr/lib/firefox/glxtest.real \
             usr/local/libexec/mi-pad4-cachyos-tuning \
             usr/lib/sysctl.d/70-mi-pad4-cachyos.conf \
             usr/lib/udev/rules.d/60-mi-pad4-ioschedulers.rules \
@@ -503,6 +507,7 @@ jobs:
               exit 1
             }
 
+          if [[ "$ENABLE_CLOVER_FIREFOX" == "true" ]]; then
           # Do not assume pacman local-db directory formatting here. The
           # package version is authoritative; directory names can differ
           # between pacman/libalpm revisions.
@@ -563,6 +568,17 @@ jobs:
               echo "Missing Clover Firefox DMABUF synchronization marker" >&2
               exit 1
             }
+          else
+            for path in \
+              usr/local/bin/mi-pad4-firefox \
+              usr/share/droidspaces/firefox-clover-direct
+            do
+              if grep -Fxq "$path" rootfs-files.txt; then
+                echo "Experimental Clover Firefox must be disabled in default rootfs: $path" >&2
+                exit 1
+              fi
+            done
+          fi
 
           #
           # Validate systemd

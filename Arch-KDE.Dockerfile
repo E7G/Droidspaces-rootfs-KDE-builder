@@ -18,6 +18,7 @@ ARG ENABLE_systemd257_ARG
 ARG USERNAME
 ARG ENABLE_anland_kde_ARG
 ARG ENABLE_MI_PAD4_PROFILE_ARG
+ARG ENABLE_MI_PAD4_FIREFOX_ARG=false
 ######################################################
 
 COPY scripts/install-usb-manager.sh /usr/local/sbin/install-droidspaces-usb-manager
@@ -80,7 +81,7 @@ RUN printf '%s\n' \
     # Replace the generic browser with the source-built Clover variant. msm_vidc
     # decodes in hardware; PRIME_2 transfers decoded NV12 to a renderer-owned
     # dmabuf so the 16-buffer V4L2 CAPTURE queue cannot deadlock.
-    if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
+    if [ "$ENABLE_MI_PAD4_FIREFOX_ARG" = "true" ]; then \
         cp /etc/pacman.conf /tmp/pacman-firefox.conf && \
         sed -i '/^LocalFileSigLevel[[:space:]]*=/d; /^\[options\]$/a LocalFileSigLevel = Never' /tmp/pacman-firefox.conf && \
         pacman --config /tmp/pacman-firefox.conf -U --noconfirm \
@@ -286,14 +287,16 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
          install -Dm755 /tmp/mi-pad4-cachyos-tuning /usr/local/libexec/mi-pad4-cachyos-tuning && \
          install -Dm644 /tmp/mi-pad4-cachyos-tuning.service /etc/systemd/system/mi-pad4-cachyos-tuning.service && \
          install -Dm644 /tmp/mi-pad4/pcmanfm-qt-settings.conf /usr/share/droidspaces/mi-pad4-profile/pcmanfm-qt-settings.conf && \
-        install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
+         if [ "$ENABLE_MI_PAD4_FIREFOX_ARG" = "true" ]; then \
+             install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
+             for desktop in /usr/share/applications/firefox*.desktop; do \
+                 [ -f "$desktop" ] || continue; \
+                 sed -i 's#Exec=/usr/lib/firefox/firefox#Exec=/usr/local/bin/mi-pad4-firefox#g' "$desktop"; \
+             done; \
+         fi && \
         install -Dm644 /tmp/mi-pad4/dolphinrc /usr/share/droidspaces/mi-pad4-profile/dolphinrc && \
         install -Dm644 /tmp/mi-pad4/dolphin-global-viewproperties /usr/share/droidspaces/mi-pad4-profile/dolphin-global-viewproperties && \
         install -Dm644 /tmp/mi-pad4/user-places.xbel /usr/share/droidspaces/mi-pad4-profile/user-places.xbel && \
-        for desktop in /usr/share/applications/firefox*.desktop; do \
-            [ -f "$desktop" ] || continue; \
-            sed -i 's#Exec=/usr/lib/firefox/firefox#Exec=/usr/local/bin/mi-pad4-firefox#g' "$desktop"; \
-        done && \
         install -Dm644 /tmp/mi-pad4/container.config /usr/share/droidspaces/mi-pad4-container.config && \
          install -Dm644 /tmp/mi-pad4/sepolicy.rule /usr/share/droidspaces/mi-pad4-sepolicy.rule && \
          mkdir -p /etc/droidspaces && \
@@ -301,7 +304,8 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
              'cachyos=portable-mi-pad4' \
              'sysctl=memory-io-thp' \
              'scheduler=schedutil-if-available' \
-             'firefox=portable-cachyos-profile' \
+             'firefox=system-default' \
+             "firefox-clover-integration=$ENABLE_MI_PAD4_FIREFOX_ARG" \
              > /usr/share/droidspaces/cachyos-mi-pad4 && \
          printf '%s\n' 'SYSTEMD_DROIDSPACES_COMPAT=1' 'SYSTEMD_LOG_LEVEL=warning' > /etc/droidspaces/systemd-compat.env && \
         printf '%s\n' '#!/bin/bash' 'set -u' 'echo "systemd: $(/usr/lib/systemd/systemd --version 2>/dev/null | head -n 1 || true)"' 'echo "kernel: $(uname -r)"' 'echo "pid1: $(cat /proc/1/comm 2>/dev/null || true)"' 'echo "state: $(systemctl is-system-running 2>/dev/null || true)"' 'echo "desktop: $(systemctl is-active mi-pad4-desktop.service 2>/dev/null || true)"' 'echo "mode: systemd257-droidspaces"' > /usr/local/bin/droidspaces-systemd-check && \
@@ -309,7 +313,7 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
     fi
 # Qualcomm msm_vidc on the Mi Pad 4 uses legacy ION USERPTR queues and private
 # sequence-change controls, which the upstream generic V4L2 VA driver lacks.
-RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
+RUN if [ "$ENABLE_MI_PAD4_FIREFOX_ARG" = "true" ]; then \
         pacman -S --noconfirm --needed pkgconf meson ninja libva libdrm gst-plugins-bad-libs && \
         git clone https://github.com/E7G/libva-v4l2-stateful.git /tmp/libva-v4l2-stateful && \
         git -C /tmp/libva-v4l2-stateful checkout "$MI_PAD4_V4L2_VAAPI_COMMIT" && \
