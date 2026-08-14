@@ -14,7 +14,7 @@ apply_sysctl() {
 # Android shares this 4 GiB memory pool with the guest. Avoid the aggressive
 # CachyOS desktop defaults, which turn normal Plasma interaction into zram I/O.
 apply_sysctl vm.swappiness 60
-apply_sysctl vm.vfs_cache_pressure 100
+apply_sysctl vm.vfs_cache_pressure 50
 apply_sysctl vm.dirty_bytes 33554432
 apply_sysctl vm.dirty_background_bytes 8388608
 apply_sysctl vm.dirty_writeback_centisecs 1500
