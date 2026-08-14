@@ -532,14 +532,21 @@ jobs:
             printf '%s\n' "$firefox_desc" | awk '
               $0 == "%NAME%" {
                 getline name
-                if (name == "firefox") {
-                  getline
-                  if ($0 == "%VERSION%") {
-                    getline
-                    print
-                    exit
-                  }
-                }
+                if (name == "firefox") package=1
+                next
+              }
+              package && $0 == "%VERSION%" {
+                getline
+                print
+                exit
+              }
+              $1 == "pkgname" && $3 == "firefox" {
+                package=1
+                next
+              }
+              package && $1 == "pkgver" {
+                print $3
+                exit
               }
             '
           )"
