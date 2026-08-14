@@ -640,7 +640,7 @@ jobs:
           tar_cat \
             etc/systemd/system/mi-pad4-desktop.service \
             | grep -Fxq \
-              'ExecStart=/usr/local/bin/mi-pad4-start-wayland' \
+              'ExecStart=/usr/local/bin/mi-pad4-start-wayland child' \
             || {
               echo "mi-pad4-desktop.service has an invalid ExecStart" >&2
               exit 1
