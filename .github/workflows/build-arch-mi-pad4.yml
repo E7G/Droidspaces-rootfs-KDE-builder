@@ -21,7 +21,7 @@ on:
         description: Integrate experimental Clover Firefox into rootfs
         required: true
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: write
@@ -460,6 +460,7 @@ jobs:
             usr/lib/sysctl.d/70-mi-pad4-cachyos.conf \
             usr/lib/udev/rules.d/60-mi-pad4-ioschedulers.rules \
             etc/systemd/system/mi-pad4-cachyos-tuning.service \
+            etc/profile.d/90-mi-pad4-cachyos-environment.sh \
             usr/lib/firefox/defaults/pref/mi-pad4-anland.js \
             usr/share/droidspaces/cachyos-mi-pad4 \
             usr/bin/startplasma-wayland \

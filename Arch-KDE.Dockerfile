@@ -32,6 +32,7 @@ COPY scripts/mi-pad4/00-mi-pad4-journal-size.conf /tmp/00-mi-pad4-journal-size.c
 COPY scripts/mi-pad4/10-mi-pad4-system.conf /tmp/10-mi-pad4-system.conf
 COPY scripts/mi-pad4/mi-pad4-cachyos-tuning.service /tmp/mi-pad4-cachyos-tuning.service
 COPY scripts/mi-pad4/mi-pad4-cachyos-tuning /tmp/mi-pad4-cachyos-tuning
+COPY scripts/mi-pad4/90-mi-pad4-cachyos-environment.sh /tmp/90-mi-pad4-cachyos-environment.sh
 COPY scripts/mi-pad4/mi-pad4-firefox-anland-prefs.js /tmp/mi-pad4-firefox-anland-prefs.js
 COPY mesa-mi-pad4/ /tmp/mesa-mi-pad4/
 COPY local-packages-mi-pad4/ /tmp/local-packages-mi-pad4/
@@ -288,6 +289,7 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
          install -Dm644 /tmp/10-mi-pad4-system.conf /usr/lib/systemd/system.conf.d/10-mi-pad4-system.conf && \
          install -Dm755 /tmp/mi-pad4-cachyos-tuning /usr/local/libexec/mi-pad4-cachyos-tuning && \
          install -Dm644 /tmp/mi-pad4-cachyos-tuning.service /etc/systemd/system/mi-pad4-cachyos-tuning.service && \
+         install -Dm755 /tmp/90-mi-pad4-cachyos-environment.sh /etc/profile.d/90-mi-pad4-cachyos-environment.sh && \
          install -Dm644 /tmp/mi-pad4/pcmanfm-qt-settings.conf /usr/share/droidspaces/mi-pad4-profile/pcmanfm-qt-settings.conf && \
          if [ "$ENABLE_MI_PAD4_FIREFOX_ARG" = "true" ]; then \
              install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
@@ -306,7 +308,7 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
              'cachyos=portable-mi-pad4' \
              'sysctl=memory-io-thp' \
              'scheduler=schedutil-if-available' \
-             'firefox=system-default' \
+             "firefox-mode=$([ \"$ENABLE_MI_PAD4_FIREFOX_ARG\" = \"true\" ] && printf clover-v4l2-m2m-cachyos || printf system-default)" \
              "firefox-clover-integration=$ENABLE_MI_PAD4_FIREFOX_ARG" \
              > /usr/share/droidspaces/cachyos-mi-pad4 && \
          printf '%s\n' 'SYSTEMD_DROIDSPACES_COMPAT=1' 'SYSTEMD_LOG_LEVEL=warning' > /etc/droidspaces/systemd-compat.env && \
