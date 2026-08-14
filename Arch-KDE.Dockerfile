@@ -278,6 +278,7 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
          mkdir -p /etc/systemd/system/multi-user.target.wants && \
          ln -sfn ../dbus.service /etc/systemd/system/multi-user.target.wants/dbus.service && \
          ln -sfn ../mi-pad4-desktop.service /etc/systemd/system/multi-user.target.wants/mi-pad4-desktop.service && \
+          ln -sfn ../mi-pad4-network.service /etc/systemd/system/multi-user.target.wants/mi-pad4-network.service && \
          ln -sfn ../mi-pad4-cachyos-tuning.service /etc/systemd/system/multi-user.target.wants/mi-pad4-cachyos-tuning.service && \
          install -Dm755 /tmp/mi-pad4/mi-pad4-file-manager /usr/local/bin/mi-pad4-file-manager && \
          ln -sfn mi-pad4-file-manager /usr/local/bin/dolphin && \
@@ -289,6 +290,8 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
          install -Dm644 /tmp/10-mi-pad4-system.conf /usr/lib/systemd/system.conf.d/10-mi-pad4-system.conf && \
          install -Dm755 /tmp/mi-pad4-cachyos-tuning /usr/local/libexec/mi-pad4-cachyos-tuning && \
          install -Dm644 /tmp/mi-pad4-cachyos-tuning.service /etc/systemd/system/mi-pad4-cachyos-tuning.service && \
+          install -Dm755 /tmp/mi-pad4/mi-pad4-network /usr/local/libexec/mi-pad4-network && \
+          install -Dm644 /tmp/mi-pad4/mi-pad4-network.service /etc/systemd/system/mi-pad4-network.service && \
          install -Dm755 /tmp/90-mi-pad4-cachyos-environment.sh /etc/profile.d/90-mi-pad4-cachyos-environment.sh && \
          install -Dm644 /tmp/mi-pad4/pcmanfm-qt-settings.conf /usr/share/droidspaces/mi-pad4-profile/pcmanfm-qt-settings.conf && \
          if [ "$ENABLE_MI_PAD4_FIREFOX_ARG" = "true" ]; then \

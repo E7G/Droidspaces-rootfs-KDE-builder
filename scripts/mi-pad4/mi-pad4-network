@@ -1,0 +1,24 @@
+#!/bin/bash
+
+set -u
+
+# Droidspaces NAT DHCP is unreliable with the tablet's 4.4 kernel. The
+# container config pins this address, so configure the veth deterministically.
+iface=eth0
+address=172.28.152.142/16
+gateway=172.28.0.1
+
+for _ in $(seq 1 20); do
+    /usr/bin/ip link show "$iface" >/dev/null 2>&1 && break
+    sleep 1
+done
+
+/usr/bin/ip link show "$iface" >/dev/null 2>&1 || exit 0
+/usr/bin/ip link set "$iface" up 2>/dev/null || true
+/usr/bin/ip addr replace "$address" dev "$iface" 2>/dev/null || true
+/usr/bin/ip route replace default via "$gateway" dev "$iface" 2>/dev/null || true
+
+# Droidspaces' dnsmasq listens on the NAT gateway. Do not use the Android LAN
+# resolver directly from the isolated veth namespace.
+printf '%s\n' 'nameserver 172.28.0.1' 'nameserver 192.168.1.1' \
+    >/run/droidspaces/resolv.conf 2>/dev/null || true

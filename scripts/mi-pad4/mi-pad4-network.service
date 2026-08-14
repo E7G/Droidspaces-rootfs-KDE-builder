@@ -1,0 +1,13 @@
+[Unit]
+Description=Mi Pad 4 Droidspaces NAT network compatibility
+After=local-fs.target
+Before=mi-pad4-desktop.service
+ConditionPathExists=/usr/local/libexec/mi-pad4-network
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/mi-pad4-network
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
