@@ -460,6 +460,7 @@ jobs:
             usr/lib/sysctl.d/70-mi-pad4-cachyos.conf \
             usr/lib/udev/rules.d/60-mi-pad4-ioschedulers.rules \
             etc/systemd/system/mi-pad4-cachyos-tuning.service \
+            usr/lib/firefox/defaults/pref/mi-pad4-anland.js \
             usr/share/droidspaces/cachyos-mi-pad4 \
             usr/bin/startplasma-wayland \
             usr/bin/kwin_wayland

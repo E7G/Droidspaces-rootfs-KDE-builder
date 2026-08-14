@@ -13,6 +13,7 @@ export LANGUAGE=zh_CN:zh
 export LC_ALL=zh_CN.UTF-8
 export WAYLAND_DISPLAY=wayland-0
 export QT_QPA_PLATFORM=wayland
+export MOZ_ENABLE_WAYLAND=1
 export ANLAND=1
 export ANLAND_SOCKET=/run/display.sock
 # Mi Pad 4's KGSL node is not a DRM/GBM render node. The patched backend must

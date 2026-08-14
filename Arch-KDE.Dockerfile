@@ -32,6 +32,7 @@ COPY scripts/mi-pad4/00-mi-pad4-journal-size.conf /tmp/00-mi-pad4-journal-size.c
 COPY scripts/mi-pad4/10-mi-pad4-system.conf /tmp/10-mi-pad4-system.conf
 COPY scripts/mi-pad4/mi-pad4-cachyos-tuning.service /tmp/mi-pad4-cachyos-tuning.service
 COPY scripts/mi-pad4/mi-pad4-cachyos-tuning /tmp/mi-pad4-cachyos-tuning
+COPY scripts/mi-pad4/mi-pad4-firefox-anland-prefs.js /tmp/mi-pad4-firefox-anland-prefs.js
 COPY mesa-mi-pad4/ /tmp/mesa-mi-pad4/
 COPY local-packages-mi-pad4/ /tmp/local-packages-mi-pad4/
 
@@ -280,6 +281,7 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
          install -Dm755 /tmp/mi-pad4/mi-pad4-file-manager /usr/local/bin/mi-pad4-file-manager && \
          ln -sfn mi-pad4-file-manager /usr/local/bin/dolphin && \
          install -Dm644 /tmp/mi-pad4/org.kde.dolphin.desktop /usr/local/share/applications/org.kde.dolphin.desktop && \
+         install -Dm644 /tmp/mi-pad4-firefox-anland-prefs.js /usr/lib/firefox/defaults/pref/mi-pad4-anland.js && \
          install -Dm644 /tmp/70-mi-pad4-cachyos.conf /usr/lib/sysctl.d/70-mi-pad4-cachyos.conf && \
          install -Dm644 /tmp/60-mi-pad4-ioschedulers.rules /usr/lib/udev/rules.d/60-mi-pad4-ioschedulers.rules && \
          install -Dm644 /tmp/00-mi-pad4-journal-size.conf /usr/lib/systemd/journald.conf.d/00-mi-pad4-journal-size.conf && \
@@ -539,7 +541,8 @@ RUN if [ "$ENABLE_systemd257_ARG" = "true" ]; then \
 RUN rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/* /tmp/local-packages-mi-pad4 && \
     rm -f /tmp/70-mi-pad4-cachyos.conf /tmp/60-mi-pad4-ioschedulers.rules \
           /tmp/00-mi-pad4-journal-size.conf /tmp/10-mi-pad4-system.conf \
-          /tmp/mi-pad4-cachyos-tuning /tmp/mi-pad4-cachyos-tuning.service
+          /tmp/mi-pad4-cachyos-tuning /tmp/mi-pad4-cachyos-tuning.service \
+          /tmp/mi-pad4-firefox-anland-prefs.js
 # 阶段 2：将完整的根文件系统导出到 scratch（空白层），以便外部直接提取或打包成 tarfs
 FROM scratch AS export
 COPY --from=customizer / /

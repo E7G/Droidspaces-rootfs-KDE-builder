@@ -2,8 +2,8 @@
 #include "display_producer.h"
 #include "socket_utils.h"
 
-#include <errno.h>
 #include <poll.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -291,7 +291,21 @@ int trigger_refresh(display_ctx *ctx)
         c->cmsg_len = CMSG_LEN(sizeof(int));
         memcpy(CMSG_DATA(c), &ctx->pending_render_fence, sizeof(int));
     }
-    sendmsg(ctx->fence_fd, &msg, MSG_NOSIGNAL | MSG_DONTWAIT);
+    /* The Android consumer must receive exactly one refresh message for every
+     * ready buffer. A non-blocking send can return EAGAIN while Firefox is
+     * submitting video frames; dropping that byte leaves refresh_done() stuck,
+     * and the consumer reconnects after its safety timeout, visible as a flash.
+     * Wait briefly for the dedicated socket, then use the normal blocking send
+     * so a live consumer cannot lose frame synchronization. A disconnected
+     * socket fails immediately with EPIPE/ECONNRESET. */
+    ssize_t sent = sendmsg(ctx->fence_fd, &msg, MSG_NOSIGNAL | MSG_DONTWAIT);
+    if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        struct pollfd pfd = { .fd = ctx->fence_fd, .events = POLLOUT };
+        (void)poll(&pfd, 1, 100);
+        sent = sendmsg(ctx->fence_fd, &msg, MSG_NOSIGNAL);
+    }
+    if (sent < 0)
+        fprintf(stderr, "anland: failed to send refresh fence: %s\n", strerror(errno));
     if (ctx->pending_render_fence >= 0) {
         close(ctx->pending_render_fence);
         ctx->pending_render_fence = -1;
