@@ -539,6 +539,17 @@ RUN if [ "$ENABLE_systemd257_ARG" = "true" ]; then \
     rm -f /usr/local/sbin/systemd257 && \
     rm -rf /usr/local/share/droidspaces/systemd257
 
+# USB Manager performs a full pacman -Syu on Arch guests. Reinstall the
+# source-built Clover package after every package transaction so a repository
+# Firefox update cannot silently replace the hardware-decoding build.
+RUN if [ "$ENABLE_MI_PAD4_FIREFOX_ARG" = "true" ]; then \
+        cp /etc/pacman.conf /tmp/pacman-firefox-final.conf && \
+        sed -i '/^LocalFileSigLevel[[:space:]]*=/d; /^\[options\]$/a LocalFileSigLevel = Never' /tmp/pacman-firefox-final.conf && \
+        pacman --config /tmp/pacman-firefox-final.conf -U --noconfirm \
+            /tmp/local-packages-mi-pad4/firefox-153.0.3-1.3-aarch64.pkg.tar.* && \
+        rm -f /tmp/pacman-firefox-final.conf; \
+    fi
+
 # 彻底清理 pacman 缓存
 RUN rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/* /tmp/local-packages-mi-pad4 && \
     rm -f /tmp/70-mi-pad4-cachyos.conf /tmp/60-mi-pad4-ioschedulers.rules \
