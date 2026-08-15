@@ -6,7 +6,7 @@ ConditionPathExists=/usr/local/libexec/mi-pad4-cachyos-tuning
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/libexec/mi-pad4-cachyos-tuning
+ExecStart=/usr/bin/bash /usr/local/libexec/mi-pad4-cachyos-tuning
 RemainAfterExit=yes
 
 [Install]

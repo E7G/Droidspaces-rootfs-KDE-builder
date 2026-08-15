@@ -507,7 +507,11 @@ void AnlandBackend::onReconnectTimer()
 
     qCInfo(KWIN_ANLAND) << "consumer reconnected";
     m_inFallback = false;
-    m_consumerReady = false;
+    // The consumer has just handed over a selected BufferQueue slot.  It is
+    // already ready for the first rendered frame; waiting for a
+    // buffer-ready event here deadlocks the initial handshake because that
+    // event is emitted only after the consumer receives our first refresh.
+    m_consumerReady = true;
     m_reconnectTimer->stop();
 
     // try_exit_fallback() already received a fresh dmabuf set. Import it into the
