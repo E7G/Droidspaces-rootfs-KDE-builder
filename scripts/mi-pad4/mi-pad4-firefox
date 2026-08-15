@@ -23,14 +23,26 @@ export LD_LIBRARY_PATH="/usr/local/lib/firefox-vaapi${LD_LIBRARY_PATH:+:$LD_LIBR
 # Arch Firefox's generic RDD sandbox does not whitelist Qualcomm's legacy
 # msm_vidc and ION ioctls. This affects only the media decoder process.
 export MOZ_DISABLE_RDD_SANDBOX=1
-export MESA_LOADER_DRIVER_OVERRIDE=kgsl
-export FD_FORCE_KGSL=1
-export FD_KGSL_ENABLE_DMABUF=1
-# Firefox's generic Linux GPU sandbox does not allow legacy KGSL/ION private
-# ioctls. Keep content and network sandboxes intact; only the GPU process needs
-# direct access to the render node.
-export MOZ_DISABLE_GPU_SANDBOX=1
-export LD_PRELOAD="/usr/local/lib/libion-legacy-shim.so${LD_PRELOAD:+:$LD_PRELOAD}"
+# The stock Clover KGSL export path is kept as an opt-in diagnostic mode. It
+# spins the Firefox renderer on this Anland/4.4 combination even for a blank
+# page. The normal profile uses the low-power Wayland compositor; KWin remains
+# on KGSL and video still uses V4L2-M2M.
+if [[ "${MI_PAD4_FIREFOX_GPU:-0}" = 1 ]]; then
+    export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+    export FD_FORCE_KGSL=1
+    export FD_KGSL_ENABLE_DMABUF=1
+    export MOZ_DISABLE_GPU_SANDBOX=1
+else
+    unset MESA_LOADER_DRIVER_OVERRIDE FD_FORCE_KGSL FD_KGSL_ENABLE_DMABUF
+    unset MOZ_DISABLE_GPU_SANDBOX MOZ_DRM_DEVICE
+    export MOZ_WEBRENDER=0
+    # The ION shim is only needed by the experimental KGSL export path. Do
+    # not inject it into every Firefox thread in the normal low-power mode.
+    unset LD_PRELOAD
+fi
+if [[ "${MI_PAD4_FIREFOX_GPU:-0}" = 1 ]]; then
+    export LD_PRELOAD="/usr/local/lib/libion-legacy-shim.so${LD_PRELOAD:+:$LD_PRELOAD}"
+fi
 unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER
 unset XWAYLAND_FORCE_KGSL_SURFACELESS MOZ_X11_EGL
 unset QT_QUICK_BACKEND
@@ -44,6 +56,18 @@ firefox_root="${HOME:-/tmp/droidspaces-home}/.mozilla/firefox"
 legacy_profile="$firefox_root/mi-pad4.default-release"
 profile="$firefox_root/mi-pad4.fd512"
 mkdir -p "$profile"
+
+# A second Firefox instance is catastrophic on this 4 GiB tablet: two GPU
+# processes and two video pages push the Android zram into reclaim storms.
+# Keep the descriptor locked across exec so clicking the panel icon repeatedly
+# cannot create another browser tree. Existing Firefox instances still receive
+# normal single-instance URLs through Firefox's own remote protocol.
+if command -v flock >/dev/null 2>&1; then
+    exec 9>"$profile/.mi-pad4-launch.lock"
+    # Let Firefox's native remote protocol deliver URLs to the existing
+    # browser instead of silently dropping panel/file-manager launches.
+    flock -n 9 || exec /usr/lib/firefox/firefox --profile "$profile" "$@"
+fi
 
 # A 4.4-kernel crash can leave Firefox's lock symlink pointing at a zombie
 # process. Firefox then exits immediately on the next launch, which looks like
@@ -70,6 +94,17 @@ if [[ ! -e "$profile/.mi-pad4-migrated" ]]; then
     : >"$profile/.mi-pad4-migrated"
 fi
 
+# Do this once for profiles produced by the earlier GPU experiments. Preserve
+# bookmarks/cookies/passwords, but discard only restart/session and shader
+# caches; restoring several old tabs was enough to start multiple content
+# processes before the low-memory prefs were read.
+if [[ ! -e "$profile/.mi-pad4-profile-v2" ]]; then
+    rm -f "$profile/sessionstore.jsonlz4" "$profile/previous.jsonlz4"
+    rm -rf "$profile/sessionstore-backups" "$profile/shader-cache" \
+           "$profile/startupCache" "$profile/cache2"
+    : >"$profile/.mi-pad4-profile-v2"
+fi
+
 # Remove only stale graphics overrides if this profile survives a future tuning
 # change; history, bookmarks, cookies and passwords stay untouched.
 prefs="$profile/prefs.js"
@@ -79,9 +114,9 @@ fi
 
 cat >"$profile/user.js" <<'EOF'
 // Mi Pad 4: keep Firefox responsive with 4 GB RAM and a 4.4 kernel.
-// Two content processes keep a heavy tab from blocking the whole browser while
-// remaining small enough for the tablet's 4 GB RAM.
-user_pref("dom.ipc.processCount", 2);
+// One content process avoids a second JS/video tree competing with KWin for
+// the shared zram device. Hardware video decode remains enabled below.
+user_pref("dom.ipc.processCount", 1);
 user_pref("dom.ipc.processCount.webIsolated", 1);
 user_pref("dom.ipc.processPrelaunch.enabled", false);
 user_pref("fission.autostart", false);
@@ -91,9 +126,9 @@ user_pref("browser.sessionhistory.max_total_viewers", 2);
 // only increases memory pressure and swap I/O on this 4 GB device.
 user_pref("browser.cache.disk.enable", false);
 user_pref("browser.cache.disk.capacity", 0);
-user_pref("browser.cache.memory.capacity", 32768);
-user_pref("media.cache_size", 32768);
-user_pref("browser.sessionstore.interval", 120000);
+user_pref("browser.cache.memory.capacity", 16384);
+user_pref("media.cache_size", 16384);
+user_pref("browser.sessionstore.interval", 300000);
 user_pref("browser.sessionstore.max_tabs_undo", 3);
 user_pref("browser.sessionstore.max_windows_undo", 1);
 user_pref("browser.pagethumbnails.capturing_disabled", true);
@@ -108,6 +143,8 @@ user_pref("browser.newtabpage.activity-stream.feeds.section.topstories", false);
 user_pref("network.prefetch-next", false);
 user_pref("network.dns.disablePrefetch", false);
 user_pref("network.http.speculative-parallel-limit", 2);
+user_pref("network.http.max-connections", 64);
+user_pref("network.http.max-persistent-connections-per-server", 6);
 user_pref("browser.urlbar.speculativeConnect.enabled", true);
 user_pref("toolkit.cosmeticAnimations.enabled", false);
 user_pref("ui.prefersReducedMotion", 1);
@@ -127,18 +164,21 @@ user_pref("media.rdd-ffmpeg.enabled", true);
 user_pref("media.av1.enabled", false);
 // Prefer H.264 on MSE sites such as YouTube; this decoder does not expose VP9.
 user_pref("media.mediasource.vp9.enabled", false);
-// CachyOS Firefox settings, adapted for Clover instead of copied verbatim:
-// keep the GPU decoder/WebRender path, but do not use its desktop-sized
-// 1--3 GiB media caches on this 4 GiB tablet.
+// Device-specific presentation choice: the legacy Clover KGSL/Anland path
+// keeps a WebRender renderer busy even on about:blank and causes panel flash.
+// Use Firefox's low-power basic compositor here; KWin still uses KGSL and the
+// V4L2-M2M decoder remains hardware accelerated. This is intentionally not a
+// generic desktop/CachyOS WebRender preset.
 user_pref("media.gpu-process-decoder", true);
-user_pref("gfx.webrender.all", true);
-user_pref("gfx.webrender.precache-shaders", true);
-user_pref("gfx.webrender.program-binary-disk", true);
-user_pref("layers.gpu-process.enabled", true);
-user_pref("gfx.canvas.accelerated.cache-items", 8192);
-user_pref("gfx.canvas.accelerated.cache-size", 2048);
-user_pref("image.cache.size", 10485760);
-user_pref("image.mem.decode_bytes_at_a_time", 65536);
+user_pref("gfx.webrender.all", false);
+user_pref("gfx.webrender.precache-shaders", false);
+user_pref("gfx.webrender.program-binary-disk", false);
+user_pref("layers.acceleration.force-enabled", false);
+user_pref("layers.gpu-process.enabled", false);
+user_pref("gfx.canvas.accelerated.cache-items", 2048);
+user_pref("gfx.canvas.accelerated.cache-size", 512);
+user_pref("image.cache.size", 5242880);
+user_pref("image.mem.decode_bytes_at_a_time", 32768);
 user_pref("image.mem.shared.unmap.min_expiration_ms", 120000);
 user_pref("gfx.color_management.mode", 0);
 user_pref("gfx.webrender.low-quality-pinch-zoom", true);
@@ -148,11 +188,9 @@ user_pref("gfx.webrender.allow-partial-present-buffer-age", false);
 user_pref("gfx.webrender.force-partial-present", false);
 user_pref("gfx.webrender.compositor", false);
 user_pref("gfx.webrender.compositor.force-enabled", false);
-// Keep Firefox's native GPU/DMABUF presentation enabled. The compositor-side
-// patch forces a complete EGL damage rectangle, avoiding stale regions without
-// falling back to SHM or software rendering.
-// Clover's legacy KGSL explicit-sync path flashes exported dmabuf frames.
-// Keep WebRender/KGSL, but use Wayland shared buffers for final presentation.
+// Clover's legacy KGSL explicit-sync path flashes exported dmabuf frames. The
+// basic Wayland compositor uses shared buffers and avoids the busy-loop/stale
+// damage behaviour while retaining hardware decode for video.
 user_pref("widget.dmabuf.enabled", false);
 user_pref("widget.dmabuf-feedback.enabled", false);
 user_pref("widget.dmabuf-export.force-enabled", false);

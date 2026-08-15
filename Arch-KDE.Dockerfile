@@ -308,10 +308,10 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
          install -Dm644 /tmp/mi-pad4/sepolicy.rule /usr/share/droidspaces/mi-pad4-sepolicy.rule && \
          mkdir -p /etc/droidspaces && \
          printf '%s\n' \
-             'cachyos=portable-mi-pad4' \
+             'profile=mi-pad4-sdm660-4gb' \
              'sysctl=memory-io-thp' \
              'scheduler=schedutil-if-available' \
-             "firefox-mode=$([ \"$ENABLE_MI_PAD4_FIREFOX_ARG\" = \"true\" ] && printf clover-v4l2-m2m-cachyos || printf system-default)" \
+             "firefox-mode=$([ \"$ENABLE_MI_PAD4_FIREFOX_ARG\" = \"true\" ] && printf clover-v4l2-m2m-device || printf system-default)" \
              "firefox-clover-integration=$ENABLE_MI_PAD4_FIREFOX_ARG" \
              > /usr/share/droidspaces/cachyos-mi-pad4 && \
          printf '%s\n' 'SYSTEMD_DROIDSPACES_COMPAT=1' 'SYSTEMD_LOG_LEVEL=warning' > /etc/droidspaces/systemd-compat.env && \
