@@ -104,6 +104,11 @@ if [[ ! -e "$profile/.mi-pad4-profile-v2" ]]; then
            "$profile/startupCache" "$profile/cache2"
     : >"$profile/.mi-pad4-profile-v2"
 fi
+# Never restore a multi-tab crash session on this 4 GiB tablet. It can create
+# several content processes before user.js is applied and immediately exhaust
+# the shared zram. History, bookmarks, cookies and passwords are untouched.
+rm -f "$profile/sessionstore.jsonlz4" "$profile/previous.jsonlz4"
+rm -rf "$profile/sessionstore-backups"
 
 # Remove only stale graphics overrides if this profile survives a future tuning
 # change; history, bookmarks, cookies and passwords stay untouched.
@@ -171,9 +176,12 @@ user_pref("media.mediasource.vp9.enabled", false);
 // generic desktop/CachyOS WebRender preset.
 user_pref("media.gpu-process-decoder", true);
 user_pref("gfx.webrender.all", false);
+user_pref("gfx.webrender.enabled", false);
+user_pref("gfx.webrender.force-disabled", true);
 user_pref("gfx.webrender.precache-shaders", false);
 user_pref("gfx.webrender.program-binary-disk", false);
 user_pref("layers.acceleration.force-enabled", false);
+user_pref("layers.acceleration.disabled", true);
 user_pref("layers.gpu-process.enabled", false);
 user_pref("gfx.canvas.accelerated.cache-items", 2048);
 user_pref("gfx.canvas.accelerated.cache-size", 512);
@@ -214,4 +222,14 @@ user_pref("browser.urlbar.suggest.quicksuggest.nonsponsored", false);
 user_pref("browser.urlbar.suggest.quicksuggest.sponsored", false);
 EOF
 
-exec /usr/lib/firefox/firefox --profile "$profile" "$@"
+firefox_args=(--profile "$profile" "$@")
+# The SDM660 big cluster is CPU 4-7; this kernel's container cpuset exposes
+# cores 4 and 7 for foreground work. Keeping the browser tree there avoids
+# bouncing its JS,
+# compositor and decoder threads between little/big clusters during scrolling.
+# Set MI_PAD4_FIREFOX_CPUS=none to restore the kernel's normal placement.
+firefox_cpus="${MI_PAD4_FIREFOX_CPUS:-4,7}"
+if [[ "$firefox_cpus" != none && -x /usr/bin/taskset ]]; then
+    exec /usr/bin/taskset -c "$firefox_cpus" /usr/lib/firefox/firefox "${firefox_args[@]}"
+fi
+exec /usr/lib/firefox/firefox "${firefox_args[@]}"
