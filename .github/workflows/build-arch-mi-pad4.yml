@@ -21,7 +21,9 @@ on:
         description: Integrate experimental Clover Firefox into rootfs
         required: true
         type: boolean
-        default: true
+        # Keep the experimental browser package out of the normal slim image.
+        # The dedicated Firefox job still builds it for later testing.
+        default: false
 
 permissions:
   contents: write
