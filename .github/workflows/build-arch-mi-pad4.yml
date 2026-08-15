@@ -315,7 +315,8 @@ jobs:
             -b true \
             -c true \
             -d false \
-            -e true \
+            # Zip/p7zip are not part of the runtime profile; tar/xz remain available.
+            -e false \
             -f false \
             -h false \
             -j false \

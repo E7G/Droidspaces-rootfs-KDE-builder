@@ -24,7 +24,7 @@ apply_sysctl kernel.unprivileged_userns_clone 1
 apply_sysctl kernel.printk '3 3 3 3'
 apply_sysctl kernel.kptr_restrict 2
 apply_sysctl net.core.netdev_max_backlog 4096
-apply_sysctl fs.file-max 1048576
+apply_sysctl fs.file-max 131072
 apply_sysctl fs.inotify.max_user_watches 8192
 
 # SDM660 has separate little/big policies. schedutil is retained, but its
