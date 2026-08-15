@@ -8,6 +8,7 @@ ConditionPathExists=/usr/local/libexec/mi-pad4-network
 Type=oneshot
 ExecStart=/usr/bin/bash /usr/local/libexec/mi-pad4-network
 RemainAfterExit=yes
+TimeoutStartSec=75s
 
 [Install]
 WantedBy=multi-user.target

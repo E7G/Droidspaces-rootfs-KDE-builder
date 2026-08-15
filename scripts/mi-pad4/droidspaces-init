@@ -9,19 +9,28 @@ export SYSTEMD_DROIDSPACES_COMPAT=1
 export SYSTEMD_LOG_LEVEL=warning
 export container=droidspaces
 
+/usr/bin/mkdir -p /run/droidspaces 2>/dev/null || true
+
 # Droidspaces creates the NAT veth, but on Clover's 4.4 kernel the guest-side
 # address is not assigned reliably. systemd-networkd also requires
 # CAP_NET_ADMIN, which is intentionally unavailable to PID 1 in this runtime.
 # Configure the static NAT endpoint before handing control to systemd instead.
 if [[ -r /run/droidspaces/container.config ]] \
-    && /usr/bin/grep -q '^net_mode=nat$' /run/droidspaces/container.config \
-    && /usr/bin/ip link show eth0 >/dev/null 2>&1; then
+    && /usr/bin/grep -q '^net_mode=nat$' /run/droidspaces/container.config; then
   nat_ip="$(/usr/bin/sed -n 's/^static_nat_ip=//p' /run/droidspaces/container.config)"
   if [[ -n "$nat_ip" ]]; then
-    /usr/bin/ip link set eth0 up 2>/dev/null || true
-    /usr/bin/ip addr replace "${nat_ip}/16" dev eth0 2>/dev/null || true
-    /usr/bin/ip route replace default via 172.28.0.1 dev eth0 2>/dev/null || true
-    printf '%s\n' 'nameserver 172.28.0.1' 'nameserver 192.168.1.1' \
+    for _ in $(seq 1 60); do
+      if /usr/bin/ip link show eth0 >/dev/null 2>&1; then
+        /usr/bin/ip link set eth0 up 2>/dev/null || true
+        /usr/bin/ip addr replace "${nat_ip}/16" dev eth0 2>/dev/null || true
+        /usr/bin/ip route replace default via 172.28.0.1 dev eth0 2>/dev/null || true
+        if /usr/bin/ip route get 1.1.1.1 >/dev/null 2>&1; then
+          break
+        fi
+      fi
+      sleep 1
+    done
+    printf '%s\n' 'nameserver 172.28.0.1' 'nameserver 223.5.5.5' 'nameserver 119.29.29.29' \
       >/run/droidspaces/resolv.conf 2>/dev/null || true
   fi
 fi

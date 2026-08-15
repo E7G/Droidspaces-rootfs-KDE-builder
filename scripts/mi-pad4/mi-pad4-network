@@ -7,18 +7,26 @@ set -u
 iface=eth0
 address=172.28.152.142/16
 gateway=172.28.0.1
+dns_file=/run/droidspaces/resolv.conf
 
-for _ in $(seq 1 20); do
-    /usr/bin/ip link show "$iface" >/dev/null 2>&1 && break
+/usr/bin/mkdir -p /run/droidspaces 2>/dev/null || true
+
+# The veth can appear after systemd starts. Keep retrying instead of exiting
+# successfully before the interface is ready.
+for _ in $(seq 1 60); do
+    if /usr/bin/ip link show "$iface" >/dev/null 2>&1; then
+        /usr/bin/ip link set "$iface" up 2>/dev/null || true
+        /usr/bin/ip addr replace "$address" dev "$iface" 2>/dev/null || true
+        /usr/bin/ip route replace default via "$gateway" dev "$iface" 2>/dev/null || true
+        if /usr/bin/ip route get 1.1.1.1 >/dev/null 2>&1; then
+            break
+        fi
+    fi
     sleep 1
 done
 
-/usr/bin/ip link show "$iface" >/dev/null 2>&1 || exit 0
-/usr/bin/ip link set "$iface" up 2>/dev/null || true
-/usr/bin/ip addr replace "$address" dev "$iface" 2>/dev/null || true
-/usr/bin/ip route replace default via "$gateway" dev "$iface" 2>/dev/null || true
-
 # Droidspaces' dnsmasq listens on the NAT gateway. Do not use the Android LAN
 # resolver directly from the isolated veth namespace.
-printf '%s\n' 'nameserver 172.28.0.1' 'nameserver 192.168.1.1' \
-    >/run/droidspaces/resolv.conf 2>/dev/null || true
+printf '%s\n' 'nameserver 172.28.0.1' 'nameserver 223.5.5.5' 'nameserver 119.29.29.29' \
+    >"$dns_file" 2>/dev/null || true
+exit 0
