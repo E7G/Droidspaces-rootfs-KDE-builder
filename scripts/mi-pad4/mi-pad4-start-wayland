@@ -211,6 +211,21 @@ live_plasmashell_pid() {
   return 1
 }
 
+# Keep the panel on a stable SHM/software scenegraph.  On Clover's KGSL path
+# Firefox damage events can invalidate a recycled QtQuick texture owned by
+# plasmashell; the result is a flashing panel even though KWin itself remains
+# connected to Anland.  KWin and application windows keep the accelerated path;
+# only the small panel process uses the software scenegraph.
+start_plasmashell() {
+  export LIBGL_ALWAYS_SOFTWARE=1
+  export QT_QUICK_BACKEND=software
+  export QSG_RHI_BACKEND=software
+  export GALLIUM_DRIVER=llvmpipe
+  export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
+  unset FD_FORCE_KGSL FD_KGSL_ENABLE_DMABUF
+  exec /usr/bin/plasmashell -p org.kde.plasma.desktop
+}
+
 latest_live_pid() {
   local pattern="$1" pid state newest=""
   for pid in $(pgrep -f "$pattern" 2>/dev/null || true); do
@@ -412,7 +427,7 @@ if [[ "${1:-}" = session ]]; then
   sleep 1
   shell_pid="$(live_plasmashell_pid || true)"
   if [[ -z "$shell_pid" ]]; then
-    /usr/bin/plasmashell -p org.kde.plasma.desktop \
+    start_plasmashell \
       >/run/mi-pad4-plasmashell.log 2>&1 &
     shell_pid=$!
   fi
@@ -495,4 +510,4 @@ if [[ -n "$shell_pid" ]]; then
   exit 1
 fi
 
-exec /usr/bin/plasmashell -p org.kde.plasma.desktop
+start_plasmashell
