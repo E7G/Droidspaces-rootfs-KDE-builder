@@ -385,25 +385,30 @@ if [[ "${1:-}" = session ]]; then
     --group 7 --group Configuration --group General \
     --key showVirtualDevices true 2>/dev/null || true
   export XDG_CONFIG_HOME="$plasma_config_home"
-  export KDEWM='/usr/bin/bash /usr/local/bin/mi-pad4-kwin-wayland'
 
-  /usr/bin/startplasma-wayland &
-  startup_pid=$!
+  # Do not use startplasma-wayland here.  On this rootfs it delegates KWin to
+  # plasma_session/KSplash; the old 4.4 kernel leaves plasma_waitforname
+  # behind, so the session waits forever and systemd restarts the whole desktop.
+  # Starting the two real graphical processes directly keeps one stable D-Bus
+  # session while preserving KWin's Anland backend and Plasma's panel.
+  /usr/sbin/kwin_wayland_wrapper --xwayland \
+    >/run/mi-pad4-kwin.log 2>&1 &
+  kwin_pid=$!
   for _ in $(seq 1 100); do
     [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]] && break
-    if ! kill -0 "$startup_pid" 2>/dev/null; then
-      wait "$startup_pid"
+    if ! kill -0 "$kwin_pid" 2>/dev/null; then
+      wait "$kwin_pid" 2>/dev/null || true
       exit 1
     fi
     sleep 0.1
   done
   if [[ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]]; then
-    kill "$startup_pid" 2>/dev/null || true
-    wait "$startup_pid" 2>/dev/null || true
+    kill "$kwin_pid" 2>/dev/null || true
+    wait "$kwin_pid" 2>/dev/null || true
     exit 1
   fi
 
-  sleep 3
+  sleep 1
   shell_pid="$(live_plasmashell_pid || true)"
   if [[ -z "$shell_pid" ]]; then
     /usr/bin/plasmashell -p org.kde.plasma.desktop \
@@ -412,8 +417,8 @@ if [[ "${1:-}" = session ]]; then
   fi
   wait "$shell_pid"
   status=$?
-  kill "$startup_pid" 2>/dev/null || true
-  wait "$startup_pid" 2>/dev/null || true
+  kill "$kwin_pid" 2>/dev/null || true
+  wait "$kwin_pid" 2>/dev/null || true
   exit "$status"
 fi
 
