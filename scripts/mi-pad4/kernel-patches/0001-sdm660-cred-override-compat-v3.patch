@@ -1,0 +1,21 @@
+diff --git a/kernel/cred.c b/kernel/cred.c
+--- a/kernel/cred.c
++++ b/kernel/cred.c
+@@ -435,1 +435,16 @@ int commit_creds(struct cred *new)
+-	BUG_ON(task->cred != old);
++	/*
++	 * ReSukiSU uses temporary subjective credentials around init/ksud
++	 * filesystem work. Android init may enter SELinux proc-attribute
++	 * handling before that override is reverted. On this 4.4 tree the
++	 * upstream BUG_ON would turn that recoverable state into a reboot.
++	 * Restore the real credentials with revert_creds-style accounting.
++	 */
++	if (unlikely(task->cred != old)) {
++		const struct cred *override = task->cred;
++		pr_warn_ratelimited("commit_creds: clearing subjective override for pid %d (%s)\n",
++				   task->pid, task->comm);
++		alter_cred_subscribers(old, 1);
++		rcu_assign_pointer(task->cred, old);
++		alter_cred_subscribers(override, -1);
++		put_cred(override);
++	}
