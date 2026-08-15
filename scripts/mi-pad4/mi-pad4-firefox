@@ -11,17 +11,12 @@ export XDG_RUNTIME_DIR=/run/droidspaces-runtime/user-0
 export PULSE_RUNTIME_PATH="$XDG_RUNTIME_DIR/pulse"
 export PULSE_SERVER="unix:$PULSE_RUNTIME_PATH/native"
 export PIPEWIRE_REMOTE="$XDG_RUNTIME_DIR/pipewire-0"
+# Use Firefox's native FFmpeg V4L2-M2M path. Clover exposes the decoder as
+# /dev/video2; the old libva stateful bridge on /dev/video32 is not an M2M
+# device and makes Firefox fall back to a CPU decoder.
 export MOZ_DRM_DEVICE=/dev/dri/renderD128
-# Route H.264/HEVC through the stateful V4L2 VA-API driver and Clover's
-# Qualcomm decoder. The driver uses X11 only to obtain a DRM display handle;
-# Firefox itself remains a native Wayland client.
-export LIBVA_DRIVER_NAME=v4l2
-export LIBVA_DRIVERS_PATH=/usr/lib/dri
-export LIBVA_V4L2_VIDEO_PATH=/dev/video32
-export LIBVA_DRM_X11_DISPLAY="${DISPLAY:-:0}"
-export LD_LIBRARY_PATH="/usr/local/lib/firefox-vaapi${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 # Arch Firefox's generic RDD sandbox does not whitelist Qualcomm's legacy
-# msm_vidc and ION ioctls. This affects only the media decoder process.
+# msm_vidc ioctls. This affects only the media decoder process.
 export MOZ_DISABLE_RDD_SANDBOX=1
 # The stock Clover KGSL export path is kept as an opt-in diagnostic mode. It
 # spins the Firefox renderer on this Anland/4.4 combination even for a blank
@@ -33,12 +28,16 @@ if [[ "${MI_PAD4_FIREFOX_GPU:-0}" = 1 ]]; then
     export FD_KGSL_ENABLE_DMABUF=1
     export MOZ_DISABLE_GPU_SANDBOX=1
 else
+    # Keep Firefox on the stable Wayland EGL path. KGSL is reserved for KWin;
+    # forcing it into Firefox's WebRender process causes shader retries and a
+    # busy-loop on this legacy Anland stack instead of improving playback.
     unset MESA_LOADER_DRIVER_OVERRIDE FD_FORCE_KGSL FD_KGSL_ENABLE_DMABUF
-    unset MOZ_DISABLE_GPU_SANDBOX MOZ_DRM_DEVICE
-    export MOZ_WEBRENDER=0
-    # The ION shim is only needed by the experimental KGSL export path. Do
-    # not inject it into every Firefox thread in the normal low-power mode.
-    unset LD_PRELOAD
+    unset MOZ_DISABLE_GPU_SANDBOX
+    export MOZ_WEBRENDER=1
+    # Keep Firefox's normal Wayland EGL compositor, but do not use the
+    # broken direct-DMABUF window export path. This accelerates page/video
+    # composition without feeding recycled browser buffers into Anland.
+    unset MOZ_DRM_DEVICE LD_PRELOAD
 fi
 if [[ "${MI_PAD4_FIREFOX_GPU:-0}" = 1 ]]; then
     export LD_PRELOAD="/usr/local/lib/libion-legacy-shim.so${LD_PRELOAD:+:$LD_PRELOAD}"
@@ -66,7 +65,9 @@ if command -v flock >/dev/null 2>&1; then
     exec 9>"$profile/.mi-pad4-launch.lock"
     # Let Firefox's native remote protocol deliver URLs to the existing
     # browser instead of silently dropping panel/file-manager launches.
-    flock -n 9 || exec /usr/lib/firefox/firefox --profile "$profile" "$@"
+    # Never create a second browser tree on the 4 GiB tablet. The desktop
+    # launcher is intentionally idempotent; existing Firefox remains usable.
+    flock -n 9 || exit 0
 fi
 
 # A 4.4-kernel crash can leave Firefox's lock symlink pointing at a zombie
@@ -159,13 +160,14 @@ user_pref("layout.frame_rate", -1);
 user_pref("accessibility.force_disabled", 1);
 user_pref("media.hardware-video-decoding.enabled", true);
 user_pref("media.hardware-video-decoding.force-enabled", true);
-user_pref("media.ffmpeg.vaapi.enabled", true);
-// Clover's V4L2 VA-API bridge supports hardware decode plus copy-out, not
-// synchronized decoder-surface export. Zero-copy exhausts its CAPTURE queue.
-user_pref("media.ffmpeg.vaapi.force-surface-zero-copy", 0);
+// Use Firefox's native FFmpeg V4L2-M2M decoder on /dev/video2. Do not route
+// this tablet through the obsolete stateful VA-API bridge on /dev/video32.
+user_pref("media.ffmpeg.vaapi.enabled", false);
+user_pref("media.rdd-ffmpeg.enabled", true);
+user_pref("media.rdd-vpx.enabled", true);
+user_pref("media.decoder.recycle.enabled", true);
 user_pref("media.ffvpx.enabled", true);
 user_pref("media.ffvpx.hw.enabled", false);
-user_pref("media.rdd-ffmpeg.enabled", true);
 // OpenH264 is only needed for WebRTC. Douyin's normal H.264 MSE stream uses
 // FFmpeg/V4L2 instead; keeping the bundled plugin alive starts a separate
 // software decoder process on the 4 GB Clover and wastes CPU while browsing.
@@ -174,19 +176,18 @@ user_pref("media.gmp-provider.enabled", false);
 user_pref("media.av1.enabled", false);
 // Prefer H.264 on MSE sites such as YouTube; this decoder does not expose VP9.
 user_pref("media.mediasource.vp9.enabled", false);
-// Device-specific presentation choice: the legacy Clover KGSL/Anland path
-// keeps a WebRender renderer busy even on about:blank and causes panel flash.
-// Use Firefox's low-power basic compositor here; KWin still uses KGSL and the
-// V4L2-M2M decoder remains hardware accelerated. This is intentionally not a
-// generic desktop/CachyOS WebRender preset.
+// Device-specific presentation choice: use WebRender for Firefox page/video
+// composition, but keep direct window DMABUF export disabled. The panel is a
+// separate software plasmashell process, so this does not reintroduce panel
+// texture reuse while removing the large CPU cost of BasicCompositor.
 user_pref("media.gpu-process-decoder", true);
-user_pref("gfx.webrender.all", false);
-user_pref("gfx.webrender.enabled", false);
-user_pref("gfx.webrender.force-disabled", true);
+user_pref("gfx.webrender.all", true);
+user_pref("gfx.webrender.enabled", true);
+user_pref("gfx.webrender.force-disabled", false);
 user_pref("gfx.webrender.precache-shaders", false);
 user_pref("gfx.webrender.program-binary-disk", false);
-user_pref("layers.acceleration.force-enabled", false);
-user_pref("layers.acceleration.disabled", true);
+user_pref("layers.acceleration.force-enabled", true);
+user_pref("layers.acceleration.disabled", false);
 user_pref("layers.gpu-process.enabled", false);
 user_pref("gfx.canvas.accelerated.cache-items", 2048);
 user_pref("gfx.canvas.accelerated.cache-size", 512);
@@ -201,9 +202,9 @@ user_pref("gfx.webrender.allow-partial-present-buffer-age", false);
 user_pref("gfx.webrender.force-partial-present", false);
 user_pref("gfx.webrender.compositor", false);
 user_pref("gfx.webrender.compositor.force-enabled", false);
-// Clover's legacy KGSL explicit-sync path flashes exported dmabuf frames. The
-// basic Wayland compositor uses shared buffers and avoids the busy-loop/stale
-// damage behaviour while retaining hardware decode for video.
+// Clover's legacy KGSL explicit-sync path flashes exported dmabuf frames. Keep
+// the browser window on shared Wayland buffers while WebRender accelerates its
+// internal scenegraph.
 user_pref("widget.dmabuf.enabled", false);
 user_pref("widget.dmabuf-feedback.enabled", false);
 user_pref("widget.dmabuf-export.force-enabled", false);
