@@ -11,9 +11,9 @@ export XDG_RUNTIME_DIR=/run/droidspaces-runtime/user-0
 export PULSE_RUNTIME_PATH="$XDG_RUNTIME_DIR/pulse"
 export PULSE_SERVER="unix:$PULSE_RUNTIME_PATH/native"
 export PIPEWIRE_REMOTE="$XDG_RUNTIME_DIR/pipewire-0"
-# Use Firefox's native FFmpeg V4L2-M2M path. Clover exposes the decoder as
-# /dev/video2; the old libva stateful bridge on /dev/video32 is not an M2M
-# device and makes Firefox fall back to a CPU decoder.
+# Use Firefox's native FFmpeg V4L2-M2M path. On this Clover kernel the
+# Qualcomm decoder is /dev/video32; /dev/video2 is a single-plane graphics
+# node and must not be selected as the decoder.
 export MOZ_DRM_DEVICE=/dev/dri/renderD128
 # Arch Firefox's generic RDD sandbox does not whitelist Qualcomm's legacy
 # msm_vidc ioctls. This affects only the media decoder process.
@@ -160,14 +160,19 @@ user_pref("layout.frame_rate", -1);
 user_pref("accessibility.force_disabled", 1);
 user_pref("media.hardware-video-decoding.enabled", true);
 user_pref("media.hardware-video-decoding.force-enabled", true);
-// Use Firefox's native FFmpeg V4L2-M2M decoder on /dev/video2. Do not route
-// this tablet through the obsolete stateful VA-API bridge on /dev/video32.
+// This Firefox build carries the native FFmpeg V4L2-M2M backend. The
+// hardware switch uses a hyphenated pref; the dotted spelling is ignored.
+user_pref("media.ffvpx-hw.enabled", true);
+user_pref("media.rdd-ffvpx.enabled", true);
+user_pref("media.prefer-non-ffvpx", false);
+// Use Firefox's native FFmpeg V4L2-M2M decoder. The patched decoder probe
+// selects Qualcomm's /dev/video32 M2M node; video2 is not a decoder node.
 user_pref("media.ffmpeg.vaapi.enabled", false);
 user_pref("media.rdd-ffmpeg.enabled", true);
 user_pref("media.rdd-vpx.enabled", true);
 user_pref("media.decoder.recycle.enabled", true);
 user_pref("media.ffvpx.enabled", true);
-user_pref("media.ffvpx.hw.enabled", false);
+user_pref("media.ffvpx.hw.enabled", true);
 // OpenH264 is only needed for WebRTC. Douyin's normal H.264 MSE stream uses
 // FFmpeg/V4L2 instead; keeping the bundled plugin alive starts a separate
 // software decoder process on the 4 GB Clover and wastes CPU while browsing.
