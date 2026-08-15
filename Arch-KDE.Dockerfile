@@ -319,13 +319,11 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
              '    default.clock.max-quantum = 2048' \
              '    default.clock.quantum-limit = 2048' \
              '}' > /etc/pipewire/pipewire.conf.d/20-mi-pad4-low-cpu.conf && \
-         if [ "$ENABLE_MI_PAD4_FIREFOX_ARG" = "true" ]; then \
-             install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
-             for desktop in /usr/share/applications/firefox*.desktop; do \
-                 [ -f "$desktop" ] || continue; \
-                 sed -i 's#Exec=/usr/lib/firefox/firefox#Exec=/usr/local/bin/mi-pad4-firefox#g' "$desktop"; \
-             done; \
-         fi && \
+         install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
+         for desktop in /usr/share/applications/firefox*.desktop; do \
+             [ -f "$desktop" ] || continue; \
+             sed -i 's#Exec=/usr/lib/firefox/firefox#Exec=/usr/local/bin/mi-pad4-firefox#g' "$desktop"; \
+         done && \
         install -Dm644 /tmp/mi-pad4/dolphinrc /usr/share/droidspaces/mi-pad4-profile/dolphinrc && \
         install -Dm644 /tmp/mi-pad4/dolphin-global-viewproperties /usr/share/droidspaces/mi-pad4-profile/dolphin-global-viewproperties && \
         install -Dm644 /tmp/mi-pad4/user-places.xbel /usr/share/droidspaces/mi-pad4-profile/user-places.xbel && \
@@ -336,8 +334,8 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
              'profile=mi-pad4-sdm660-4gb' \
              'sysctl=memory-io-thp' \
              'scheduler=schedutil-if-available' \
-             "firefox-mode=$([ \"$ENABLE_MI_PAD4_FIREFOX_ARG\" = \"true\" ] && printf clover-v4l2-m2m-device || printf system-default)" \
-             "firefox-clover-integration=$ENABLE_MI_PAD4_FIREFOX_ARG" \
+             'firefox-mode=clover-v4l2-m2m-device' \
+             'firefox-clover-integration=true' \
              > /usr/share/droidspaces/cachyos-mi-pad4 && \
          printf '%s\n' 'SYSTEMD_DROIDSPACES_COMPAT=1' 'SYSTEMD_LOG_LEVEL=warning' > /etc/droidspaces/systemd-compat.env && \
         printf '%s\n' '#!/bin/bash' 'set -u' 'echo "systemd: $(/usr/lib/systemd/systemd --version 2>/dev/null | head -n 1 || true)"' 'echo "kernel: $(uname -r)"' 'echo "pid1: $(cat /proc/1/comm 2>/dev/null || true)"' 'echo "state: $(systemctl is-system-running 2>/dev/null || true)"' 'echo "desktop: $(systemctl is-active mi-pad4-desktop.service 2>/dev/null || true)"' 'echo "mode: systemd257-droidspaces"' > /usr/local/bin/droidspaces-systemd-check && \
