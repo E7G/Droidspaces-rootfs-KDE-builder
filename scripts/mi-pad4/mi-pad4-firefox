@@ -7,6 +7,10 @@ set -u
 export MOZ_ENABLE_WAYLAND=1
 export GDK_BACKEND=wayland
 export EGL_PLATFORM=wayland
+export XDG_RUNTIME_DIR=/run/droidspaces-runtime/user-0
+export PULSE_RUNTIME_PATH="$XDG_RUNTIME_DIR/pulse"
+export PULSE_SERVER="unix:$PULSE_RUNTIME_PATH/native"
+export PIPEWIRE_REMOTE="$XDG_RUNTIME_DIR/pipewire-0"
 export MOZ_DRM_DEVICE=/dev/dri/renderD128
 # Route H.264/HEVC through the stateful V4L2 VA-API driver and Clover's
 # Qualcomm decoder. The driver uses X11 only to obtain a DRM display handle;
@@ -40,6 +44,20 @@ firefox_root="${HOME:-/tmp/droidspaces-home}/.mozilla/firefox"
 legacy_profile="$firefox_root/mi-pad4.default-release"
 profile="$firefox_root/mi-pad4.fd512"
 mkdir -p "$profile"
+
+# A 4.4-kernel crash can leave Firefox's lock symlink pointing at a zombie
+# process. Firefox then exits immediately on the next launch, which looks like
+# a broken launcher or a flashing page. Remove only locks whose recorded PID is
+# absent or already a zombie; never disturb a live browser instance.
+if [[ -L "$profile/lock" ]]; then
+    lock_pid="$(readlink "$profile/lock" | sed -n 's/.*:+\([0-9][0-9]*\)$/\1/p')"
+    lock_state=""
+    [[ -n "$lock_pid" && -r "/proc/$lock_pid/stat" ]] && \
+        lock_state="$(awk '{print $3}' "/proc/$lock_pid/stat" 2>/dev/null || true)"
+    if [[ -z "$lock_state" || "$lock_state" = Z ]]; then
+        rm -f "$profile/lock" "$profile/.parentlock"
+    fi
+fi
 
 # Start from clean runtime state: the old profile accumulated incompatible GPU,
 # extension and crash-session state. Migrate personal data once, but deliberately
@@ -133,12 +151,16 @@ user_pref("gfx.webrender.compositor.force-enabled", false);
 // Keep Firefox's native GPU/DMABUF presentation enabled. The compositor-side
 // patch forces a complete EGL damage rectangle, avoiding stale regions without
 // falling back to SHM or software rendering.
-user_pref("widget.dmabuf.enabled", true);
+// Clover's legacy KGSL explicit-sync path flashes exported dmabuf frames.
+// Keep WebRender/KGSL, but use Wayland shared buffers for final presentation.
+user_pref("widget.dmabuf.enabled", false);
 user_pref("widget.dmabuf-feedback.enabled", false);
 user_pref("widget.dmabuf-export.force-enabled", false);
 user_pref("widget.dmabuf-webgl.enabled", false);
 user_pref("widget.wayland.vsync.enabled", true);
 user_pref("widget.wayland.opaque-region.enabled", true);
+user_pref("media.cubeb.backend", "pulse");
+user_pref("media.cubeb.force_null_context", false);
 user_pref("dom.webgpu.enabled", false);
 user_pref("browser.ml.enable", false);
 user_pref("toolkit.telemetry.enabled", false);
