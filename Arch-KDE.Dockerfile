@@ -56,11 +56,11 @@ RUN printf '%s\n' \
     rm -f /tmp/pacman-local.conf && \
     pacman -S --noconfirm --needed \
     # 核心工具组件 
-    bash coreutils file findutils grep sed gawk curl wget ca-certificates dbus systemd pam \
+    bash coreutils file findutils grep sed gawk curl wget ca-certificates bash-completion dbus systemd pam logrotate \
     # 用户请求的基础开发/编辑工具
-    git gcc sudo \
+    git gcc nano sudo \
     # 网络与 SSH 工具
-    openssh iptables iproute2 \
+    openssh net-tools iptables iputils iproute2 bind \
     # 用于系统监控的 procps 进程工具
     procps-ng \
     # 核心内核模块支持
@@ -69,8 +69,8 @@ RUN printf '%s\n' \
     # 最小化KDE
     if [ "$BUILD_KDE" = "min" ]; then \
         pacman -S --noconfirm --needed \
-        xkeyboard-config noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa kwin upower konsole \
-        pcmanfm-qt libpulse firefox; \
+        xorg-xrandr xkeyboard-config noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
+        dolphin pcmanfm-qt kate kinfocenter libpulse systemsettings firefox; \
     fi && \
     # 精简KDE
     if [ "$BUILD_KDE" = "conc" ]; then \
@@ -553,28 +553,17 @@ RUN if [ "$ENABLE_MI_PAD4_FIREFOX_ARG" = "true" ]; then \
         rm -f /tmp/pacman-firefox-final.conf; \
     fi
 
-# Mi Pad 4 runtime is intentionally smaller than the generic KDE image. The
-# desktop uses Wayland/KWin plus pcmanfm-qt; X11 KWin, Dolphin, developer tools
-# and diagnostic viewers only consume storage and can start extra processes.
+# Mi Pad 4 runtime keeps the normal daily KDE applications. Only build-time
+# compilers and source-control tools are removed; file management, archives,
+# editor, settings and common network utilities remain available.
 RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
-        for package in \
-            ark dolphin kate kinfocenter mesa-utils vulkan-tools xorg-xrandr kwin-x11 \
-            bash-completion bind dialog fastfetch logrotate net-tools iputils; do \
-            if pacman -Qq "$package" >/dev/null 2>&1; then \
-                pacman -Rns --noconfirm "$package" || true; \
-            fi; \
-        done; \
         if [ "$ENABLE_kfgj_ARG" != "true" ]; then \
-            for package in gcc git nano; do \
+            for package in gcc git; do \
                 if pacman -Qq "$package" >/dev/null 2>&1; then \
                     pacman -Rns --noconfirm "$package" || true; \
                 fi; \
             done; \
         fi; \
-        rm -rf /usr/share/man/* /usr/share/info/* /usr/share/gtk-doc/*; \
-        find /usr/share/locale -mindepth 1 -maxdepth 1 -type d \
-            ! -name C ! -name en_US ! -name zh_CN ! -name zh_Hans \
-            -exec rm -rf {} +; \
         mkdir -p /etc/systemd/coredump.conf.d; \
         printf '%s\n' '[Coredump]' 'Storage=none' 'ProcessSizeMax=0' \
             > /etc/systemd/coredump.conf.d/99-mi-pad4.conf; \
