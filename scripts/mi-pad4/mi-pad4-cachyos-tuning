@@ -13,7 +13,7 @@ apply_sysctl() {
 # goal is to avoid the multi-process Firefox + KWin swap storm seen on Clover,
 # not to maximize a desktop benchmark score.
 apply_sysctl vm.swappiness 35
-apply_sysctl vm.vfs_cache_pressure 50
+apply_sysctl vm.vfs_cache_pressure 75
 apply_sysctl vm.dirty_bytes 16777216
 apply_sysctl vm.dirty_background_bytes 4194304
 apply_sysctl vm.dirty_writeback_centisecs 3000
@@ -25,6 +25,9 @@ apply_sysctl kernel.printk '3 3 3 3'
 apply_sysctl kernel.kptr_restrict 2
 apply_sysctl net.core.netdev_max_backlog 4096
 apply_sysctl fs.file-max 131072
+apply_sysctl vm.compaction_proactiveness 0
+apply_sysctl vm.watermark_boost_factor 0
+apply_sysctl fs.inotify.max_user_instances 128
 apply_sysctl fs.inotify.max_user_watches 8192
 
 # SDM660 has separate little/big policies. schedutil is retained, but its

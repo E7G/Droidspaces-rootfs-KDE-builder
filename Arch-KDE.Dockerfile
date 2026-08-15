@@ -227,6 +227,19 @@ EOF
     cat <<'EOF' > /home/${USERNAME}/.config/kwinrc
 [Compositing]
 Enabled=false
+[Plugins]
+blurEnabled=false
+contrastEnabled=false
+desktopgridEnabled=false
+fadeEnabled=false
+kwin4_effect_maximizeEnabled=false
+minimizeEnabled=false
+overviewEnabled=false
+presentwindowsEnabled=false
+scaleEnabled=false
+slideEnabled=false
+wobblywindowsEnabled=false
+zoomEnabled=false
 EOF
     cat <<'EOF' > /home/${USERNAME}/.config/kscreenlockerrc
 [Daemon]
@@ -280,7 +293,7 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
          ln -sfn ../mi-pad4-desktop.service /etc/systemd/system/multi-user.target.wants/mi-pad4-desktop.service && \
           ln -sfn ../mi-pad4-network.service /etc/systemd/system/multi-user.target.wants/mi-pad4-network.service && \
          ln -sfn ../mi-pad4-cachyos-tuning.service /etc/systemd/system/multi-user.target.wants/mi-pad4-cachyos-tuning.service && \
-         install -Dm755 /tmp/mi-pad4/mi-pad4-file-manager /usr/local/bin/mi-pad4-file-manager && \
+    install -Dm755 /tmp/mi-pad4/mi-pad4-file-manager /usr/local/bin/mi-pad4-file-manager && \
          ln -sfn mi-pad4-file-manager /usr/local/bin/dolphin && \
          install -Dm644 /tmp/mi-pad4/org.kde.dolphin.desktop /usr/local/share/applications/org.kde.dolphin.desktop && \
          install -Dm644 /tmp/mi-pad4-firefox-anland-prefs.js /usr/lib/firefox/defaults/pref/mi-pad4-anland.js && \
@@ -294,6 +307,15 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
           install -Dm644 /tmp/mi-pad4/mi-pad4-network.service /etc/systemd/system/mi-pad4-network.service && \
          install -Dm755 /tmp/90-mi-pad4-cachyos-environment.sh /etc/profile.d/90-mi-pad4-cachyos-environment.sh && \
          install -Dm644 /tmp/mi-pad4/pcmanfm-qt-settings.conf /usr/share/droidspaces/mi-pad4-profile/pcmanfm-qt-settings.conf && \
+         mkdir -p /etc/pipewire/pipewire.conf.d && \
+         printf '%s\n' \
+             'context.properties = {' \
+             '    default.clock.rate = 48000' \
+             '    default.clock.quantum = 1024' \
+             '    default.clock.min-quantum = 512' \
+             '    default.clock.max-quantum = 2048' \
+             '    default.clock.quantum-limit = 2048' \
+             '}' > /etc/pipewire/pipewire.conf.d/20-mi-pad4-low-cpu.conf && \
          if [ "$ENABLE_MI_PAD4_FIREFOX_ARG" = "true" ]; then \
              install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
              for desktop in /usr/share/applications/firefox*.desktop; do \
@@ -564,6 +586,12 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
                 fi; \
             done; \
         fi; \
+        for unit in \
+            systemd-rfkill.service systemd-rfkill.socket \
+            systemd-timesyncd.service systemd-timesyncd.socket \
+            man-db.timer updatedb.timer fstrim.timer; do \
+            ln -sfn /dev/null "/etc/systemd/system/$unit"; \
+        done; \
         mkdir -p /etc/systemd/coredump.conf.d; \
         printf '%s\n' '[Coredump]' 'Storage=none' 'ProcessSizeMax=0' \
             > /etc/systemd/coredump.conf.d/99-mi-pad4.conf; \

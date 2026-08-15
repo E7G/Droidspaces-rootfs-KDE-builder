@@ -54,6 +54,7 @@ export QSG_RENDER_LOOP=basic
 export QT_QPA_PLATFORMTHEME=KDE
 export QT_QUICK_CONTROLS_STYLE=org.kde.breeze
 export QT_ENABLE_GLYPH_CACHE_WORKAROUND=1
+export PIPEWIRE_LATENCY=1024/48000
 if [[ -r /etc/profile.d/90-mi-pad4-cachyos-environment.sh ]]; then
   # Apply the same safe allocator defaults to non-login graphical processes.
   source /etc/profile.d/90-mi-pad4-cachyos-environment.sh
