@@ -166,6 +166,11 @@ user_pref("media.ffmpeg.vaapi.force-surface-zero-copy", 0);
 user_pref("media.ffvpx.enabled", true);
 user_pref("media.ffvpx.hw.enabled", false);
 user_pref("media.rdd-ffmpeg.enabled", true);
+// OpenH264 is only needed for WebRTC. Douyin's normal H.264 MSE stream uses
+// FFmpeg/V4L2 instead; keeping the bundled plugin alive starts a separate
+// software decoder process on the 4 GB Clover and wastes CPU while browsing.
+user_pref("media.gmp-gmpopenh264.enabled", false);
+user_pref("media.gmp-provider.enabled", false);
 user_pref("media.av1.enabled", false);
 // Prefer H.264 on MSE sites such as YouTube; this decoder does not expose VP9.
 user_pref("media.mediasource.vp9.enabled", false);
@@ -223,12 +228,11 @@ user_pref("browser.urlbar.suggest.quicksuggest.sponsored", false);
 EOF
 
 firefox_args=(--profile "$profile" "$@")
-# The SDM660 big cluster is CPU 4-7; this kernel's container cpuset exposes
-# cores 4 and 7 for foreground work. Keeping the browser tree there avoids
-# bouncing its JS,
-# compositor and decoder threads between little/big clusters during scrolling.
-# Set MI_PAD4_FIREFOX_CPUS=none to restore the kernel's normal placement.
-firefox_cpus="${MI_PAD4_FIREFOX_CPUS:-4,7}"
+# The SDM660 big cluster is CPU 4-7. Keep Firefox on the whole big cluster,
+# not just two CPUs: Douyin's JS, compositor and decoder can run in parallel.
+# The governor still scales idle cores down; this only removes the 2-core
+# bottleneck during playback. Set MI_PAD4_FIREFOX_CPUS=none for kernel placement.
+firefox_cpus="${MI_PAD4_FIREFOX_CPUS:-4-7}"
 if [[ "$firefox_cpus" != none && -x /usr/bin/taskset ]]; then
     exec /usr/bin/taskset -c "$firefox_cpus" /usr/lib/firefox/firefox "${firefox_args[@]}"
 fi
