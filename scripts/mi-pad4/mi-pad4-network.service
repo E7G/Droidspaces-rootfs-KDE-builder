@@ -6,7 +6,7 @@ ConditionPathExists=/usr/local/libexec/mi-pad4-network
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/libexec/mi-pad4-network
+ExecStart=/usr/bin/bash /usr/local/libexec/mi-pad4-network
 RemainAfterExit=yes
 
 [Install]

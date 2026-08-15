@@ -303,8 +303,11 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
          install -Dm644 /tmp/10-mi-pad4-system.conf /usr/lib/systemd/system.conf.d/10-mi-pad4-system.conf && \
          install -Dm755 /tmp/mi-pad4-cachyos-tuning /usr/local/libexec/mi-pad4-cachyos-tuning && \
          install -Dm644 /tmp/mi-pad4-cachyos-tuning.service /etc/systemd/system/mi-pad4-cachyos-tuning.service && \
-          install -Dm755 /tmp/mi-pad4/mi-pad4-network /usr/local/libexec/mi-pad4-network && \
-          install -Dm644 /tmp/mi-pad4/mi-pad4-network.service /etc/systemd/system/mi-pad4-network.service && \
+         install -Dm755 /tmp/mi-pad4/mi-pad4-network /usr/local/libexec/mi-pad4-network && \
+         install -Dm644 /tmp/mi-pad4/mi-pad4-network.service /etc/systemd/system/mi-pad4-network.service && \
+         for unit in systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service systemd-resolved.service dbus-org.freedesktop.network1.service dbus-org.freedesktop.resolve1.service; do \
+             ln -sfn /dev/null "/etc/systemd/system/$unit"; \
+         done && \
          install -Dm755 /tmp/90-mi-pad4-cachyos-environment.sh /etc/profile.d/90-mi-pad4-cachyos-environment.sh && \
          install -Dm644 /tmp/mi-pad4/pcmanfm-qt-settings.conf /usr/share/droidspaces/mi-pad4-profile/pcmanfm-qt-settings.conf && \
          mkdir -p /etc/pipewire/pipewire.conf.d && \
@@ -502,9 +505,8 @@ for unit in NetworkManager.service dhcpcd.service systemd-resolved.service syste
     if [ -f "$GUEST_SYSTEMD_PATH/$unit" ] || [ -f "/etc/systemd/system/multi-user.target.wants/$unit" ]; then
         mkdir -p "/etc/systemd/system/${unit}.d"
         cat > "/etc/systemd/system/${unit}.d/99-netmode-limit.conf" << 'EOF'
-[Service]
-ExecCondition=
-ExecCondition=/bin/sh -c "grep -qE 'net_mode=(nat|gateway)' /run/droidspaces/container.config"
+[Unit]
+ConditionPathExists=/run/droidspaces/container.config
 EOF
     fi
 done
@@ -514,9 +516,8 @@ for unit in systemd-udevd.service systemd-udev-trigger.service systemd-udev-sett
     if [ -f "$GUEST_SYSTEMD_PATH/$unit" ] || [ -f "/etc/systemd/system/multi-user.target.wants/$unit" ]; then
         mkdir -p "/etc/systemd/system/${unit}.d"
         cat > "/etc/systemd/system/${unit}.d/99-hwaccess-limit.conf" << 'EOF'
-[Service]
-ExecCondition=
-ExecCondition=/bin/sh -c "grep -q 'enable_hw_access=1' /run/droidspaces/container.config"
+[Unit]
+ConditionPathExists=/run/droidspaces/container.config
 EOF
     fi
 done
