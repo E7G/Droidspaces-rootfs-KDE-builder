@@ -282,12 +282,22 @@ bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region
     if (m_damageFlags != 0)
         scheduleRepaint(nullptr);
 
-    // Instead of CPU-blocking on glFinish, create a fence for the just-submitted
-    // GPU work and hand it to the consumer (via the transport). The consumer passes
-    // it to ANativeWindow_queueBuffer, so SurfaceFlinger waits on it GPU-side before
-    // scanout -- letting us submit the buffer before its render completes.
-    EGLNativeFence fence{m_backend->openglContext()->displayObject()};
-    set_render_fence(m_display, fence.takeFileDescriptor().take());
+    // Clover's 4.4 KGSL exports an EGL sync fence, but the Android consumer and
+    // SurfaceFlinger do not share the same sync_file security/ABI context. The
+    // resulting fence is repeatedly rejected as anon_inode:sync_fence and can
+    // make BufferQueue show an incompletely rendered dmabuf (the panel flashes
+    // when a video client increases frame damage). Use the conservative path by
+    // default: finish the GL work before queueBuffer and send a bare completion
+    // byte. It costs one GPU/CPU synchronization per frame, but prevents stale
+    // or partially scanned buffers on this legacy kernel. Keep the native-fence
+    // path available for newer Android kernels with ANLAND_NATIVE_FENCE=1.
+    if (qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1) {
+        EGLNativeFence fence{m_backend->openglContext()->displayObject()};
+        set_render_fence(m_display, fence.takeFileDescriptor().take());
+    } else {
+        glFinish();
+        set_render_fence(m_display, -1);
+    }
     return true;
 }
 
