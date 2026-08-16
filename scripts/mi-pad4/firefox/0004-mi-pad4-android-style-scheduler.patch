@@ -1,72 +1,77 @@
 diff --git a/hal/fallback/FallbackHeterogeneousCpuInfo.cpp b/hal/fallback/FallbackHeterogeneousCpuInfo.cpp
+index 1111111..2222222 100644
 --- a/hal/fallback/FallbackHeterogeneousCpuInfo.cpp
 +++ b/hal/fallback/FallbackHeterogeneousCpuInfo.cpp
-@@ -1,10 +1,39 @@
+@@ -1,11 +1,44 @@
  /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
  /* vim: set ts=8 sts=2 et sw=2 tw=80: */
  /* This Source Code Form is subject to the terms of the Mozilla Public
   * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
+
  #include "Hal.h"
  #include "HalTypes.h"
 +#include "prenv.h"
- 
+
  namespace mozilla::hal_impl {
- 
+
  const Maybe<hal::HeterogeneousCpuInfo>& GetHeterogeneousCpuInfo() {
 -  static Maybe<hal::HeterogeneousCpuInfo> cpuInfo = Nothing();
 +  static Maybe<hal::HeterogeneousCpuInfo> cpuInfo = []() {
 +#if defined(__aarch64__)
 +    const char* enabled = PR_GetEnv("MOZ_MI_PAD4_ANDROID_SCHED");
+
 +    if (enabled &&
 +        enabled[0] == '1' &&
 +        enabled[1] == '\0') {
+
 +      hal::HeterogeneousCpuInfo info;
+
 +      // Snapdragon 660 / Xiaomi Mi Pad 4 clover
 +      info.mTotalNumCpus = 8;
+
 +      // CPU0-3 efficiency cluster
 +      for (size_t i = 0; i < 4; ++i) {
 +        info.mLittleCpus[i] = true;
 +      }
+
 +      // CPU4-7 performance cluster
 +      for (size_t i = 4; i < 8; ++i) {
 +        info.mBigCpus[i] = true;
 +      }
+
 +      return Some(info);
 +    }
 +#endif
+
 +    return Maybe<hal::HeterogeneousCpuInfo>(Nothing());
 +  }();
-   return cpuInfo;
+
+  return cpuInfo;
  }
- 
- }  // namespace mozilla::hal_impl
 diff --git a/dom/ipc/ContentChild.cpp b/dom/ipc/ContentChild.cpp
+index 3333333..4444444 100644
 --- a/dom/ipc/ContentChild.cpp
 +++ b/dom/ipc/ContentChild.cpp
-@@ -77,8 +77,11 @@
- #include "ProfilerChild.h"
- #include "SessionHistoryEntry.h"
- 
--#if defined(MOZ_WIDGET_ANDROID)
-+#if defined(MOZ_WIDGET_ANDROID) || \
-+    (defined(XP_LINUX) && defined(__aarch64__))
- #  include <sched.h>
+@@ -71,8 +71,10 @@
+ #include "ChildProfilerController.h"
+
+ #if defined(MOZ_WIDGET_ANDROID)
+-#  include <sched.h>
++#  include "APKOpen.h"
++#endif
+
++#if defined(MOZ_WIDGET_ANDROID) || (defined(XP_LINUX) && defined(__aarch64__))
++#  include <sched.h>
  #endif
-+#if defined(MOZ_WIDGET_ANDROID)
- #  include "APKOpen.h"
- #endif
- 
-@@ -4572,7 +4575,7 @@ void ContentChild::Init() {
- 
- #endif  // !defined(MOZ_WIDGET_ANDROID)
- 
+
+ #include "mozilla/Atomics.h"
+@@ -1093,7 +1095,7 @@ void ContentChild::InitThreadAffinity() {
+   // Apply Android big.LITTLE thread affinity policy to Stylo.
+   // This only affects the worker threads; the main thread remains unbound.
+   // See the comment in dom/ipc/ContentChild.cpp for the Android implementation.
 -#ifdef MOZ_WIDGET_ANDROID
-+#if defined(MOZ_WIDGET_ANDROID) || \
-+    (defined(XP_LINUX) && defined(__aarch64__))
-   // On Android we may have a performance hint manager to tell us which cores
-   // are performance cores and which are efficiency cores.
-   ConfigureThreadPerformanceHints();
--#endif  // MOZ_WIDGET_ANDROID
-+#endif  // MOZ_WIDGET_ANDROID || (XP_LINUX && __aarch64__)
++#if defined(MOZ_WIDGET_ANDROID) || (defined(XP_LINUX) && defined(__aarch64__))
+   InitThreadAffinityImpl();
+ #endif
+ }

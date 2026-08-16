@@ -103,13 +103,9 @@ if [[ ! -e "$profile/.mi-pad4-migrated" ]]; then
 fi
 
 # Do this once for profiles produced by the earlier GPU experiments. Preserve
-# bookmarks/cookies/passwords, but discard only restart/session and shader
-# caches; restoring several old tabs was enough to start multiple content
-# processes before the low-memory prefs were read.
+# bookmarks/cookies/passwords, but discard only shader caches.
 if [[ ! -e "$profile/.mi-pad4-profile-v2" ]]; then
-    rm -f "$profile/sessionstore.jsonlz4" "$profile/previous.jsonlz4"
-    rm -rf "$profile/sessionstore-backups" "$profile/shader-cache" \
-           "$profile/startupCache" "$profile/cache2"
+    rm -rf "$profile/shader-cache" "$profile/startupCache" "$profile/cache2"
     : >"$profile/.mi-pad4-profile-v2"
 fi
 

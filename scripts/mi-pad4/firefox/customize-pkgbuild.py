@@ -43,8 +43,6 @@ replace_once(
     "ac_add_options --disable-alsa\n"
     "ac_add_options --disable-jack\n"
     "# Tablet-only build: remove large services not used by normal browsing.\n"
-    "ac_add_options --disable-accessibility\n"
-    "ac_add_options --disable-webrtc\n"
     "ac_add_options --disable-backgroundtasks\n"
     "ac_add_options --disable-webdriver\n"
     "ac_add_options --disable-profiling\n"
@@ -53,7 +51,8 @@ replace_once(
 replace_once(
     '  echo -n "$_google_api_key" >google-api-key\n',
     '  patch -Np1 <"$srcdir/../0002-mi-pad4-clover-direct-dmabuf.patch"\n'
-    '  patch -Np1 <"$srcdir/../0003-mi-pad4-clover-full-egl-damage.patch"\n\n'
+    '  patch -Np1 <"$srcdir/../0003-mi-pad4-clover-full-egl-damage.patch"\n'
+    '  patch -Np1 <"$srcdir/../0004-mi-pad4-android-style-scheduler.patch"\n\n'
     '  echo -n "$_google_api_key" >google-api-key\n',
 )
 replace_once(
