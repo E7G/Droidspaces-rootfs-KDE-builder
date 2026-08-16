@@ -1,5 +1,4 @@
 diff --git a/hal/fallback/FallbackHeterogeneousCpuInfo.cpp b/hal/fallback/FallbackHeterogeneousCpuInfo.cpp
-index 0000000000000000000000000000000000000000..1111111111111111111111111111111111111111 100644
 --- a/hal/fallback/FallbackHeterogeneousCpuInfo.cpp
 +++ b/hal/fallback/FallbackHeterogeneousCpuInfo.cpp
 @@ -1,10 +1,39 @@
@@ -44,7 +43,6 @@ index 0000000000000000000000000000000000000000..11111111111111111111111111111111
  
  }  // namespace mozilla::hal_impl
 diff --git a/dom/ipc/ContentChild.cpp b/dom/ipc/ContentChild.cpp
-index 0000000000000000000000000000000000000000..1111111111111111111111111111111111111111 100644
 --- a/dom/ipc/ContentChild.cpp
 +++ b/dom/ipc/ContentChild.cpp
 @@ -77,8 +77,11 @@
