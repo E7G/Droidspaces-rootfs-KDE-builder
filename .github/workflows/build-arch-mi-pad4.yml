@@ -90,6 +90,7 @@ jobs:
           cp \
             scripts/mi-pad4/firefox/0002-mi-pad4-clover-direct-dmabuf.patch \
             scripts/mi-pad4/firefox/0003-mi-pad4-clover-full-egl-damage.patch \
+            scripts/mi-pad4/firefox/0004-mi-pad4-android-style-scheduler.patch \
             scripts/mi-pad4/firefox/customize-pkgbuild.py \
             .ci/firefox/
 
