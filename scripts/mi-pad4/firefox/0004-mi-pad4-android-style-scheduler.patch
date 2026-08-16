@@ -1,7 +1,7 @@
 diff --git a/hal/fallback/FallbackHeterogeneousCpuInfo.cpp b/hal/fallback/FallbackHeterogeneousCpuInfo.cpp
 --- a/hal/fallback/FallbackHeterogeneousCpuInfo.cpp
 +++ b/hal/fallback/FallbackHeterogeneousCpuInfo.cpp
-@@ -6,6 +6,7 @@
+@@ -3,6 +3,7 @@
  #include "Hal.h"
  #include "HalTypes.h"
  #include "prenv.h"
@@ -45,7 +45,7 @@ diff --git a/hal/fallback/FallbackHeterogeneousCpuInfo.cpp b/hal/fallback/Fallba
 diff --git a/dom/ipc/ContentChild.cpp b/dom/ipc/ContentChild.cpp
 --- a/dom/ipc/ContentChild.cpp
 +++ b/dom/ipc/ContentChild.cpp
-@@ -68,8 +68,10 @@
+@@ -65,8 +65,10 @@
  #include "ChildProfilerController.h"
  
  #if defined(MOZ_WIDGET_ANDROID)
@@ -58,7 +58,7 @@ diff --git a/dom/ipc/ContentChild.cpp b/dom/ipc/ContentChild.cpp
  #endif
  
  #include "mozilla/Atomics.h"
-@@ -1090,7 +1092,7 @@ void ContentChild::InitThreadAffinity() {
+@@ -1087,7 +1089,7 @@ void ContentChild::InitThreadAffinity() {
    // Apply Android big.LITTLE thread affinity policy to Stylo.
    // This only affects the worker threads; the main thread remains unbound.
    // See the comment in dom/ipc/ContentChild.cpp for the Android implementation.
