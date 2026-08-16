@@ -1,0 +1,23 @@
+#!/bin/bash
+set -euo pipefail
+
+# winrun-box64 - Compatibility mode using Box64 + x86_64 Wine WoW64
+# Fallback when Hangover fails for specific applications
+
+WINEPREFIX="${HOME:-/tmp/droidspaces-home}/.wine"
+EXE_PATH="$1"
+
+if [[ -z "$EXE_PATH" ]]; then
+    echo "Usage: winrun-box64 <executable.exe>"
+    exit 1
+fi
+
+mkdir -p "$WINEPREFIX"
+
+# Force Box64 mode with conservative settings
+BOX64_MAXCPU=4 \
+BOX64_DYNAREC=1 \
+BOX64_DYNAREC_SAFEFLAGS=1 \
+BOX64_DYNAREC_STRONGMEM=0 \
+BOX64_DYNAREC_BIGBLOCK=1 \
+box64 wine "$EXE_PATH"

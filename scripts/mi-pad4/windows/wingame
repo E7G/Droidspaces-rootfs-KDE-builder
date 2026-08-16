@@ -1,0 +1,58 @@
+#!/bin/bash
+set -euo pipefail
+
+# wingame - Gaming mode launcher for Mi Pad 4
+# Optimizes CPU/GPU for gaming before launching Windows games
+
+WINEPREFIX="${HOME:-/tmp/droidspaces-home}/.wine"
+EXE_PATH="$1"
+
+if [[ -z "$EXE_PATH" ]]; then
+    echo "Usage: wingame <game.exe>"
+    exit 1
+fi
+
+mkdir -p "$WINEPREFIX"
+
+# Save current settings
+CURRENT_CORE_CTL=$(cat /sys/devices/system/cpu/cpu4/core_ctl/min_cpus 2>/dev/null || echo "2")
+CURRENT_GOVERNOR=$(cat /sys/devices/system/cpu/cpu4/cpufreq/scaling_governor 2>/dev/null || echo "powersave")
+
+# Gaming optimizations
+echo "Applying gaming optimizations..."
+
+# Increase core_ctl minimum CPUs (SDM660 optimization)
+if [[ -d /sys/devices/system/cpu/cpu4/core_ctl ]]; then
+    echo 4 > /sys/devices/system/cpu/cpu4/core_ctl/min_cpus 2>/dev/null || true
+fi
+
+# Set CPU governor to performance
+if [[ -d /sys/devices/system/cpu/cpu4/cpufreq ]]; then
+    echo performance > /sys/devices/system/cpu/cpu4/cpufreq/scaling_governor 2>/dev/null || true
+fi
+
+# Disable Plasma animations for gaming
+kwriteconfig5 --file kdeglobals --group KDE --group Effect --key AnimationSpeed 0 2>/dev/null || true
+
+# Pause Baloo indexing
+balooctl suspend 2>/dev/null || true
+
+# Launch game with optimized settings
+BOX64_MAXCPU=4 BOX64_DYNAREC=1 BOX64_DYNAREC_BIGBLOCK=2 winrun "$EXE_PATH"
+GAME_EXIT_CODE=$?
+
+# Restore settings
+echo "Restoring system settings..."
+
+if [[ -d /sys/devices/system/cpu/cpu4/core_ctl ]]; then
+    echo "$CURRENT_CORE_CTL" > /sys/devices/system/cpu/cpu4/core_ctl/min_cpus 2>/dev/null || true
+fi
+
+if [[ -d /sys/devices/system/cpu/cpu4/cpufreq ]]; then
+    echo "$CURRENT_GOVERNOR" > /sys/devices/system/cpu/cpu4/cpufreq/scaling_governor 2>/dev/null || true
+fi
+
+# Resume Baloo
+balooctl resume 2>/dev/null || true
+
+exit $GAME_EXIT_CODE

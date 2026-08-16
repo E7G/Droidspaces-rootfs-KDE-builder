@@ -1,0 +1,25 @@
+REGEDIT4
+
+[HKEY_CURRENT_USER\Software\Wine\Drivers]
+"Graphics"="wayland,x11"
+"Audio"="pulse"
+
+[HKEY_CURRENT_USER\Software\Wine\Direct3D]
+"DirectDrawRenderer"="opengl"
+"Direct3DRenderer"="opengl"
+"VideoMemorySize"="2048"
+"OffscreenRenderingMode"="fbo"
+"Multisampling"="disabled"
+
+[HKEY_CURRENT_USER\Software\Wine\AppDefaults]
+"DllOverrides"="vulkan-1,steamclient=n"
+
+[HKEY_CURRENT_USER\Software\Wine\X11 Driver]
+"Managed"="N"
+"Decorated"="N"
+
+[HKEY_CURRENT_USER\Software\Wine\DllOverrides]
+"*d3d8"="native,builtin"
+"*d3d9"="native,builtin"
+"*d3d10"="native,builtin"
+"*d3d11"="native,builtin"

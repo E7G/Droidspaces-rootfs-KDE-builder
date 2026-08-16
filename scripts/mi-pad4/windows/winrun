@@ -1,0 +1,31 @@
+#!/bin/bash
+set -euo pipefail
+
+# winrun - Main Windows launcher for Mi Pad 4
+# Architecture: Hangover (preferred) -> Box64 fallback
+# Graphics: WineD3D -> OpenGL -> Freedreno/KGSL -> Adreno 512
+
+WINEPREFIX="${HOME:-/tmp/droidspaces-home}/.wine"
+EXE_PATH="$1"
+
+if [[ -z "$EXE_PATH" ]]; then
+    echo "Usage: winrun <executable.exe>"
+    exit 1
+fi
+
+mkdir -p "$WINEPREFIX"
+
+# Try Hangover first (preferred for Adreno 512)
+if command -v hangover >/dev/null 2>&1; then
+    BOX64_MAXCPU=4 BOX64_DYNAREC=1 hangover "$EXE_PATH"
+    exit $?
+fi
+
+# Fallback to Box64 + Wine WoW64
+if command -v box64 >/dev/null 2>&1; then
+    BOX64_MAXCPU=4 BOX64_DYNAREC=1 box64 wine "$EXE_PATH"
+    exit $?
+fi
+
+# Direct ARM64 Wine as last resort
+wine "$EXE_PATH"
