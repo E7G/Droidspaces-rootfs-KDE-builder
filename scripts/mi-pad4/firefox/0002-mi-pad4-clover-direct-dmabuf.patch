@@ -34,13 +34,13 @@ index 29027709..c0e3e938 100644
 -      surfacesUsed++;
 -      if (surface->IsFFMPEGSurface()) {
 -        DMABUF_LOG("Used HW surface UID {} FFMPEG ID 0x{:x}\n",
--                   surface->mSurface->GetUID(), surface->mFFMPEGSurfaceID);
+-                   surface->mSurface->GetUID(), surface->mFFmpeGSurfaceID);
 -        surfacesUsedFFmpeg++;
 -      }
 -    } else {
 -      if (surface->IsFFMPEGSurface()) {
 -        DMABUF_LOG("Free HW surface UID {} FFMPEG ID 0x{:x}\n",
--                   surface->mSurface->GetUID(), surface->mFFMPEGSurfaceID);
+-                   surface->mSurface->GetUID(), surface->mFFmpeGSurfaceID);
 -      }
 -    }
 -  }
