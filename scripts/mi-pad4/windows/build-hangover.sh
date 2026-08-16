@@ -29,7 +29,8 @@ cd wine/build
   --with-mingw=clang \
   --enable-archs=arm64ec,aarch64,i386 \
   --prefix=/usr/local \
-  --without-x
+  --without-x \
+  --without-freetype
 make -j"$(nproc)"
 make DESTDIR="$STAGE" install
 
