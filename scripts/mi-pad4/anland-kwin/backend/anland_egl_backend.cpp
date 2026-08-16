@@ -218,8 +218,11 @@ bool AnlandEglLayer::importBuffers(int count)
     }
 
     m_bufCount = count;
-    m_damageMask = (uint8_t)((1 << m_bufCount) - 1);
-    m_damageFlags = m_damageMask;
+    // We repaint the selected BufferQueue slot completely on every submitted
+    // frame, so there is no need to pre-warm every buffer with extra frames.
+    // Keep this flag only as a one-shot forced repaint for reconnect/startup.
+    m_damageMask = 1;
+    m_damageFlags = 1;
     return true;
 }
 
@@ -230,15 +233,16 @@ bool AnlandEglLayer::needsRepaint() const
 
 void AnlandEglLayer::onOutputTransformChanged()
 {
-    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
+    const OutputTransform contentTransform =
+        m_output->transform().combine(OutputTransform::FlipY);
     for (int i = 0; i < m_bufCount; i++) {
         m_textures[i]->setContentTransform(contentTransform);
-        // The cached RenderTarget captured the old transform; rebuild it so the
-        // renderer picks up the new content transform on the next doBeginFrame.
         m_renderTargets[i].emplace(m_fbos[i].get());
         m_accumDamage[i] = Region::infinite();
     }
-    m_damageFlags = m_damageMask;
+    // One forced full repaint is enough. doBeginFrame() always repaints
+    // the complete selected dmabuf anyway.
+    m_damageFlags = 1;
     scheduleRepaint(nullptr);
 }
 
@@ -257,43 +261,29 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
 
     return OutputLayerBeginFrameInfo{
         .renderTarget = *m_renderTargets[m_currentIndex],
-        // Android's BufferQueue may recycle a dmabuf with undefined contents;
-        // unlike KWin's EglSwapchain it does not preserve pixels outside the
-        // requested damage. A partial repaint therefore exposes black pixels
-        // whenever a new window or Plasma popup appears. The Mi Pad 4 path is
-        // event-driven and capped at 30 Hz, so repaint the complete scene on
-        // each submitted frame instead of relying on buffer age.
+        // Android BufferQueue contents outside damage are not reliable on
+        // Clover. Always redraw the selected slot completely.
         .repaint = Region::infinite(),
     };
 }
 
 bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame)
 {
-    glFlush(); // flush pending rendering commands into the dmabuf.
-    for (int i = 0; i < m_bufCount; i++)
-        m_accumDamage[i] = m_accumDamage[i] + damagedDeviceRegion;
-
-    if (!damagedDeviceRegion.isEmpty())
-        m_damageFlags = m_damageMask;
-
+    glFlush();
+    // The selected buffer has just received a complete repaint.
     m_accumDamage[m_currentIndex] = Region();
-    
-    m_damageFlags &= ~(uint8_t)(1 << m_currentIndex);
-    if (m_damageFlags != 0)
-        scheduleRepaint(nullptr);
-
-    // Clover's 4.4 KGSL exports an EGL sync fence, but the Android consumer and
-    // SurfaceFlinger do not share the same sync_file security/ABI context. The
-    // resulting fence is repeatedly rejected as anon_inode:sync_fence and can
-    // make BufferQueue show an incompletely rendered dmabuf (the panel flashes
-    // when a video client increases frame damage). Use the conservative path by
-    // default: finish the GL work before queueBuffer and send a bare completion
-    // byte. It costs one GPU/CPU synchronization per frame, but prevents stale
-    // or partially scanned buffers on this legacy kernel. Keep the native-fence
-    // path available for newer Android kernels with ANLAND_NATIVE_FENCE=1.
+    // Do NOT mark all BufferQueue slots dirty and do NOT schedule extra
+    // frames. Future slots will receive a full repaint when selected.
+    m_damageFlags = 0;
+    // Keep the conservative Clover 4.4 synchronization path.
     if (qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1) {
-        EGLNativeFence fence{m_backend->openglContext()->displayObject()};
-        set_render_fence(m_display, fence.takeFileDescriptor().take());
+        EGLNativeFence fence{
+            m_backend->openglContext()->displayObject()
+        };
+        set_render_fence(
+            m_display,
+            fence.takeFileDescriptor().take()
+        );
     } else {
         glFinish();
         set_render_fence(m_display, -1);

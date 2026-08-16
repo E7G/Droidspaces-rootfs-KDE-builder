@@ -63,6 +63,7 @@ jobs:
           required=(
             sbin/droidspaces-init
             usr/local/bin/mi-pad4-start-wayland
+            usr/local/bin/mi-pad4-firefox
             usr/bin/startplasma-wayland
             usr/bin/kwin_wayland
             usr/lib/aarch64-linux-gnu/libexec/kactivitymanagerd
