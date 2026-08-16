@@ -1,0 +1,156 @@
+name: Build Mi Pad 4 Windows Runtime & Vulkan Bridge
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_windows:
+        description: Build Windows runtime (Box64 + Hangover + Wine)
+        required: true
+        type: boolean
+        default: true
+
+      build_vulkan_bridge:
+        description: Build Android Vulkan broker for A512
+        required: true
+        type: boolean
+        default: false
+
+      publish_release:
+        description: Publish this build to GitHub Releases
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mi-pad4-windows-vulkan
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    if: inputs.build_windows == true
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Box64 for Mi Pad 4
+        shell: bash
+        run: |
+          chmod +x scripts/mi-pad4/windows/build-box64.sh
+          scripts/mi-pad4/windows/build-box64.sh
+
+      - name: Build Hangover for Mi Pad 4
+        shell: bash
+        run: |
+          chmod +x scripts/mi-pad4/windows/build-hangover.sh
+          scripts/mi-pad4/windows/build-hangover.sh
+
+      - name: Upload Windows runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-mi-pad4
+          path: usr/local/
+          if-no-files-found: error
+          retention-days: 30
+
+  vulkan-broker:
+    if: inputs.build_vulkan_bridge == true
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Android Vulkan broker for A512
+        shell: bash
+        run: |
+          chmod +x scripts/mi-pad4/vulkan/build-android-vulkan-broker.sh
+          scripts/mi-pad4/vulkan/build-android-vulkan-broker.sh
+
+      - name: Upload Vulkan broker
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulkan-broker-mi-pad4
+          path: vulkan-broker-mi-pad4/
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: [windows, vulkan-broker]
+    if: inputs.publish_release == true
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Windows runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-mi-pad4
+          path: windows-mi-pad4/
+
+      - name: Download Vulkan broker
+        uses: actions/download-artifact@v4
+        with:
+          name: vulkan-broker-mi-pad4
+          path: vulkan-broker-mi-pad4/
+
+      - name: Create release package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION=$(date +%Y%m%d-%H%M%S)
+          RELEASE_DIR="mi-pad4-windows-vulkan-${VERSION}"
+          mkdir -p "$RELEASE_DIR"
+
+          # Package Windows runtime
+          if [ -d "windows-mi-pad4" ]; then
+            tar czf "$RELEASE_DIR/windows-mi-pad4.tar.gz" -C windows-mi-pad4 .
+          fi
+
+          # Package Vulkan broker
+          if [ -d "vulkan-broker-mi-pad4" ]; then
+            tar czf "$RELEASE_DIR/vulkan-broker-mi-pad4.tar.gz" -C vulkan-broker-mi-pad4 .
+          fi
+
+          # Create checksums
+          sha256sum "$RELEASE_DIR"/*.tar.gz > "$RELEASE_DIR/SHA256SUMS"
+
+          echo "RELEASE_VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "RELEASE_DIR=${RELEASE_DIR}" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mi-pad4-windows-vulkan-${{ env.RELEASE_VERSION }}
+          name: Mi Pad 4 Windows Runtime & Vulkan Bridge ${{ env.RELEASE_VERSION }}
+          draft: false
+          prerelease: true
+          files: |
+            ${{ env.RELEASE_DIR }}/*.tar.gz
+            ${{ env.RELEASE_DIR }}/SHA256SUMS
+          body: |
+            Mi Pad 4 (SDM660/Adreno 512) Windows Runtime & Vulkan Bridge
+
+            **Windows Runtime** (Box64 + Hangover + WineD3D):
+            - x86_64 Windows application translation layer
+            - WineD3D for Direct3D → OpenGL translation
+
+            **Vulkan Broker** (Android vendor driver bridge):
+            - Bridges Arch glibc Vulkan calls to Android bionic vendor driver
+            - Direct access to Qualcomm A512 Vulkan blob via KGSL
+            - Low-overhead command buffer batching
+            - DMA-BUF / shared memory for resource transfer
+
+            See `scripts/mi-pad4/windows/` and `scripts/mi-pad4/vulkan/` for details.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
