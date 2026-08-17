@@ -270,12 +270,23 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
 bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame)
 {
     glFlush();
-    // The selected buffer has just received a complete repaint.
+    /*
+     * doBeginFrame() already returns Region::infinite(), therefore the
+     * currently selected Android BufferQueue slot has just been completely
+     * redrawn.
+     *
+     * Do NOT propagate every client damage to every other slot. Video clients
+     * produce damage continuously and the old code turned every video frame
+     * into multiple full-screen KWin composites.
+     *
+     * m_damageFlags is retained only for initial buffer warm-up and output
+     * transform changes.
+     */
     m_accumDamage[m_currentIndex] = Region();
-    // Do NOT mark all BufferQueue slots dirty and do NOT schedule extra
-    // frames. Future slots will receive a full repaint when selected.
-    m_damageFlags = 0;
-    // Keep the conservative Clover 4.4 synchronization path.
+    m_damageFlags &=
+        ~(uint8_t)(1 << m_currentIndex);
+    if (m_damageFlags != 0)
+        scheduleRepaint(nullptr);
     if (qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1) {
         EGLNativeFence fence{
             m_backend->openglContext()->displayObject()
