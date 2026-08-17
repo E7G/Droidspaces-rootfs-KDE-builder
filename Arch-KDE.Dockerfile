@@ -319,11 +319,13 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
              '    default.clock.max-quantum = 2048' \
              '    default.clock.quantum-limit = 2048' \
              '}' > /etc/pipewire/pipewire.conf.d/20-mi-pad4-low-cpu.conf && \
-         install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
-         for desktop in /usr/share/applications/firefox*.desktop; do \
-             [ -f "$desktop" ] || continue; \
-             sed -i 's#Exec=/usr/lib/firefox/firefox#Exec=/usr/local/bin/mi-pad4-firefox#g' "$desktop"; \
-         done && \
+         if [ "$ENABLE_MI_PAD4_FIREFOX_ARG" = "true" ]; then \
+             install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \
+             for desktop in /usr/share/applications/firefox*.desktop; do \
+                 [ -f "$desktop" ] || continue; \
+                 sed -i 's#Exec=/usr/lib/firefox/firefox#Exec=/usr/local/bin/mi-pad4-firefox#g' "$desktop"; \
+             done; \
+         fi && \
         install -Dm644 /tmp/mi-pad4/dolphinrc /usr/share/droidspaces/mi-pad4-profile/dolphinrc && \
         install -Dm644 /tmp/mi-pad4/dolphin-global-viewproperties /usr/share/droidspaces/mi-pad4-profile/dolphin-global-viewproperties && \
         install -Dm644 /tmp/mi-pad4/user-places.xbel /usr/share/droidspaces/mi-pad4-profile/user-places.xbel && \
