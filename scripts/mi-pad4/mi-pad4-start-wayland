@@ -263,6 +263,64 @@ start_system_bus() {
   export DBUS_SYSTEM_BUS_ADDRESS="unix:path=$bus_socket"
 }
 
+start_audio_stack() {
+  mkdir -p "$XDG_RUNTIME_DIR"
+  chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+  # PipeWire core first.
+  if ! pgrep -x pipewire >/dev/null 2>&1; then
+    nohup /usr/bin/pipewire \
+      >"$HOME/pipewire.log" 2>&1 </dev/null &
+  fi
+  for _ in $(seq 1 100); do
+    [[ -S "$XDG_RUNTIME_DIR/pipewire-0" ]] && break
+    sleep 0.1
+  done
+  if [[ ! -S "$XDG_RUNTIME_DIR/pipewire-0" ]]; then
+    echo "PipeWire core socket did not become ready" >&2
+    return 1
+  fi
+  # Pulse protocol must not race PipeWire startup.
+  if ! pgrep -x pipewire-pulse >/dev/null 2>&1; then
+    nohup /usr/bin/pipewire-pulse \
+      >"$HOME/pipewire-pulse.log" 2>&1 </dev/null &
+  fi
+  for _ in $(seq 1 100); do
+    pactl info >/dev/null 2>&1 && break
+    sleep 0.1
+  done
+  if ! pactl info >/dev/null 2>&1; then
+    echo "pipewire-pulse did not become ready" >&2
+    return 1
+  fi
+  # Policy manager last.
+  if ! pgrep -x wireplumber >/dev/null 2>&1; then
+    nohup /usr/bin/wireplumber \
+      >"$HOME/wireplumber.log" 2>&1 </dev/null &
+  fi
+  return 0
+}
+
+setup_anland_audio() {
+  # The Anland virtual nodes are created only after KWin's backend is alive.
+  for _ in $(seq 1 200); do
+    if pactl list short sinks 2>/dev/null |
+       grep -q '[[:space:]]anland-speaker[[:space:]]'; then
+      pactl set-default-sink anland-speaker 2>/dev/null || true
+      pactl set-sink-mute anland-speaker 0 2>/dev/null || true
+      if pactl list short sources 2>/dev/null |
+         grep -q '[[:space:]]anland-mic[[:space:]]'; then
+        pactl set-default-source anland-mic 2>/dev/null || true
+        pactl set-source-mute anland-mic 0 2>/dev/null || true
+      fi
+      echo "Anland audio ready"
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "Anland audio bridge did not appear" >&2
+  return 1
+}
+
 if [[ "${1:-}" != child && "${1:-}" != shell && "${1:-}" != session ]]; then
   # runit supervises this one foreground service.  Keep KWin and the user
   # session as siblings so a failed compositor causes one clean restart rather
@@ -321,15 +379,7 @@ if [[ "${1:-}" = child ]]; then
 fi
 
 if [[ "${1:-}" = session ]]; then
-  if ! pgrep -x pipewire >/dev/null 2>&1; then
-    nohup /usr/bin/pipewire >"$HOME/pipewire.log" 2>&1 </dev/null &
-  fi
-  if ! pgrep -x pipewire-pulse >/dev/null 2>&1; then
-    nohup /usr/bin/pipewire-pulse >"$HOME/pipewire-pulse.log" 2>&1 </dev/null &
-  fi
-  if ! pgrep -x wireplumber >/dev/null 2>&1; then
-    nohup /usr/bin/wireplumber >"$HOME/wireplumber.log" 2>&1 </dev/null &
-  fi
+  start_audio_stack || true
 
   # Plasma 6 must own plasmashell through plasma_session. Launching the shell
   # directly skips its session D-Bus services and crashes during startup. The
@@ -423,7 +473,10 @@ if [[ "${1:-}" = session ]]; then
     wait "$kwin_pid" 2>/dev/null || true
     exit 1
   fi
-
+  # Anland audio nodes appear asynchronously after the backend connects.
+  # Do not block Plasma startup while waiting for them.
+  setup_anland_audio \
+    >>"$HOME/anland-audio.log" 2>&1 &
   sleep 1
   shell_pid="$(live_plasmashell_pid || true)"
   if [[ -z "$shell_pid" ]]; then
@@ -484,19 +537,9 @@ fi
 # cannot keep a systemd user manager alive, so launch the audio graph directly.
 # Without a PipeWire server the Anland audio reconnect loop sits on a dead core
 # socket and wastes one CPU core.
-if ! pgrep -x pipewire >/dev/null 2>&1; then
-  nohup /usr/bin/pipewire >"$HOME/pipewire.log" 2>&1 </dev/null &
-fi
-for _ in $(seq 1 10); do
-  [[ -S "$XDG_RUNTIME_DIR/pipewire-0" ]] && break
-  sleep 0.2
-done
-if ! pgrep -x pipewire-pulse >/dev/null 2>&1; then
-  nohup /usr/bin/pipewire-pulse >"$HOME/pipewire-pulse.log" 2>&1 </dev/null &
-fi
-if ! pgrep -x wireplumber >/dev/null 2>&1; then
-  nohup /usr/bin/wireplumber >"$HOME/wireplumber.log" 2>&1 </dev/null &
-fi
+start_audio_stack || true
+setup_anland_audio \
+  >>"$HOME/anland-audio.log" 2>&1 &
 
 # A healthy startplasma-wayland may launch plasmashell itself once the Plasma
 # QML packages are complete.  Keep that instance instead of starting a second
