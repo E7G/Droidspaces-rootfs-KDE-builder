@@ -256,10 +256,10 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
         return std::nullopt;
     }
 
-    return OutputLayerBeginFrameInfo{
-        .renderTarget = *m_sceneTarget,
-        .repaint = m_sceneInvalid ? Region::infinite() : Region(),
-    };
+    OutputLayerBeginFrameInfo info;
+    info.renderTarget = *m_sceneTarget;
+    info.repaint = m_sceneInvalid ? Region::infinite() : Region();
+    return info;
 }
 
 bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame)
