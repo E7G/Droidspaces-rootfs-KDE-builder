@@ -366,8 +366,129 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  build-kio:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore KIO package from cache
+        id: kio-cache
+        uses: actions/cache@v4
+        with:
+          path: kio-mi-pad4
+          key: kio-${{ hashFiles('scripts/mi-pad4/kio/**') }}-${{ hashFiles('.github/workflows/build-arch-mi-pad4.yml') }}
+
+      - name: Build KIO
+        if: steps.kio-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          KIO_PKG_COMMIT: 8ca1426ad92c58c17d4ef610e57febd763717272
+        run: |
+          set -euo pipefail
+
+          rm -rf .ci/kio kio-mi-pad4
+
+          git clone \
+            --filter=blob:none \
+            --no-checkout \
+            https://gitlab.archlinux.org/archlinux/packaging/packages/kio.git \
+            .ci/kio
+
+          git -C .ci/kio fetch \
+            --depth 1 \
+            origin \
+            "$KIO_PKG_COMMIT"
+
+          git -C .ci/kio checkout \
+            --detach \
+            FETCH_HEAD
+
+          # Apply KIO runtime named socket patch
+          cp scripts/mi-pad4/kio-runtime-named-socket.patch .ci/kio/
+          sed -i "s/^arch=(.*)$/arch=('aarch64')/" .ci/kio/PKGBUILD
+          cat >> .ci/kio/PKGBUILD <<'EOF'
+source+=(kio-runtime-named-socket.patch)
+sha256sums+=('SKIP')
+
+prepare() {
+  cd "$srcdir/kio-$pkgver"
+  patch -Np1 -i "$srcdir/kio-runtime-named-socket.patch"
+}
+EOF
+
+          docker run \
+            --privileged \
+            --rm \
+            -v "$PWD/.ci/kio:/src" \
+            lfdevs/archlinuxarm:base-devel \
+            bash -lc '
+              set -euo pipefail
+
+              pacman -Syyu --noconfirm
+              pacman -S --needed --noconfirm \
+                sudo \
+                base-devel \
+                git \
+                ccache
+
+              useradd -m -s /bin/bash builder
+
+              echo "builder ALL=(ALL) NOPASSWD: ALL" \
+                >/etc/sudoers.d/builder
+
+              chmod 0440 /etc/sudoers.d/builder
+
+              chown -R builder:builder /src
+
+              sudo -u builder bash -lc "
+                set -euo pipefail
+
+                export CCACHE_DIR=/home/builder/.ccache
+                ccache --max-size=2G
+
+                cd /src
+                makepkg -s --noconfirm --needed
+              "
+            '
+
+          mkdir -p kio-mi-pad4
+
+          cp -v \
+            .ci/kio/kio-[0-9]*.pkg.tar.* \
+            kio-mi-pad4/
+
+          test -n "$(
+            find kio-mi-pad4 \
+              -maxdepth 1 \
+              -name 'kio-*.pkg.tar.*' \
+              -print \
+              -quit
+          )"
+
+          # Rename files to remove colons (epoch version format) for GitHub Actions compatibility
+          cd kio-mi-pad4
+          for file in *; do
+            mv "$file" "${file//:/_}"
+          done
+          cd ..
+
+          sha256sum \
+            kio-mi-pad4/*.pkg.tar.* \
+            | tee kio-mi-pad4/SHA256SUMS
+
+      - name: Upload KIO package
+        uses: actions/upload-artifact@v4
+        with:
+          name: kio-mi-pad4
+          path: kio-mi-pad4/
+          if-no-files-found: error
+          retention-days: 30
+
   build-rootfs:
-    needs: [firefox, build-mesa, build-pango]
+    needs: [firefox, build-mesa, build-pango, build-kio]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
 
@@ -391,6 +512,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: pango-mi-pad4
+          path: local-packages-mi-pad4
+
+      - name: Download KIO package
+        uses: actions/download-artifact@v4
+        with:
+          name: kio-mi-pad4
           path: local-packages-mi-pad4
 
       - name: Setup Docker buildx with cache
@@ -617,6 +744,14 @@ jobs:
             rootfs-files.txt \
             || {
               echo "Pango is not installed" >&2
+              exit 1
+            }
+
+          grep -Eq \
+            '^var/lib/pacman/local/kio-[0-9]+\.[0-9]+\.[0-9]+-/' \
+            rootfs-files.txt \
+            || {
+              echo "KIO is not installed" >&2
               exit 1
             }
 
