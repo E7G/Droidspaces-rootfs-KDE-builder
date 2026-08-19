@@ -344,7 +344,9 @@ bool AnlandEglBackend::initRenderingContext()
         EGL_NONE
     };
 
-    setContext(EglContext::create(eglDisplay(), EGL_NO_CONFIG_KHR, context_attribs));
+    // KWin 6.7.3 compatibility: use display() instead of eglDisplay()
+    // and EGL_NO_CONFIG_KHR for the config parameter
+    setContext(EglContext::create(display(), EGL_NO_CONFIG_KHR, context_attribs));
     if (!openglContext()) {
         return false;
     }
