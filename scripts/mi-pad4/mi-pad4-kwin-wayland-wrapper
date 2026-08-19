@@ -13,9 +13,10 @@ export XWAYLAND_FORCE_KGSL_SURFACELESS=1
 export KWIN_DISABLE_VULKAN=1
 export LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so
 
-# Clover Extreme v3: KWin is deadline-sensitive, give it all big cores with nice -8
-# Firefox is throughput workload, let Linux scheduler handle it
+# Let KWin use the full SDM660 performance cluster. core_ctl and schedutil may
+# still idle/downclock unused CPUs, but frame submission is no longer squeezed
+# onto two cores while Firefox and Android are active.
 if [[ -x /usr/bin/taskset ]]; then
-    exec /usr/bin/nice -n -8 /usr/bin/taskset -c 4-7 /usr/sbin/kwin_wayland --anland "$@"
+    exec /usr/bin/taskset -c 4-7 /usr/sbin/kwin_wayland --anland "$@"
 fi
 exec /usr/sbin/kwin_wayland --anland "$@"

@@ -55,6 +55,9 @@ export QT_QPA_PLATFORMTHEME=KDE
 export QT_QUICK_CONTROLS_STYLE=org.kde.breeze
 export QT_ENABLE_GLYPH_CACHE_WORKAROUND=1
 export PIPEWIRE_LATENCY=1024/48000
+export PULSE_RUNTIME_PATH="$XDG_RUNTIME_DIR/pulse"
+export PULSE_SERVER="unix:$PULSE_RUNTIME_PATH/native"
+export PIPEWIRE_REMOTE="$XDG_RUNTIME_DIR/pipewire-0"
 if [[ -r /etc/profile.d/90-mi-pad4-cachyos-environment.sh ]]; then
   # Apply the same safe allocator defaults to non-login graphical processes.
   source /etc/profile.d/90-mi-pad4-cachyos-environment.sh
@@ -266,61 +269,72 @@ start_system_bus() {
   export DBUS_SYSTEM_BUS_ADDRESS="unix:path=$bus_socket"
 }
 
+live_audio_pid() {
+  local name="$1" pid state
+  for pid in $(pgrep -x "$name" 2>/dev/null || true); do
+    state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+    if [[ -n "$state" && "$state" != Z* ]]; then
+      echo "$pid"
+      return 0
+    fi
+  done
+  return 1
+}
+
 start_audio_stack() {
-  mkdir -p "$XDG_RUNTIME_DIR"
+  mkdir -p "$XDG_RUNTIME_DIR" "$PULSE_RUNTIME_PATH" 2>/dev/null || true
   chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
-  # PipeWire core first.
-  if ! pgrep -x pipewire >/dev/null 2>&1; then
-    nohup /usr/bin/pipewire \
-      >"$HOME/pipewire.log" 2>&1 </dev/null &
+
+  if [[ -n "$(live_audio_pid pipewire || true)" && ! -S "$XDG_RUNTIME_DIR/pipewire-0" ]]; then
+    pkill -TERM -x wireplumber 2>/dev/null || true
+    pkill -TERM -x pipewire-pulse 2>/dev/null || true
+    pkill -TERM -x pipewire 2>/dev/null || true
+    sleep 0.2
+  fi
+
+  if [[ -z "$(live_audio_pid pipewire || true)" ]]; then
+    nohup /usr/bin/pipewire >"$HOME/pipewire.log" 2>&1 </dev/null &
   fi
   for _ in $(seq 1 100); do
     [[ -S "$XDG_RUNTIME_DIR/pipewire-0" ]] && break
     sleep 0.1
   done
-  if [[ ! -S "$XDG_RUNTIME_DIR/pipewire-0" ]]; then
-    echo "PipeWire core socket did not become ready" >&2
+  [[ -S "$XDG_RUNTIME_DIR/pipewire-0" ]] || {
+    echo "PipeWire core did not become ready" >&2
     return 1
-  fi
-  # Pulse protocol must not race PipeWire startup.
-  if ! pgrep -x pipewire-pulse >/dev/null 2>&1; then
-    nohup /usr/bin/pipewire-pulse \
-      >"$HOME/pipewire-pulse.log" 2>&1 </dev/null &
+  }
+
+  if [[ -z "$(live_audio_pid pipewire-pulse || true)" ]]; then
+    nohup /usr/bin/pipewire-pulse >"$HOME/pipewire-pulse.log" 2>&1 </dev/null &
   fi
   for _ in $(seq 1 100); do
     pactl info >/dev/null 2>&1 && break
     sleep 0.1
   done
-  if ! pactl info >/dev/null 2>&1; then
+  pactl info >/dev/null 2>&1 || {
     echo "pipewire-pulse did not become ready" >&2
     return 1
+  }
+
+  if [[ -z "$(live_audio_pid wireplumber || true)" ]]; then
+    nohup /usr/bin/wireplumber >"$HOME/wireplumber.log" 2>&1 </dev/null &
   fi
-  # Policy manager last.
-  if ! pgrep -x wireplumber >/dev/null 2>&1; then
-    nohup /usr/bin/wireplumber \
-      >"$HOME/wireplumber.log" 2>&1 </dev/null &
-  fi
-  return 0
 }
 
 setup_anland_audio() {
-  # The Anland virtual nodes are created only after KWin's backend is alive.
   for _ in $(seq 1 200); do
-    if pactl list short sinks 2>/dev/null |
-       grep -q '[[:space:]]anland-speaker[[:space:]]'; then
+    if pactl list short sinks 2>/dev/null | grep -q '[[:space:]]anland-speaker[[:space:]]'; then
       pactl set-default-sink anland-speaker 2>/dev/null || true
       pactl set-sink-mute anland-speaker 0 2>/dev/null || true
-      if pactl list short sources 2>/dev/null |
-         grep -q '[[:space:]]anland-mic[[:space:]]'; then
+      if pactl list short sources 2>/dev/null | grep -q '[[:space:]]anland-mic[[:space:]]'; then
         pactl set-default-source anland-mic 2>/dev/null || true
         pactl set-source-mute anland-mic 0 2>/dev/null || true
       fi
-      echo "Anland audio ready"
       return 0
     fi
     sleep 0.1
   done
-  echo "Anland audio bridge did not appear" >&2
+  echo "Anland audio bridge did not become ready" >&2
   return 1
 }
 
