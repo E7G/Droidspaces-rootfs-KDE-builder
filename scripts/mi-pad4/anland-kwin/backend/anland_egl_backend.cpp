@@ -340,11 +340,11 @@ bool AnlandEglBackend::initRenderingContext()
     };
 
     setContext(EglContext::create(eglDisplay(), EGL_NO_CONFIG_KHR, context_attribs));
-    if (!context()) {
+    if (!openglContext()) {
         return false;
     }
 
-    if (!context()->makeCurrent()) {
+    if (!openglContext()->makeCurrent()) {
         return false;
     }
 
