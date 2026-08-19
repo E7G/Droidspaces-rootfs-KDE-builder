@@ -340,6 +340,13 @@ jobs:
               -quit
           )"
 
+          # Rename files to remove colons (epoch version format) for GitHub Actions compatibility
+          cd pango-mi-pad4
+          for file in *; do
+            mv "$file" "${file//:/_}"
+          done
+          cd ..
+
           sha256sum \
             pango-mi-pad4/*.pkg.tar.* \
             | tee pango-mi-pad4/SHA256SUMS
