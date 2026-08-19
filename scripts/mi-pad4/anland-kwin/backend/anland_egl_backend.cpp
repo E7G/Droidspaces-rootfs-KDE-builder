@@ -100,7 +100,7 @@ void AnlandEglLayer::ensureSceneFbo()
         return;
     }
 
-    m_sceneTarget.emplace(m_sceneFbo.get());
+    m_sceneTarget = RenderTarget(m_sceneFbo.get());
     m_sceneSize = size;
     m_sceneInvalid = true;
 
