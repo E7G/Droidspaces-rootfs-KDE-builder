@@ -10,7 +10,7 @@ pref("gfx.webrender.allow-partial-present-buffer-age", false);
 pref("gfx.webrender.force-partial-present", false);
 pref("gfx.webrender.compositor", false);
 pref("gfx.webrender.compositor.force-enabled", false);
-pref("widget.dmabuf.enabled", false);
+pref("widget.dmabuf.enabled", true);
 pref("widget.dmabuf-feedback.enabled", false);
 // Keep the normal browser usable, but avoid speculative processes and large
 // disk caches competing with Plasma on the shared 4 GiB Android host.
@@ -26,13 +26,16 @@ pref("browser.sessionstore.max_tabs_undo", 3);
 pref("network.http.max-connections", 64);
 pref("network.http.max-persistent-connections-per-server", 6);
 pref("media.av1.enabled", false);
+pref("media.mediasource.vp9.enabled", true);
 pref("media.hardware-video-decoding.enabled", true);
 pref("media.hardware-video-decoding.force-enabled", true);
 pref("media.ffvpx-hw.enabled", true);
 pref("media.rdd-ffvpx.enabled", true);
-pref("media.prefer-non-ffvpx", false);
+pref("media.prefer-non-ffvpx", true);
 pref("media.ffmpeg.vaapi.enabled", false);
 pref("media.rdd-ffmpeg.enabled", true);
+pref("media.rdd-vpx.enabled", true);
+pref("media.ffmpeg.disable-software-fallback", true);
 pref("media.decoder.recycle.enabled", true);
 pref("browser.ml.enable", false);
 pref("toolkit.telemetry.enabled", false);
