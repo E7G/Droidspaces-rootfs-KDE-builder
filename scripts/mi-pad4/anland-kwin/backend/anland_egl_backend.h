@@ -4,13 +4,23 @@
 
     SPDX-License-Identifier: GPL-2.0-or-later
 
-    OpenGL/EGL render backend for the anland backend. It renders the KWin scene
-    directly into the dmabuf buffers provided by the display daemon (imported by
-    fd) and tells the daemon to present them. Modeled on VirtualEglBackend, with
-    the render target being one of the daemon's dmabufs instead of an internal
-    FBO. The consumer rotates the buffer index externally (shared memory), so the
-    layer keeps per-buffer accumulated damage (buffer-age equivalent), exactly
-    like weston's backend-anland.
+    Clover Extreme v3: Persistent scene FBO + GPU full blit architecture
+    
+    Instead of rendering directly into rotating Android BufferQueue dmabufs,
+    we maintain a persistent scene framebuffer owned by KWin. The scene is
+    composed partially (only damaged regions) into this FBO, then a single
+    GPU full-screen blit copies it to the current Android dmabuf slot.
+    
+    This eliminates:
+    - Full-screen scene composition on every frame
+    - Per-slot damage bookkeeping overhead
+    - Multiple repaints for video frames
+    
+    Architecture:
+    Firefox/Plasma damage → KWin scene (partial composition to m_sceneFbo)
+                           → GPU full blit to Android dmabuf
+                           → async fence worker
+                           → Android consumer
 */
 #pragma once
 
@@ -59,19 +69,25 @@ public:
 
 private:
     void onOutputTransformChanged();
+    void ensureSceneFbo();
+    void blitSceneToDmabuf();
 
     AnlandEglBackend *const m_backend;
     AnlandOutput *m_output;
     display_ctx *const m_display;
 
+    // Android BufferQueue dmabufs (destination only)
     int m_bufCount = 0;
     int m_currentIndex = 0;
-    uint8_t m_damageFlags = 0;
-    uint8_t m_damageMask = 0;
     std::array<std::shared_ptr<GLTexture>, MAX_BUFS> m_textures;
     std::array<std::unique_ptr<GLFramebuffer>, MAX_BUFS> m_fbos;
-    std::array<std::optional<RenderTarget>, MAX_BUFS> m_renderTargets;
-    std::array<Region, MAX_BUFS> m_accumDamage;
+
+    // Persistent scene FBO (source for composition)
+    std::unique_ptr<GLTexture> m_sceneTexture;
+    std::unique_ptr<GLFramebuffer> m_sceneFbo;
+    std::optional<RenderTarget> m_sceneTarget;
+    bool m_sceneInvalid = true;
+    QSize m_sceneSize;
 };
 
 class AnlandEglBackend : public EglBackend

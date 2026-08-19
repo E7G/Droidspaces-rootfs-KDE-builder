@@ -217,12 +217,15 @@ live_plasmashell_pid() {
 # connected to Anland.  KWin and application windows keep the accelerated path;
 # only the small panel process uses the software scenegraph.
 start_plasmashell() {
-  export LIBGL_ALWAYS_SOFTWARE=1
-  export QT_QUICK_BACKEND=software
-  export QSG_RHI_BACKEND=software
-  export GALLIUM_DRIVER=llvmpipe
-  export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
-  unset FD_FORCE_KGSL FD_KGSL_ENABLE_DMABUF
+  # Clover Extreme v3: Restore KGSL GPU acceleration for Plasma
+  # Persistent scene FBO eliminates the flicker issue that required llvmpipe workaround
+  unset LIBGL_ALWAYS_SOFTWARE
+  unset GALLIUM_DRIVER
+  export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+  export FD_FORCE_KGSL=1
+  export FD_KGSL_ENABLE_DMABUF=1
+  export QSG_RHI_BACKEND=opengl
+  export QSG_RENDER_LOOP=basic
   exec /usr/bin/plasmashell -p org.kde.plasma.desktop
 }
 

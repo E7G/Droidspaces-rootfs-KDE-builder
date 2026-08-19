@@ -42,8 +42,8 @@ for policy in /sys/devices/system/cpu/cpufreq/policy* /sys/devices/system/cpu/cp
         printf '%s\n' schedutil >"$governor" 2>/dev/null || true
     fi
     for knob_value in \
-        "$policy/schedutil/up_rate_limit_us=1000" \
-        "$policy/schedutil/down_rate_limit_us=10000"; do
+        "$policy/schedutil/up_rate_limit_us=500" \
+        "$policy/schedutil/down_rate_limit_us=20000"; do
         knob="${knob_value%%=*}"
         value="${knob_value#*=}"
         [ -w "$knob" ] && printf '%s\n' "$value" >"$knob" 2>/dev/null || true
