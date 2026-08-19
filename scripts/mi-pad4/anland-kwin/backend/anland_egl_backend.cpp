@@ -81,11 +81,16 @@ void AnlandEglLayer::ensureSceneFbo()
     m_backend->openglContext()->makeCurrent();
 
     const QSize size = m_output->modeSize();
-    m_sceneTexture = GLTexture::allocate(GL_RGBA8, size);
+    m_sceneTexture = GLTexture::allocate();
     if (!m_sceneTexture) {
         qCWarning(KWIN_ANLAND) << "failed to allocate scene texture";
         return;
     }
+    m_sceneTexture->setSize(size);
+    m_sceneTexture->setInternalFormat(GL_RGBA8);
+    m_sceneTexture->setFilter(GL_LINEAR);
+    m_sceneTexture->setWrapMode(GL_CLAMP_TO_EDGE);
+    m_sceneTexture->create();
 
     m_sceneFbo = std::make_unique<GLFramebuffer>(m_sceneTexture.get());
     if (!m_sceneFbo->valid()) {
