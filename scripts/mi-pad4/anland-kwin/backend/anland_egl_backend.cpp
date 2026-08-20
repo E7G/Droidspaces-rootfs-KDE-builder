@@ -110,19 +110,13 @@ void AnlandEglLayer::blitSceneToDmabuf()
         return;
     }
 
-    const QSize size = m_output->modeSize();
-    const int w = size.width();
-    const int h = size.height();
-
-    GLFramebuffer::pushFramebuffer(m_fbos[m_currentIndex].get());
-
-    glBlitFramebuffer(
-        0, 0, w, h,
-        0, 0, w, h,
-        GL_COLOR_BUFFER_BIT,
-        GL_NEAREST
-    );
-
+    // blitFromFramebuffer() captures the current framebuffer as its read
+    // source before binding the destination. Explicitly push the persistent
+    // scene here; binding only the destination with GL_FRAMEBUFFER would bind
+    // it for both READ and DRAW and accidentally blit the Android slot onto
+    // itself.
+    GLFramebuffer::pushFramebuffer(m_sceneFbo.get());
+    m_fbos[m_currentIndex]->blitFromFramebuffer(Rect(), Rect(), GL_NEAREST);
     GLFramebuffer::popFramebuffer();
 }
 
@@ -250,21 +244,20 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
 
     ensureSceneFbo();
 
-    // Clover's legacy BufferQueue does not preserve buffer-age damage
-    // reliably.  Every compositor pass therefore renders the complete scene;
-    // the important optimisation is that one client damage produces one pass
-    // and one consumer submission, not that we feed a partial region into the
-    // rotating Android buffers.
+    // The persistent scene texture is owned by KWin, so unlike Android's
+    // rotating BufferQueue its unchanged pixels are reliable. Repaint it in
+    // full only after allocation/reconnect/rotation; normal client damage is
+    // composed only into the damaged scene region. The completed scene is
+    // still copied in full to the selected Android slot below, which avoids
+    // depending on Clover's broken buffer-age preservation.
     return OutputLayerBeginFrameInfo{
         RenderTarget(m_sceneFbo.get()),
-        Region::infinite()
+        m_sceneInvalid ? Region::infinite() : Region()
     };
 }
 
 bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame)
 {
-    glFlush();
-
     blitSceneToDmabuf();
 
     m_sceneInvalid = false;
@@ -279,7 +272,14 @@ bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region
         EGLNativeFence fence{
             m_backend->openglContext()->displayObject()
         };
-        set_render_fence(m_display, fence.takeFileDescriptor().take());
+        if (fence.isValid()) {
+            set_render_fence(m_display, fence.takeFileDescriptor().take());
+        } else {
+            // Some legacy KGSL EGL stacks advertise native fences but fail to
+            // export a sync fd. Never submit an unfinished slot in that case.
+            glFinish();
+            set_render_fence(m_display, -1);
+        }
     } else {
         glFinish();
         set_render_fence(m_display, -1);

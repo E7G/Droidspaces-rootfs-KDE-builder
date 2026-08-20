@@ -5,4 +5,4 @@
 export MALLOC_ARENA_MAX=2
 export GLIBC_TUNABLES="glibc.malloc.trim_threshold=131072:glibc.malloc.mmap_threshold=131072"
 export QT_ENABLE_GLYPH_CACHE_WORKAROUND=1
-export PIPEWIRE_LATENCY=1024/48000
+export PIPEWIRE_LATENCY=2048/48000

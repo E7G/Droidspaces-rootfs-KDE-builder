@@ -457,10 +457,10 @@ EOT
 mkdir -p /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/ds-logging.conf << 'EOT'
 [Journal]
-SystemMaxUse=200M
-RuntimeMaxUse=200M
-MaxRetentionSec=7day
-MaxLevelStore=info
+SystemMaxUse=8M
+RuntimeMaxUse=8M
+MaxRetentionSec=1day
+MaxLevelStore=warning
 EOT
 
 mkdir -p /etc/systemd/system/multi-user.target.wants
@@ -599,9 +599,14 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         for unit in \
             systemd-rfkill.service systemd-rfkill.socket \
             systemd-timesyncd.service systemd-timesyncd.socket \
+            upower.service power-profiles-daemon.service \
+            packagekit.service packagekit-offline-update.service \
+            ModemManager.service bluetooth.service \
+            cups.service cups.socket geoclue.service \
             man-db.timer updatedb.timer fstrim.timer; do \
             ln -sfn /dev/null "/etc/systemd/system/$unit"; \
         done; \
+        rm -f /etc/systemd/system/multi-user.target.wants/sshd.service; \
         mkdir -p /etc/systemd/coredump.conf.d; \
         printf '%s\n' '[Coredump]' 'Storage=none' 'ProcessSizeMax=0' \
             > /etc/systemd/coredump.conf.d/99-mi-pad4.conf; \

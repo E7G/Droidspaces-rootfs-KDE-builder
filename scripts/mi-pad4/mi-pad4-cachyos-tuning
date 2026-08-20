@@ -19,6 +19,7 @@ apply_sysctl vm.dirty_background_bytes 4194304
 apply_sysctl vm.dirty_writeback_centisecs 3000
 apply_sysctl vm.dirty_expire_centisecs 3000
 apply_sysctl vm.page-cluster 0
+apply_sysctl vm.stat_interval 10
 apply_sysctl kernel.nmi_watchdog 0
 apply_sysctl kernel.unprivileged_userns_clone 1
 apply_sysctl kernel.printk '3 3 3 3'
@@ -42,8 +43,8 @@ for policy in /sys/devices/system/cpu/cpufreq/policy* /sys/devices/system/cpu/cp
         printf '%s\n' schedutil >"$governor" 2>/dev/null || true
     fi
     for knob_value in \
-        "$policy/schedutil/up_rate_limit_us=200" \
-        "$policy/schedutil/down_rate_limit_us=12000"; do
+        "$policy/schedutil/up_rate_limit_us=0" \
+        "$policy/schedutil/down_rate_limit_us=6000"; do
         knob="${knob_value%%=*}"
         value="${knob_value#*=}"
         [ -w "$knob" ] && printf '%s\n' "$value" >"$knob" 2>/dev/null || true
@@ -70,9 +71,13 @@ thp_defrag=/sys/kernel/mm/transparent_hugepage/defrag
 if [ -w "$thp_defrag" ] && grep -qw defer+madvise "$thp_defrag"; then
     printf '%s\n' defer+madvise >"$thp_defrag" 2>/dev/null || true
 fi
+thp_enabled=/sys/kernel/mm/transparent_hugepage/enabled
+if [ -w "$thp_enabled" ] && grep -qw madvise "$thp_enabled"; then
+    printf '%s\n' madvise >"$thp_enabled" 2>/dev/null || true
+fi
 
 mkdir -p /run/droidspaces 2>/dev/null || true
 printf '%s\n' 'profile=mi-pad4-sdm660-4gb' 'memory=swappiness35-page-cluster0' \
-    'cpu=schedutil-fast-response' 'storage=kernel-selected' 'v4l2-m2m=kept' \
+    'cpu=schedutil-zero-up-6ms-down' 'storage=kernel-selected' 'v4l2-m2m=kept' \
     'kgsl=kept' > /run/droidspaces/mi-pad4-performance.applied 2>/dev/null || true
 log 'device-specific SDM660 profile applied'
