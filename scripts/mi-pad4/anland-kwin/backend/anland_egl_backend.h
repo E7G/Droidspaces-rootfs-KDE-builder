@@ -87,6 +87,7 @@ private:
     std::unique_ptr<GLFramebuffer> m_sceneFbo;
     std::optional<RenderTarget> m_sceneTarget;
     bool m_sceneInvalid = true;
+    bool m_hasPendingDamage = true;
     QSize m_sceneSize;
 };
 

@@ -69,6 +69,7 @@ void AnlandEglLayer::releaseBuffers()
     m_sceneFbo.reset();
     m_sceneTarget.reset();
     m_sceneInvalid = true;
+    m_hasPendingDamage = true;
     m_bufCount = 0;
 }
 
@@ -103,6 +104,7 @@ void AnlandEglLayer::ensureSceneFbo()
     m_sceneTarget = RenderTarget(m_sceneFbo.get());
     m_sceneSize = size;
     m_sceneInvalid = true;
+    m_hasPendingDamage = true;
 
     qCDebug(KWIN_ANLAND) << "created scene FBO" << size;
 }
@@ -220,12 +222,13 @@ bool AnlandEglLayer::importBuffers(int count)
     m_bufCount = count;
     ensureSceneFbo();
     m_sceneInvalid = true;
+    m_hasPendingDamage = true;
     return true;
 }
 
 bool AnlandEglLayer::needsRepaint() const
 {
-    return m_sceneInvalid;
+    return m_sceneInvalid || m_hasPendingDamage;
 }
 
 void AnlandEglLayer::onOutputTransformChanged()
@@ -235,6 +238,7 @@ void AnlandEglLayer::onOutputTransformChanged()
         m_textures[i]->setContentTransform(contentTransform);
     }
     m_sceneInvalid = true;
+    m_hasPendingDamage = true;
     scheduleRepaint(nullptr);
 }
 
@@ -258,7 +262,12 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
 
     OutputLayerBeginFrameInfo info;
     info.renderTarget = *m_sceneTarget;
-    info.repaint = m_sceneInvalid ? Region::infinite() : Region();
+    // Clover's legacy BufferQueue does not preserve buffer-age damage
+    // reliably.  Every compositor pass therefore renders the complete scene;
+    // the important optimisation is that one client damage produces one pass
+    // and one consumer submission, not that we feed a partial region into the
+    // rotating Android buffers.
+    info.repaint = Region::infinite();
     return info;
 }
 
@@ -269,18 +278,22 @@ bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region
     blitSceneToDmabuf();
 
     m_sceneInvalid = false;
+    m_hasPendingDamage = false;
 
-    // Clover Extreme v3: Always use EGL native fence for async GPU completion
-    // The Anland fence worker thread will wait for GPU completion instead of
-    // blocking the KWin render thread with glFinish(). This eliminates
-    // CPU/GPU synchronization from the render thread and improves frame pacing.
-    EGLNativeFence fence{
-        m_backend->openglContext()->displayObject()
-    };
-    set_render_fence(
-        m_display,
-        fence.takeFileDescriptor().take()
-    );
+    // The old Android BufferQueue/4.4 KGSL combination is not safe with an
+    // arbitrary native-fence fd: a few vendor builds queue it before the
+    // fence-worker has drained the fd and show a stale/black buffer. Keep the
+    // proven synchronous path as the default. The asynchronous path is
+    // opt-in for kernels/consumers which have been verified to support it.
+    if (qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1) {
+        EGLNativeFence fence{
+            m_backend->openglContext()->displayObject()
+        };
+        set_render_fence(m_display, fence.takeFileDescriptor().take());
+    } else {
+        glFinish();
+        set_render_fence(m_display, -1);
+    }
     return true;
 }
 

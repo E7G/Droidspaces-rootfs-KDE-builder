@@ -13,10 +13,13 @@ export XWAYLAND_FORCE_KGSL_SURFACELESS=1
 export KWIN_DISABLE_VULKAN=1
 export LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so
 
-# Let KWin use the full SDM660 performance cluster. core_ctl and schedutil may
-# still idle/downclock unused CPUs, but frame submission is no longer squeezed
-# onto two cores while Firefox and Android are active.
+# KWin is latency sensitive. Use the performance cluster but let the kernel
+# decide idle states. This avoids starving frame submission when Firefox and
+# PipeWire are active.
 if [[ -x /usr/bin/taskset ]]; then
+    if [[ -x /usr/bin/nice ]]; then
+        exec /usr/bin/nice -n -5 /usr/bin/taskset -c 4-7 /usr/sbin/kwin_wayland --anland "$@"
+    fi
     exec /usr/bin/taskset -c 4-7 /usr/sbin/kwin_wayland --anland "$@"
 fi
 exec /usr/sbin/kwin_wayland --anland "$@"

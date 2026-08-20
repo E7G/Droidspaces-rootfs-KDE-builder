@@ -2,6 +2,10 @@
 
 set -u
 
+# Runtime marker used by adb diagnostics; startup must continue if /tmp is unavailable.
+mi_pad4_audio_status=/tmp/mi-pad4-audio-status
+: >"$mi_pad4_audio_status" 2>/dev/null || true
+
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export HOME=/tmp/droidspaces-home
 export USER=user
@@ -220,14 +224,16 @@ live_plasmashell_pid() {
 # connected to Anland.  KWin and application windows keep the accelerated path;
 # only the small panel process uses the software scenegraph.
 start_plasmashell() {
-  # Clover Extreme v3: Restore KGSL GPU acceleration for Plasma
-  # Persistent scene FBO eliminates the flicker issue that required llvmpipe workaround
-  unset LIBGL_ALWAYS_SOFTWARE
-  unset GALLIUM_DRIVER
-  export MESA_LOADER_DRIVER_OVERRIDE=kgsl
-  export FD_FORCE_KGSL=1
-  export FD_KGSL_ENABLE_DMABUF=1
-  export QSG_RHI_BACKEND=opengl
+  # Keep the small, mostly-static panel on a private software scenegraph.
+  # Clover's old KGSL/BufferQueue path can recycle a QtQuick texture while
+  # Firefox is presenting video, which manifests as a flashing panel. KWin,
+  # Firefox and normal Wayland clients remain on the KGSL path.
+  export LIBGL_ALWAYS_SOFTWARE=1
+  export GALLIUM_DRIVER=llvmpipe
+  export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
+  export QT_QUICK_BACKEND=software
+  export QT_OPENGL=software
+  export QSG_RHI_BACKEND=software
   export QSG_RENDER_LOOP=basic
   exec /usr/bin/plasmashell -p org.kde.plasma.desktop
 }
@@ -326,6 +332,12 @@ setup_anland_audio() {
     if pactl list short sinks 2>/dev/null | grep -q '[[:space:]]anland-speaker[[:space:]]'; then
       pactl set-default-sink anland-speaker 2>/dev/null || true
       pactl set-sink-mute anland-speaker 0 2>/dev/null || true
+      {
+        echo "pipewire=$(pgrep -x pipewire >/dev/null && echo ok || echo fail)"
+        echo "pulse=$(pactl info >/dev/null 2>&1 && echo ok || echo fail)"
+        echo "wireplumber=$(pgrep -x wireplumber >/dev/null && echo ok || echo fail)"
+        echo "anland=ok"
+      } >/tmp/mi-pad4-audio-status
       if pactl list short sources 2>/dev/null | grep -q '[[:space:]]anland-mic[[:space:]]'; then
         pactl set-default-source anland-mic 2>/dev/null || true
         pactl set-source-mute anland-mic 0 2>/dev/null || true
@@ -334,6 +346,12 @@ setup_anland_audio() {
     fi
     sleep 0.1
   done
+  {
+    echo "pipewire=$(pgrep -x pipewire >/dev/null && echo ok || echo fail)"
+    echo "pulse=$(pactl info >/dev/null 2>&1 && echo ok || echo fail)"
+    echo "wireplumber=$(pgrep -x wireplumber >/dev/null && echo ok || echo fail)"
+    echo "anland=fail"
+  } >/tmp/mi-pad4-audio-status
   echo "Anland audio bridge did not become ready" >&2
   return 1
 }
