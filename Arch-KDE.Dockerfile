@@ -34,7 +34,6 @@ COPY scripts/mi-pad4/mi-pad4-cachyos-tuning.service /tmp/mi-pad4-cachyos-tuning.
 COPY scripts/mi-pad4/mi-pad4-cachyos-tuning /tmp/mi-pad4-cachyos-tuning
 COPY scripts/mi-pad4/90-mi-pad4-cachyos-environment.sh /tmp/90-mi-pad4-cachyos-environment.sh
 COPY scripts/mi-pad4/mi-pad4-firefox-anland-prefs.js /tmp/mi-pad4-firefox-anland-prefs.js
-COPY mesa-mi-pad4/ /tmp/mesa-mi-pad4/
 COPY local-packages-mi-pad4/ /tmp/local-packages-mi-pad4/
 
 ARG MI_PAD4_V4L2_VAAPI_COMMIT=1be35ad2fc1bc66c76842d735b6ec91e11944a44
@@ -87,6 +86,24 @@ RUN printf '%s\n' \
         install -d -m 0755 /usr/share/droidspaces && \
         printf '%s\n' 'patched-kio=named-worker-socket-for-kernel-4.4;version=6.29.0' \
             > /usr/share/droidspaces/kio-runtime-named-socket; \
+    fi && \
+    # Validate and install all CI-built Mesa packages before the expensive
+    # KWin/Plasma source build. The workflow downloads every package artifact
+    # into local-packages-mi-pad4, not the source-tree mesa-mi-pad4 directory.
+    if [ "$ENABLE_mesa_ARG" = "true" ]; then \
+        compgen -G '/tmp/local-packages-mi-pad4/mesa-[0-9]*.pkg.tar.*' >/dev/null && \
+        compgen -G '/tmp/local-packages-mi-pad4/vulkan-freedreno-*.pkg.tar.*' >/dev/null && \
+        compgen -G '/tmp/local-packages-mi-pad4/vulkan-mesa-implicit-layers-*.pkg.tar.*' >/dev/null && \
+        pacman --config /tmp/pacman-local.conf -U --noconfirm \
+            /tmp/local-packages-mi-pad4/mesa-[0-9]*.pkg.tar.* \
+            /tmp/local-packages-mi-pad4/vulkan-freedreno-*.pkg.tar.* \
+            /tmp/local-packages-mi-pad4/vulkan-mesa-implicit-layers-*.pkg.tar.* && \
+        printf '%s\n' \
+            'source=E7G/mesa-for-android-container@0f8a8d14c50612527909784e5d4dd45da628fa84' \
+            'pkgbuild=E7G/archlinuxarm-PKGBUILDs@3ac8aeb07923707ac054c65b0e451b540f2ade4a' \
+            'fix=proven KGSL baseline + clover 32-bit ION ABI/lifetime + KGSL dma-buf enable' \
+            'egl=EGL_EXT_image_dma_buf_import' \
+            > /usr/share/droidspaces/mesa-kgsl-dmabuf-import; \
     fi && \
     rm -f /tmp/pacman-local.conf && \
     # Replace the generic browser with the source-built Clover variant. msm_vidc
@@ -387,27 +404,6 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         printf '%s\n' 'patched-kwin=not-requested' > /usr/share/droidspaces/anland-kwin-package; \
     fi
 RUN rm -rf /tmp/mi-pad4
-
-# 下载并安装 Mesa
-RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
-        echo "--> [开启] 正在下载并安装最新版 Mesa 驱动..." && \
-        cp /etc/pacman.conf /tmp/pacman-nosig.conf && \
-        sed -i 's/.*SigLevel.*/SigLevel = Never/g' /tmp/pacman-nosig.conf && \
-        if compgen -G '/tmp/mesa-mi-pad4/*.pkg.tar.*' >/dev/null; then \
-            pacman --config /tmp/pacman-nosig.conf -U --noconfirm /tmp/mesa-mi-pad4/*.pkg.tar.* && \
-            printf '%s\n' \
-              'source=E7G/mesa-for-android-container@0f8a8d14c50612527909784e5d4dd45da628fa84' \
-              'pkgbuild=E7G/archlinuxarm-PKGBUILDs@3ac8aeb07923707ac054c65b0e451b540f2ade4a' \
-              'fix=proven KGSL baseline + clover 32-bit ION ABI/lifetime + KGSL dma-buf enable' \
-              'egl=EGL_EXT_image_dma_buf_import' \
-              > /usr/share/droidspaces/mesa-kgsl-dmabuf-import; \
-        else \
-            echo 'Missing CI-built Mi Pad 4 Mesa packages' >&2; exit 1; \
-        fi && \
-        rm -rf /tmp/mesa-mi-pad4 /tmp/pacman-nosig.conf ; \
-    else \
-        echo "--> [跳过] 未开启 Mesa 驱动安装"; \
-    fi
 
 # 修复容器内的 DHCP 网络服务配置
 RUN mkdir -p /etc/systemd/network && \

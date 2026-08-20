@@ -509,6 +509,34 @@ jobs:
           name: kio-mi-pad4
           path: local-packages-mi-pad4
 
+      - name: Validate local package bundle
+        shell: bash
+        env:
+          ENABLE_CLOVER_FIREFOX: ${{ inputs.enable_clover_firefox }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          required=(
+            'local-packages-mi-pad4/pango-*.pkg.tar.*'
+            'local-packages-mi-pad4/kio-6.29.0-1-aarch64.pkg.tar.*'
+            'local-packages-mi-pad4/mesa-[0-9]*.pkg.tar.*'
+            'local-packages-mi-pad4/vulkan-freedreno-*.pkg.tar.*'
+            'local-packages-mi-pad4/vulkan-mesa-implicit-layers-*.pkg.tar.*'
+          )
+          if [[ "$ENABLE_CLOVER_FIREFOX" = true ]]; then
+            required+=('local-packages-mi-pad4/firefox-153.0.3-1.3-aarch64.pkg.tar.*')
+          fi
+
+          for pattern in "${required[@]}"; do
+            files=($pattern)
+            if ((${#files[@]} == 0)); then
+              echo "Missing downloaded package: $pattern" >&2
+              exit 1
+            fi
+            printf 'verified: %s\n' "${files[@]}"
+          done
+
       - name: Setup Docker buildx with cache
         run: |
           docker run --privileged --rm tonistiigi/binfmt --install all > /dev/null 2>&1
