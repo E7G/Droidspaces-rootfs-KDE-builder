@@ -408,14 +408,8 @@ jobs:
 
           # Apply KIO runtime named socket patch
           cp scripts/mi-pad4/kio-runtime-named-socket.patch .ci/kio/
-          sed -i "s/^arch=(.*)$/arch=('aarch64')/" .ci/kio/PKGBUILD
-          echo "source+=(kio-runtime-named-socket.patch)" >> .ci/kio/PKGBUILD
-          echo "sha256sums+=('SKIP')" >> .ci/kio/PKGBUILD
-          echo "" >> .ci/kio/PKGBUILD
-          echo "prepare() {" >> .ci/kio/PKGBUILD
-          echo "  cd \"\$srcdir/kio-\$pkgver\"" >> .ci/kio/PKGBUILD
-          echo "  patch -Np1 -i \"\$srcdir/kio-runtime-named-socket.patch\"" >> .ci/kio/PKGBUILD
-          echo "}" >> .ci/kio/PKGBUILD
+          chmod +x scripts/mi-pad4/apply-kio-patch.sh
+          bash scripts/mi-pad4/apply-kio-patch.sh
 
           docker run \
             --privileged \
