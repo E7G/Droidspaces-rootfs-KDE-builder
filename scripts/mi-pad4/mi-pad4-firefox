@@ -53,7 +53,7 @@ ulimit -n 8192
 
 # SDM660 has 4 efficiency + 4 performance cores.
 # Avoid Firefox creating a generic worker pool for all 8 CPUs.
-export MOZ_TASKCONTROLLER_THREADCOUNT="${MI_PAD4_FIREFOX_TASK_THREADS:-4}"
+export MOZ_TASKCONTROLLER_THREADCOUNT="${MI_PAD4_FIREFOX_TASK_THREADS:-2}"
 # Enabled by our Firefox source patch below.
 # Reuses Firefox Android's big.LITTLE policy for Stylo workers only.
 export MOZ_MI_PAD4_ANDROID_SCHED="${MI_PAD4_FIREFOX_ANDROID_SCHED:-1}"
@@ -140,12 +140,11 @@ user_pref("browser.sessionhistory.max_total_viewers", 2);
 // A large "disk cache" would simply duplicate RAM usage.
 user_pref("browser.cache.disk.enable", false);
 user_pref("browser.cache.disk.capacity", 0);
-// 16 MiB was a little too aggressive and causes extra decode/refetch work.
-// 32 MiB is a better CPU/RAM compromise on this tablet.
-user_pref("browser.cache.memory.capacity", 32768);
-user_pref("media.cache_size", 32768);
-// Keep enough decoded images to avoid constant re-decoding.
-user_pref("image.cache.size", 16777216);
+// Keep the browser's RAM footprint bounded; hardware video frames do not use
+// these caches. The disk cache remains disabled because HOME is Android-backed.
+user_pref("browser.cache.memory.capacity", 16384);
+user_pref("media.cache_size", 16384);
+user_pref("image.cache.size", 8388608);
 user_pref("image.mem.decode_bytes_at_a_time", 65536);
 user_pref("image.mem.shared.unmap.min_expiration_ms", 60000);
 // ---------- Session / daily usability ----------

@@ -314,10 +314,10 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
          printf '%s\n' \
              'context.properties = {' \
              '    default.clock.rate = 48000' \
-             '    default.clock.quantum = 1024' \
-             '    default.clock.min-quantum = 512' \
-             '    default.clock.max-quantum = 2048' \
-             '    default.clock.quantum-limit = 2048' \
+             '    default.clock.quantum = 2048' \
+             '    default.clock.min-quantum = 1024' \
+             '    default.clock.max-quantum = 4096' \
+             '    default.clock.quantum-limit = 4096' \
              '}' > /etc/pipewire/pipewire.conf.d/20-mi-pad4-low-cpu.conf && \
          if [ "$ENABLE_MI_PAD4_FIREFOX_ARG" = "true" ]; then \
              install -Dm755 /tmp/mi-pad4/mi-pad4-firefox /usr/local/bin/mi-pad4-firefox && \

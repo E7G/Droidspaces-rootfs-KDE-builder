@@ -61,17 +61,12 @@ index 29027709..c0e3e938 100644
 -    return true;
 -  }
 -  return freeRatio < SURFACE_COPY_THRESHOLD;
-+  // Clover uses the stateful V4L2 VA-API bridge. Its msm_vidc CAPTURE queue
-+  // has only sixteen buffers and does not implement synchronized zero-copy
-+  // export. Retaining decoder-owned surfaces in WebRender eventually drains
-+  // that queue and stalls decoding with VA_STATUS_ERROR_SURFACE_BUSY.
-+  //
-+  // Keep hardware decoding, but copy each completed NV12 frame into a
-+  // renderer-owned dmabuf and immediately return the CAPTURE buffer. This also
-+  // removes the legacy glFinish-on-texture-destruction workaround: KWin and
-+  // Android remain synchronized by the Anland native fence, without globally
-+  // serializing Firefox's GPU process.
-+  return true;
++  // Extreme Clover mode: keep the decoder-owned DRM_PRIME surface and hand it
++  // directly to WebRender. This removes the NV12 -> renderer dmabuf copy and
++  // immediately lowers RDD CPU use and memory bandwidth. Anland's native
++  // fence is the lifetime boundary for the surface. If a vendor msm_vidc
++  // build reports SURFACE_BUSY, revert this single extreme-mode change.
++  return false;
  }
  
  RefPtr<VideoFrameSurface<LIBAV_VER>>

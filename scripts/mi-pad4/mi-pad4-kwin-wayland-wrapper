@@ -18,7 +18,7 @@ export LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so
 # PipeWire are active.
 if [[ -x /usr/bin/taskset ]]; then
     if [[ -x /usr/bin/nice ]]; then
-        exec /usr/bin/nice -n -5 /usr/bin/taskset -c 4-7 /usr/sbin/kwin_wayland --anland "$@"
+        exec /usr/bin/nice -n -8 /usr/bin/taskset -c 4-7 /usr/sbin/kwin_wayland --anland "$@"
     fi
     exec /usr/bin/taskset -c 4-7 /usr/sbin/kwin_wayland --anland "$@"
 fi

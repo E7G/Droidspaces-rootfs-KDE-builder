@@ -280,12 +280,12 @@ bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region
     m_sceneInvalid = false;
     m_hasPendingDamage = false;
 
-    // The old Android BufferQueue/4.4 KGSL combination is not safe with an
-    // arbitrary native-fence fd: a few vendor builds queue it before the
-    // fence-worker has drained the fd and show a stale/black buffer. Keep the
-    // proven synchronous path as the default. The asynchronous path is
-    // opt-in for kernels/consumers which have been verified to support it.
-    if (qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1) {
+    // Extreme mode defaults to asynchronous native fences: KWin does not
+    // block on GPU completion and the fence worker sleeps in poll(). Set
+    // ANLAND_NATIVE_FENCE=0 for the legacy synchronous fallback.
+    const bool nativeFence = !qEnvironmentVariableIsSet("ANLAND_NATIVE_FENCE")
+        || qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1;
+    if (nativeFence) {
         EGLNativeFence fence{
             m_backend->openglContext()->displayObject()
         };
