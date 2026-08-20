@@ -156,12 +156,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore Mesa packages from cache
+      - name: Restore Mesa package from cache
         id: mesa-cache
         uses: actions/cache@v4
         with:
           path: mesa-mi-pad4
-          key: mesa-kgsl-${{ hashFiles('scripts/mi-pad4/mesa/**') }}-${{ hashFiles('.github/workflows/build-arch-mi-pad4.yml') }}
+          key: mesa-${{ hashFiles('scripts/mi-pad4/mesa/**') }}
 
       - name: Build patched Mesa for KGSL
         if: steps.mesa-cache.outputs.cache-hit != 'true'
@@ -271,7 +271,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: pango-mi-pad4
-          key: pango-${{ hashFiles('scripts/mi-pad4/pango/**') }}-${{ hashFiles('.github/workflows/build-arch-mi-pad4.yml') }}
+          key: pango-${{ hashFiles('scripts/mi-pad4/pango/**') }}
 
       - name: Build Pango
         if: steps.pango-cache.outputs.cache-hit != 'true'
@@ -379,7 +379,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: kio-mi-pad4
-          key: kio-${{ hashFiles('scripts/mi-pad4/kio/**') }}-${{ hashFiles('.github/workflows/build-arch-mi-pad4.yml') }}
+          key: kio-${{ hashFiles('scripts/mi-pad4/kio/**') }}
 
       - name: Build KIO
         if: steps.kio-cache.outputs.cache-hit != 'true'
