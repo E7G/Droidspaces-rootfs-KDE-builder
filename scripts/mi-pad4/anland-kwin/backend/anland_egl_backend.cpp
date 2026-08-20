@@ -67,7 +67,6 @@ void AnlandEglLayer::releaseBuffers()
     }
     m_sceneTexture.reset();
     m_sceneFbo.reset();
-    m_sceneTarget.reset();
     m_sceneInvalid = true;
     m_hasPendingDamage = true;
     m_bufCount = 0;
@@ -82,16 +81,13 @@ void AnlandEglLayer::ensureSceneFbo()
     m_backend->openglContext()->makeCurrent();
 
     const QSize size = m_output->modeSize();
-    m_sceneTexture = GLTexture::allocate();
+    m_sceneTexture = GLTexture::allocate(GL_RGBA8, size);
     if (!m_sceneTexture) {
         qCWarning(KWIN_ANLAND) << "failed to allocate scene texture";
         return;
     }
-    m_sceneTexture->setSize(size);
-    m_sceneTexture->setInternalFormat(GL_RGBA8);
     m_sceneTexture->setFilter(GL_LINEAR);
     m_sceneTexture->setWrapMode(GL_CLAMP_TO_EDGE);
-    m_sceneTexture->create();
 
     m_sceneFbo = std::make_unique<GLFramebuffer>(m_sceneTexture.get());
     if (!m_sceneFbo->valid()) {
@@ -101,7 +97,6 @@ void AnlandEglLayer::ensureSceneFbo()
         return;
     }
 
-    m_sceneTarget = RenderTarget(m_sceneFbo.get());
     m_sceneSize = size;
     m_sceneInvalid = true;
     m_hasPendingDamage = true;
@@ -255,20 +250,15 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
 
     ensureSceneFbo();
 
-    if (!m_sceneTarget) {
-        qCWarning(KWIN_ANLAND) << "scene FBO not available";
-        return std::nullopt;
-    }
-
-    OutputLayerBeginFrameInfo info;
-    info.renderTarget = *m_sceneTarget;
     // Clover's legacy BufferQueue does not preserve buffer-age damage
     // reliably.  Every compositor pass therefore renders the complete scene;
     // the important optimisation is that one client damage produces one pass
     // and one consumer submission, not that we feed a partial region into the
     // rotating Android buffers.
-    info.repaint = Region::infinite();
-    return info;
+    return OutputLayerBeginFrameInfo{
+        RenderTarget(m_sceneFbo.get()),
+        Region::infinite()
+    };
 }
 
 bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame)
@@ -334,15 +324,13 @@ bool AnlandEglBackend::initializeEgl()
         return false;
     }
 
-    setEglDisplay(EglDisplay::create(eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_NO_DISPLAY, nullptr)));
-    if (!eglDisplay()) {
+    m_anlandEglDisplay = EglDisplay::create(
+        eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_NO_DISPLAY, nullptr),
+        nullptr
+    );
+    if (!m_anlandEglDisplay) {
         return false;
     }
-
-    if (!eglDisplay()->initialize()) {
-        return false;
-    }
-
     return true;
 }
 
@@ -357,10 +345,9 @@ bool AnlandEglBackend::initRenderingContext()
         EGL_NONE
     };
 
-    // KWin 6.7.3 compatibility: use display() instead of eglDisplay()
-    // and EGL_NO_CONFIG_KHR for the config parameter
-    setContext(EglContext::create(display(), EGL_NO_CONFIG_KHR, context_attribs));
-    if (!openglContext()) {
+    Q_UNUSED(context_attribs);
+    m_context = EglContext::create(m_anlandEglDisplay.get(), EGL_NO_CONFIG_KHR, nullptr);
+    if (!m_context) {
         return false;
     }
 

@@ -85,7 +85,6 @@ private:
     // Persistent scene FBO (source for composition)
     std::unique_ptr<GLTexture> m_sceneTexture;
     std::unique_ptr<GLFramebuffer> m_sceneFbo;
-    std::optional<RenderTarget> m_sceneTarget;
     bool m_sceneInvalid = true;
     bool m_hasPendingDamage = true;
     QSize m_sceneSize;
@@ -117,6 +116,7 @@ private:
     void removeOutput(BackendOutput *output);
 
     AnlandBackend *m_backend;
+    std::unique_ptr<EglDisplay> m_anlandEglDisplay;
     std::map<BackendOutput *, std::unique_ptr<AnlandEglLayer>> m_outputs;
 };
 
