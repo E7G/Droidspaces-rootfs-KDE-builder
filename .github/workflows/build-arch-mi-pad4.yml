@@ -424,7 +424,8 @@ jobs:
                 sudo \
                 base-devel \
                 git \
-                ccache
+                ccache \
+                gnupg
 
               useradd -m -s /bin/bash builder
 
@@ -442,6 +443,7 @@ jobs:
                 ccache --max-size=2G
 
                 cd /src
+                gpg --recv-keys 2C8DF587A6D4AAC1
                 makepkg -s --noconfirm --needed
               "
             '
