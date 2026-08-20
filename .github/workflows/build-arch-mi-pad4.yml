@@ -379,13 +379,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: kio-mi-pad4
-          key: kio-${{ hashFiles('scripts/mi-pad4/kio/**') }}
+          key: kio-6.29.0-1-97c0d35-${{ hashFiles('scripts/mi-pad4/kio-runtime-named-socket.patch', 'scripts/mi-pad4/apply-kio-patch.sh') }}
 
       - name: Build KIO
         if: steps.kio-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
-          KIO_PKG_COMMIT: 8ca1426ad92c58c17d4ef610e57febd763717272
+          KIO_PKG_COMMIT: 97c0d35b1b7e526eef330747e9bf28e6da31f430
         run: |
           set -euo pipefail
 
@@ -737,10 +737,10 @@ jobs:
             }
 
           grep -Eq \
-            '^var/lib/pacman/local/kio-[0-9]+\.[0-9]+\.[0-9]+-/' \
+            '^var/lib/pacman/local/kio-6\.29\.0-1/' \
             rootfs-files.txt \
             || {
-              echo "KIO is not installed" >&2
+              echo "Expected patched KIO 6.29.0-1 is not installed" >&2
               exit 1
             }
 

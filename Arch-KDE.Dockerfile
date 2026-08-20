@@ -53,7 +53,6 @@ RUN printf '%s\n' \
     cp /etc/pacman.conf /tmp/pacman-local.conf && \
     sed -i '/^LocalFileSigLevel[[:space:]]*=/d; /^\[options\]$/a LocalFileSigLevel = Never' /tmp/pacman-local.conf && \
     pacman --config /tmp/pacman-local.conf -U --noconfirm --needed /tmp/local-packages-mi-pad4/pango-*.pkg.tar.* && \
-    rm -f /tmp/pacman-local.conf && \
     pacman -S --noconfirm --needed \
     # 核心工具组件 
     bash coreutils file findutils grep sed gawk curl wget ca-certificates bash-completion dbus systemd pam logrotate \
@@ -80,6 +79,16 @@ RUN printf '%s\n' \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
         kimageformats plasma-browser-integration plasma-mobile plasma-keyboard libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium firefox; \
     fi && \
+    # Replace the repository KIO only after Plasma has installed its complete
+    # dependency set. This guarantees one KF6 6.29 ABI throughout the image.
+    if [ "$BUILD_KDE" = "min" ] || [ "$BUILD_KDE" = "conc" ]; then \
+        pacman --config /tmp/pacman-local.conf -U --noconfirm \
+            /tmp/local-packages-mi-pad4/kio-6.29.0-1-aarch64.pkg.tar.* && \
+        install -d -m 0755 /usr/share/droidspaces && \
+        printf '%s\n' 'patched-kio=named-worker-socket-for-kernel-4.4;version=6.29.0' \
+            > /usr/share/droidspaces/kio-runtime-named-socket; \
+    fi && \
+    rm -f /tmp/pacman-local.conf && \
     # Replace the generic browser with the source-built Clover variant. msm_vidc
     # decodes in hardware; PRIME_2 transfers decoded NV12 to a renderer-owned
     # dmabuf so the 16-buffer V4L2 CAPTURE queue cannot deadlock.
@@ -371,7 +380,7 @@ RUN if [ "$ENABLE_MI_PAD4_FIREFOX_ARG" = "true" ]; then \
 # Plasma Wayland launches this fixed path and ignores KDEWM.
 RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh && \
-        BUILD_KDE="$BUILD_KDE" /tmp/mi-pad4/build-arch-anland-kwin.sh && \
+        BUILD_KDE="$BUILD_KDE" BUILD_KIO=false /tmp/mi-pad4/build-arch-anland-kwin.sh && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland-wrapper /usr/local/libexec/mi-pad4-kwin-wayland-wrapper && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland-wrapper /usr/sbin/kwin_wayland_wrapper; \
     else \

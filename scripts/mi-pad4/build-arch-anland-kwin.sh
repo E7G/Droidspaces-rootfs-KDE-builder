@@ -12,7 +12,7 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_ROOT=/tmp/droidspaces-arch-anland-build
 PACKAGE_OUTPUT_DIR="${ANLAND_PACKAGE_OUTPUT_DIR:-}"
-KIOKG=8ca1426ad92c58c17d4ef610e57febd763717272
+KIOKG=97c0d35b1b7e526eef330747e9bf28e6da31f430
 KWINKG=365ae0acc5f521f53a85fe6d9a030646687324f8
 XWAYLANDKG=8f82d79d312192108bb6417187c6ea986cdfcb3c
 PLASMAWORKSPACEKG=864d8e5f78cb3665317efc5ca3f525e87a30f6dc
@@ -155,6 +155,9 @@ EOF_PLASMA_WORKSPACE_PATCH
 
 if [[ "${BUILD_KIO:-true}" = true ]]; then
     build_kio
+elif [[ ! -f /usr/share/droidspaces/kio-runtime-named-socket ]]; then
+    echo 'BUILD_KIO=false but the patched KIO package is not installed' >&2
+    exit 1
 fi
 if [[ "${BUILD_KWIN:-true}" = true ]]; then
     build_kwin
