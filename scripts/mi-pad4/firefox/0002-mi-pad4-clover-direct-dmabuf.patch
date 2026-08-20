@@ -22,7 +22,7 @@ index 29027709..c0e3e938 100644
  constexpr static VASurfaceID sInvalidFFMPEGSurfaceID = -1;
  
  namespace mozilla {
-@@ -235,41 +229,17 @@ VideoFramePool<LIBAV_VER>::GetFreeVideoFrameSurfaceLocked(
+@@ -235,41 +229,12 @@ VideoFramePool<LIBAV_VER>::GetFreeVideoFrameSurfaceLocked(
  }
  
  bool VideoFramePool<LIBAV_VER>::ShouldCopySurface() {
