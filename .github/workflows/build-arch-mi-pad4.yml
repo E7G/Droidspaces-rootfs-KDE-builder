@@ -451,7 +451,7 @@ jobs:
           mkdir -p kio-mi-pad4
 
           cp -v \
-            .ci/kio/kio-[0-9]*.pkg.tar.* \
+            "$PWD/.ci/kio/kio-"[0-9]*.pkg.tar.* \
             kio-mi-pad4/
 
           test -n "$(
