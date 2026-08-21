@@ -116,7 +116,6 @@ private:
     void removeOutput(BackendOutput *output);
 
     AnlandBackend *m_backend;
-    std::unique_ptr<EglDisplay> m_anlandEglDisplay;
     std::map<BackendOutput *, std::unique_ptr<AnlandEglLayer>> m_outputs;
 };
 

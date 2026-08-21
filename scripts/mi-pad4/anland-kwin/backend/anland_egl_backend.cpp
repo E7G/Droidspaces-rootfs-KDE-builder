@@ -339,19 +339,18 @@ bool AnlandEglBackend::initializeEgl()
         return false;
     }
 
-    m_anlandEglDisplay = EglDisplay::create(
-        // libepoxy resolves the EGL 1.5 core entry point through
-        // eglGetProcAddress(). libglvnd does not expose that core function via
-        // its vendor dispatch on Clover, even though the display reports EGL
-        // 1.5, and epoxy aborts with "No provider of eglGetPlatformDisplay".
-        // EGL_EXT_platform_base is advertised and its EXT entry point works on
-        // this Mesa/KGSL stack, so use the same path as openRenderDevice().
-        eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr),
-        nullptr
-    );
-    if (!m_anlandEglDisplay) {
+    // The output backend owns the only EGL display. Using a second
+    // surfaceless display here leaves EglBackend::m_renderDevice unset and
+    // makes importDmaBufAsTexture() dereference a null RenderDevice on the
+    // first frame. It also creates two unrelated EGL contexts on old KGSL.
+    // Match KWin's DRM/virtual backends and share the backend RenderDevice.
+    if (!m_backend || !m_backend->renderDevice()
+        || !m_backend->renderDevice()->eglDisplay()) {
+        qCWarning(KWIN_ANLAND) << "Anland has no usable RenderDevice/EGL display";
         return false;
     }
+
+    setRenderDevice(m_backend->renderDevice());
     return true;
 }
 
@@ -367,7 +366,7 @@ bool AnlandEglBackend::initRenderingContext()
     };
 
     Q_UNUSED(context_attribs);
-    m_context = EglContext::create(m_anlandEglDisplay.get(), EGL_NO_CONFIG_KHR, nullptr);
+    m_context = EglContext::create(eglDisplayObject(), EGL_NO_CONFIG_KHR, nullptr);
     if (!m_context) {
         return false;
     }

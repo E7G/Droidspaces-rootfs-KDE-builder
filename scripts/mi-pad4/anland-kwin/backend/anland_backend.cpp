@@ -52,6 +52,32 @@ namespace KWin
 static const QString s_defaultSocketPath = QStringLiteral("/tmp/display_daemon.sock");
 static const int s_reconnectIntervalMs = 200;
 
+using EglGetPlatformDisplayExt = EGLDisplay (*)(EGLenum, void *, const EGLint *);
+
+// Do not call epoxy's eglGetPlatformDisplayEXT wrapper here. On the Clover
+// 4.4 userspace, libepoxy/libglvnd can resolve the EGL 1.5 core symbol while
+// failing to dispatch the EXT entry point. Resolving the advertised EXT
+// function explicitly is the reliable path on Mesa/KGSL.
+static EGLDisplay getSurfacelessEglDisplay()
+{
+    auto getPlatformDisplay = reinterpret_cast<EglGetPlatformDisplayExt>(
+        eglGetProcAddress("eglGetPlatformDisplayEXT"));
+    if (!getPlatformDisplay) {
+        qCWarning(KWIN_ANLAND) << "eglGetPlatformDisplayEXT is unavailable";
+        return EGL_NO_DISPLAY;
+    }
+
+    const EGLDisplay display = getPlatformDisplay(
+        EGL_PLATFORM_SURFACELESS_MESA,
+        EGL_DEFAULT_DISPLAY,
+        nullptr);
+    if (display == EGL_NO_DISPLAY) {
+        qCWarning(KWIN_ANLAND)
+            << "failed to create surfaceless EGL display, error" << Qt::hex << eglGetError();
+    }
+    return display;
+}
+
 /*
  * KWin needs a DRM render device for the GL/EGL path (syncobj timelines, dmabuf
  * feedback). The anland backend renders surfaceless and imports the daemon's
@@ -94,7 +120,7 @@ static std::unique_ptr<RenderDevice> openRenderDevice()
     // Mi Pad 4's 4.4 KGSL stack exposes /dev/kgsl-3d0, not a DRM render node.
     // KWin 6.7's RenderDevice can still own a surfaceless EGL display; keeping
     // the DRM pointer null disables only DRM feedback/syncobj paths.
-    const EGLDisplay eglDisplay = eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
+    const EGLDisplay eglDisplay = getSurfacelessEglDisplay();
     auto display = EglDisplay::create(eglDisplay, nullptr);
     if (display) {
         qCInfo(KWIN_ANLAND) << "using surfaceless EGL without a DRM render node";
