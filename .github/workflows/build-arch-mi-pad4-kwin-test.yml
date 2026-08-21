@@ -30,7 +30,7 @@ jobs:
               cp -a /repo/scripts/mi-pad4 /tmp/mi-pad4
               chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh
               BUILD_KDE=min \
-              BUILD_KIO=false \
+              BUILD_KIO=true \
               BUILD_KWIN=true \
               BUILD_XWAYLAND=false \
               BUILD_PLASMA_WORKSPACE=false \
