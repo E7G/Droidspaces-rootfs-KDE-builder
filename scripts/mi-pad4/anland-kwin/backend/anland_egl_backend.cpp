@@ -46,6 +46,21 @@ AnlandEglLayer::AnlandEglLayer(AnlandOutput *output, AnlandEglBackend *backend)
     , m_output(output)
     , m_display(backend->display())
 {
+    // AnlandBackend drives reconnect/import through AnlandOutput::eglLayer().
+    // The map in AnlandEglBackend owns this layer, but the output still needs a
+    // non-owning pointer to it. Without this registration, reconnect succeeds
+    // and hands KWin the Android dmabufs, but no layer imports or paints them;
+    // the consumer then remains blocked in refresh_done() on a black frame.
+    m_output->setEglLayer(this);
+
+    // Usually the reconnect timer fires after the GL backend has created this
+    // layer. Cover the opposite ordering too: if consumer buffers are already
+    // present, import and arm the first full repaint immediately.
+    const int bufferCount = get_buf_count(m_display);
+    if (bufferCount > 0 && importBuffers(bufferCount)) {
+        addDeviceRepaint(Region::infinite());
+    }
+
     connect(m_output, &BackendOutput::transformChanged, this, &AnlandEglLayer::onOutputTransformChanged);
 }
 
@@ -228,7 +243,7 @@ void AnlandEglLayer::onOutputTransformChanged()
     }
     m_sceneInvalid = true;
     m_hasPendingDamage = true;
-    scheduleRepaint(nullptr);
+    addDeviceRepaint(Region::infinite());
 }
 
 std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
@@ -325,7 +340,13 @@ bool AnlandEglBackend::initializeEgl()
     }
 
     m_anlandEglDisplay = EglDisplay::create(
-        eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_NO_DISPLAY, nullptr),
+        // libepoxy resolves the EGL 1.5 core entry point through
+        // eglGetProcAddress(). libglvnd does not expose that core function via
+        // its vendor dispatch on Clover, even though the display reports EGL
+        // 1.5, and epoxy aborts with "No provider of eglGetPlatformDisplay".
+        // EGL_EXT_platform_base is advertised and its EXT entry point works on
+        // this Mesa/KGSL stack, so use the same path as openRenderDevice().
+        eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr),
         nullptr
     );
     if (!m_anlandEglDisplay) {

@@ -517,8 +517,8 @@ void AnlandBackend::onReconnectTimer()
     // try_exit_fallback() already received a fresh dmabuf set. Import it into the
     // layer (which arms an infinite/full-output repaint on every rotation buffer),
     // resume the RenderLoop (uninhibit, balancing the inhibit from onConsumerLost),
-    // and mark the layer dirty. scheduleRepaint() keeps the layer's needsRepaint()
-    // true so the next composite() paints into the new dmabufs even on an idle
+    // and mark the full output dirty. addDeviceRepaint() guarantees the first
+    // composite paints into the new dmabufs even on an idle
     // desktop. resumeRendering() runs unconditionally to keep inhibit/uninhibit
     // balanced regardless of whether the GL layer is attached yet.
     AnlandEglLayer *layer = m_outputs[0]->eglLayer();
@@ -539,7 +539,7 @@ void AnlandBackend::onReconnectTimer()
     sendConsumerVar(CONSUMER_VAR_ANDROID_IME, m_androidImeActive ? 1 : 0);
     m_outputs[0]->resumeRendering();
     if (layer) {
-        layer->scheduleRepaint(nullptr);
+        layer->addDeviceRepaint(Region::infinite());
     }
 }
 
