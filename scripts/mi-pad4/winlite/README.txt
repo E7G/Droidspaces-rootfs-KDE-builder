@@ -9,7 +9,7 @@ Mi Pad 4 WinLite RootFS
 - Hangover ARM64EC/FEX（x64）+ wowbox64（x86）
 - Wine Wayland，Xwayland 仅兼容回退时按需启动
 - LXQt Panel + PCManFM-Qt，无 Plasma、Firefox、Dolphin、Baloo、Portal
-- tini PID 1，无 systemd 服务管理器
+- 内置 droidspaces-tini PID 1，无 systemd 服务管理器
 
 用法：
 1. 把 EXE/MSI 放到 Windows 目录。

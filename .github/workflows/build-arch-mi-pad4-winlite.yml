@@ -338,7 +338,7 @@ jobs:
           tar -tf "${archive[0]}" | sed 's#^\./##' >rootfs-files.txt
           for path in \
             sbin/droidspaces-init \
-            usr/bin/tini \
+            usr/bin/droidspaces-tini \
             usr/bin/wine \
             usr/bin/wineserver \
             usr/local/bin/winrun \
@@ -357,7 +357,7 @@ jobs:
             }
           done
           grep -Eq '^var/lib/pacman/local/kwin-6\.7\.3-2/' rootfs-files.txt
-          grep -Eq '^var/lib/pacman/local/mesa-1:26\.2\.0-9/' rootfs-files.txt
+          grep -Eq '^var/lib/pacman/local/mesa-1:26\.2\.0-[0-9.]+/' rootfs-files.txt
           for unwanted in firefox plasmashell dolphin baloo_file xdg-desktop-portal; do
             if grep -Eq "(^|/)${unwanted}($|[./-])" rootfs-files.txt; then
               echo "Unexpected heavyweight component: $unwanted" >&2

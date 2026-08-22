@@ -33,6 +33,6 @@ if [[ -r /run/droidspaces/container.config ]] \
     fi
 fi
 
-# tini is the only permanent PID-1 helper. No systemd user/system manager,
-# timers, portals or polling daemons are needed by this image.
-exec /usr/bin/tini -s -- /usr/local/bin/winlite-supervisor
+# The in-tree init only reaps children and forwards signals. It avoids the AUR
+# tini dependency and keeps systemd, timers, portals and polling daemons absent.
+exec /usr/bin/droidspaces-tini /usr/local/bin/winlite-supervisor

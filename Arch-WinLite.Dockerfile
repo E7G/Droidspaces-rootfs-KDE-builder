@@ -7,14 +7,19 @@ RUN printf '%s\n' \
         >/etc/pacman.d/mirrorlist \
     && pacman -Syu --noconfirm --needed gcc glibc
 COPY scripts/ion-legacy-shim.c /tmp/ion-legacy-shim.c
+COPY scripts/mi-pad4/winlite/droidspaces-tini.c /tmp/droidspaces-tini.c
 RUN gcc -shared -fPIC -O2 -s \
-        -o /tmp/libion-legacy-shim.so /tmp/ion-legacy-shim.c -ldl
+        -o /tmp/libion-legacy-shim.so /tmp/ion-legacy-shim.c -ldl \
+    && gcc -O2 -pipe -fno-plt -Wall -Wextra -Werror -s \
+        -o /tmp/droidspaces-tini /tmp/droidspaces-tini.c \
+    && /tmp/droidspaces-tini /usr/bin/true
 
 FROM ogarcia/archlinux AS customizer
 
 COPY local-packages-winlite/ /tmp/local-packages-winlite/
 COPY hangover-winlite/rootfs/ /
 COPY --from=shim-builder /tmp/libion-legacy-shim.so /usr/local/lib/libion-legacy-shim.so
+COPY --from=shim-builder /tmp/droidspaces-tini /usr/bin/droidspaces-tini
 COPY scripts/mi-pad4/mi-pad4-kwin-wayland-wrapper /usr/local/libexec/mi-pad4-kwin-wayland-wrapper
 COPY scripts/mi-pad4/winlite/ /tmp/winlite/
 
@@ -27,7 +32,7 @@ RUN set -eux; \
     if [[ -f /etc/nsswitch.conf ]]; then \
         sed -i 's/^hosts:.*/hosts: files dns/' /etc/nsswitch.conf; \
     fi; \
-    pacman -Sy --noconfirm archlinux-keyring glibc; \
+    pacman -Sy --noconfirm --needed archlinux-keyring glibc; \
     pacman -Su --noconfirm; \
     pacman -S --noconfirm --needed \
         alsa-lib \
@@ -77,7 +82,6 @@ RUN set -eux; \
         qt6-wayland \
         sed \
         shared-mime-info \
-        tini \
         ttf-dejavu \
         tzdata \
         unzip \
@@ -133,7 +137,7 @@ RUN set -eux; \
     printf '%s\n' \
         'profile=winlite' \
         'desktop=kwin-anland+lxqt-panel' \
-        'pid1=tini' \
+        'pid1=droidspaces-tini' \
         'systemd=not-started' \
         'windows=hangover-arm64ec-fex+wowbox64' \
         'graphics=wined3d-wayland-opengl-kgsl' \
