@@ -11,10 +11,10 @@
     composed partially (only damaged regions) into this FBO, then a single
     GPU full-screen blit copies it to the current Android dmabuf slot.
     
-    This eliminates:
-    - Full-screen scene composition on every frame
-    - Per-slot damage bookkeeping overhead
-    - Multiple repaints for video frames
+    Per-slot dirty bits track which rotating Android buffers contain the newest
+    persistent scene. A selected stale slot receives only the final GPU blit;
+    KWin does not recompose an unchanged scene. This is required because the
+    consumer rotates BufferQueue slots even after the desktop becomes idle.
     
     Architecture:
     Firefox/Plasma damage → KWin scene (partial composition to m_sceneFbo)
@@ -62,15 +62,22 @@ public:
     bool importBuffers(int count);
     void releaseBuffers() override;
 
-    /** True while at least one consumer-owned dmabuf still needs the current
-     *  scene. Used by the output handshake to render dirty rotation buffers but
-     *  acknowledge clean ones without running the GPU continuously. */
+    /** True when the slot currently selected by the consumer does not contain
+     *  the latest persistent scene. Clean selected slots are acknowledged
+     *  without waking the GPU. */
     bool needsRepaint() const;
+
+    /** Copy the unchanged persistent scene into the selected stale BufferQueue
+     *  slot without scheduling a KWin composition frame. Returns false when the
+     *  scene itself first needs to be rendered. */
+    bool syncSelectedBuffer();
 
 private:
     void onOutputTransformChanged();
     void ensureSceneFbo();
     void blitSceneToDmabuf();
+    void markAllBuffersDirty();
+    void armRenderFence();
 
     AnlandEglBackend *const m_backend;
     AnlandOutput *m_output;
@@ -86,7 +93,7 @@ private:
     std::unique_ptr<GLTexture> m_sceneTexture;
     std::unique_ptr<GLFramebuffer> m_sceneFbo;
     bool m_sceneInvalid = true;
-    bool m_hasPendingDamage = true;
+    uint32_t m_dirtySlots = 0;
     QSize m_sceneSize;
 };
 

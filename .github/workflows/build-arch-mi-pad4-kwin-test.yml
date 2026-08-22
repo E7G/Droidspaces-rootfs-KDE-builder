@@ -29,8 +29,13 @@ jobs:
               useradd -m -s /bin/bash user
               cp -a /repo/scripts/mi-pad4 /tmp/mi-pad4
               chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh
+              # Test artifacts target an existing rootfs that already carries
+              # the patched KIO package. Building KIO again adds about 15 minutes
+              # and cannot affect an Anland backend-only change.
+              install -d /usr/share/droidspaces
+              : > /usr/share/droidspaces/kio-runtime-named-socket
               BUILD_KDE=min \
-              BUILD_KIO=true \
+              BUILD_KIO=false \
               BUILD_KWIN=true \
               BUILD_XWAYLAND=false \
               BUILD_PLASMA_WORKSPACE=false \

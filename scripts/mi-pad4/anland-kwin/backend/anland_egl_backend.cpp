@@ -83,8 +83,16 @@ void AnlandEglLayer::releaseBuffers()
     m_sceneTexture.reset();
     m_sceneFbo.reset();
     m_sceneInvalid = true;
-    m_hasPendingDamage = true;
+    m_dirtySlots = 0;
     m_bufCount = 0;
+}
+
+void AnlandEglLayer::markAllBuffersDirty()
+{
+    static_assert(MAX_BUFS <= 32, "dirty slot mask is too small");
+    m_dirtySlots = m_bufCount == 32
+        ? UINT32_MAX
+        : ((uint32_t(1) << m_bufCount) - 1);
 }
 
 void AnlandEglLayer::ensureSceneFbo()
@@ -115,7 +123,7 @@ void AnlandEglLayer::ensureSceneFbo()
 
     m_sceneSize = size;
     m_sceneInvalid = true;
-    m_hasPendingDamage = true;
+    markAllBuffersDirty();
 
     qCDebug(KWIN_ANLAND) << "created scene FBO" << size;
 }
@@ -230,61 +238,22 @@ bool AnlandEglLayer::importBuffers(int count)
     m_bufCount = count;
     ensureSceneFbo();
     m_sceneInvalid = true;
-    m_hasPendingDamage = true;
+    markAllBuffersDirty();
     return true;
 }
 
 bool AnlandEglLayer::needsRepaint() const
 {
-    return m_sceneInvalid || m_hasPendingDamage;
+    if (m_sceneInvalid) {
+        return true;
+    }
+    const int index = get_selected_idx(m_display);
+    return index >= 0 && index < m_bufCount
+        && (m_dirtySlots & (uint32_t(1) << index));
 }
 
-void AnlandEglLayer::onOutputTransformChanged()
+void AnlandEglLayer::armRenderFence()
 {
-    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
-    for (int i = 0; i < m_bufCount; i++) {
-        m_textures[i]->setContentTransform(contentTransform);
-    }
-    if (m_sceneTexture) {
-        m_sceneTexture->setContentTransform(contentTransform);
-    }
-    m_sceneInvalid = true;
-    m_hasPendingDamage = true;
-    addDeviceRepaint(Region::infinite());
-}
-
-std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
-{
-    m_backend->openglContext()->makeCurrent();
-
-    m_currentIndex = get_selected_idx(m_display);
-
-    if (m_currentIndex < 0 || m_currentIndex >= m_bufCount || !m_fbos[m_currentIndex]) {
-        qCWarning(KWIN_ANLAND) << "no render target for consumer buffer" << m_currentIndex;
-        return std::nullopt;
-    }
-
-    ensureSceneFbo();
-
-    // Clover's Android 4.4 KGSL stack is not reliable when KWin updates only a
-    // transformed sub-region of the persistent scene FBO: the copied Android
-    // slot can briefly contain pixels from two scene generations. Always
-    // compose one complete scene for each event-driven frame. This does not
-    // introduce a timer or idle repaint; it only makes an already requested
-    // frame atomic before the full dmabuf blit below.
-    return OutputLayerBeginFrameInfo{
-        RenderTarget(m_sceneFbo.get()),
-        Region::infinite()
-    };
-}
-
-bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame)
-{
-    blitSceneToDmabuf();
-
-    m_sceneInvalid = false;
-    m_hasPendingDamage = false;
-
     // The producer-side compatibility worker waits on this native fence, then
     // notifies Clover with fence=-1. KWin stays asynchronous without exposing
     // Android 4.4 BufferQueue to the unreliable imported-fence path.
@@ -306,6 +275,87 @@ bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region
         glFinish();
         set_render_fence(m_display, -1);
     }
+}
+
+bool AnlandEglLayer::syncSelectedBuffer()
+{
+    if (m_sceneInvalid || !m_sceneFbo) {
+        return false;
+    }
+
+    m_backend->openglContext()->makeCurrent();
+    m_currentIndex = get_selected_idx(m_display);
+    if (m_currentIndex < 0 || m_currentIndex >= m_bufCount
+        || !(m_dirtySlots & (uint32_t(1) << m_currentIndex))
+        || !m_fbos[m_currentIndex]) {
+        return false;
+    }
+
+    // This is a slot synchronization, not a compositor frame: copy the already
+    // completed persistent scene and fence it directly. Avoiding a synthetic
+    // KWin repaint prevents device-repair damage from being confused with new
+    // client damage and keeps Firefox frames one-composition/one-submit.
+    blitSceneToDmabuf();
+    m_dirtySlots &= ~(uint32_t(1) << m_currentIndex);
+    armRenderFence();
+    return true;
+}
+
+void AnlandEglLayer::onOutputTransformChanged()
+{
+    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
+    for (int i = 0; i < m_bufCount; i++) {
+        m_textures[i]->setContentTransform(contentTransform);
+    }
+    if (m_sceneTexture) {
+        m_sceneTexture->setContentTransform(contentTransform);
+    }
+    m_sceneInvalid = true;
+    markAllBuffersDirty();
+    addDeviceRepaint(Region::infinite());
+}
+
+std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
+{
+    m_backend->openglContext()->makeCurrent();
+
+    m_currentIndex = get_selected_idx(m_display);
+
+    if (m_currentIndex < 0 || m_currentIndex >= m_bufCount || !m_fbos[m_currentIndex]) {
+        qCWarning(KWIN_ANLAND) << "no render target for consumer buffer" << m_currentIndex;
+        return std::nullopt;
+    }
+
+    ensureSceneFbo();
+
+    // Partial composition is safe in this KWin-owned persistent texture. The
+    // selected Android slot is never trusted for preservation and always gets a
+    // full blit in doEndFrame(). A reconnect/rotation still repairs the scene in
+    // full once.
+    return OutputLayerBeginFrameInfo{
+        RenderTarget(m_sceneFbo.get()),
+        m_sceneInvalid ? Region::infinite() : Region()
+    };
+}
+
+bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame)
+{
+    // New client damage changes the persistent scene generation, making every
+    // rotating Android slot stale. Do not re-arm the mask for a sync-only frame:
+    // onConsumerReady() may request a frame solely to copy the unchanged scene
+    // into the selected stale slot.
+    if (m_sceneInvalid || !damagedDeviceRegion.isEmpty()) {
+        markAllBuffersDirty();
+    }
+
+    blitSceneToDmabuf();
+
+    m_sceneInvalid = false;
+    if (m_currentIndex >= 0 && m_currentIndex < m_bufCount) {
+        m_dirtySlots &= ~(uint32_t(1) << m_currentIndex);
+    }
+
+    armRenderFence();
     return true;
 }
 
