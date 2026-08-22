@@ -52,10 +52,9 @@ jobs:
               useradd -m -s /bin/bash user
               cp -a /repo/scripts/mi-pad4 /tmp/mi-pad4
               chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh
+              # The patched KWin PKGBUILD requires matching patched KIO during
+              # validation; WinLite only installs the resulting KWin package.
               BUILD_KDE=min \
-              # The patched KWin PKGBUILD is validated against the matching
-              # runtime-named-socket KIO build. Build it in this isolated job;
-              # WinLite only installs the resulting KWin package.
               BUILD_KIO=true \
               BUILD_KWIN=true \
               BUILD_XWAYLAND=false \
