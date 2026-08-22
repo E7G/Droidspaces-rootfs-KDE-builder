@@ -152,13 +152,30 @@ jobs:
         uses: actions/cache@v4
         with:
           path: hangover-winlite
-          key: hangover-winlite-${{ env.HANGOVER_VERSION }}-${{ env.HANGOVER_SHA256 }}
+          # v2 invalidates the old cache created before data.tar.zst extraction
+          # was fixed. GitHub caches are immutable, so code changes alone cannot
+          # repair a bad entry under the original key.
+          key: hangover-winlite-v2-${{ env.HANGOVER_VERSION }}-${{ env.HANGOVER_SHA256 }}
 
       - name: Extract required Hangover runtime
-        if: steps.hangover-cache.outputs.cache-hit != 'true'
         shell: bash
+        env:
+          CACHE_HIT: ${{ steps.hangover-cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
+          runtime_valid() {
+            test -x hangover-winlite/rootfs/usr/bin/wine \
+              && test -x hangover-winlite/rootfs/usr/bin/wineserver \
+              && find hangover-winlite/rootfs/usr/lib -name libarm64ecfex.dll \
+                   -print -quit | grep -q . \
+              && find hangover-winlite/rootfs/usr/lib -name wowbox64.dll \
+                   -print -quit | grep -q .
+          }
+          if [[ "$CACHE_HIT" == true ]] && runtime_valid; then
+            echo 'Validated cached Hangover runtime'
+            exit 0
+          fi
+
           rm -rf .ci/hangover hangover-winlite
           mkdir -p .ci/hangover hangover-winlite/rootfs
           bundle=".ci/hangover/hangover_${HANGOVER_VERSION}_ubuntu2404_noble_arm64.tar"
@@ -190,14 +207,32 @@ jobs:
             hangover-winlite/rootfs/usr/share/doc \
             hangover-winlite/rootfs/usr/share/man \
             hangover-winlite/rootfs/usr/lib/debug
+          install -d hangover-winlite/rootfs/usr/share
           printf '%s\n' \
             "hangover=${HANGOVER_VERSION}" \
             "sha256=${HANGOVER_SHA256}" \
             'x64=arm64ec-fex' \
             'x86=wowbox64' \
             >hangover-winlite/rootfs/usr/share/hangover-winlite-version
+          if ! runtime_valid; then
+            echo 'Hangover extraction is incomplete:' >&2
+            find hangover-winlite/rootfs/usr -maxdepth 5 -type f \
+              \( -name 'wine*' -o -name 'libarm64ecfex.dll' -o -name 'wowbox64.dll' \) \
+              -printf '%m %p\n' >&2 || true
+            exit 1
+          fi
+
+      - name: Validate slim Hangover runtime
+        shell: bash
+        run: |
+          set -euo pipefail
           test -x hangover-winlite/rootfs/usr/bin/wine
           test -x hangover-winlite/rootfs/usr/bin/wineserver
+          find hangover-winlite/rootfs/usr/lib -name libarm64ecfex.dll \
+            -print -quit | grep -q .
+          find hangover-winlite/rootfs/usr/lib -name wowbox64.dll \
+            -print -quit | grep -q .
+          du -sh hangover-winlite/rootfs
 
       - name: Upload slim Hangover runtime
         uses: actions/upload-artifact@v4
@@ -241,6 +276,8 @@ jobs:
           shopt -s nullglob
           kwin=(local-packages-winlite/kwin-[0-9]*.pkg.tar.*)
           mesa=(local-packages-winlite/mesa-[0-9]*.pkg.tar.*)
+          printf 'kwin-packages=%s mesa-packages=%s\n' "${#kwin[@]}" "${#mesa[@]}"
+          printf 'hangover-wine='; stat -c '%A %s %n' hangover-winlite/rootfs/usr/bin/wine
           ((${#kwin[@]} == 1))
           ((${#mesa[@]} == 1))
           test -x hangover-winlite/rootfs/usr/bin/wine
