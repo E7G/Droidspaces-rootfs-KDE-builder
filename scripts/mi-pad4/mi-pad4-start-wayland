@@ -20,6 +20,10 @@ export QT_QPA_PLATFORM=wayland
 export MOZ_ENABLE_WAYLAND=1
 export ANLAND=1
 export ANLAND_SOCKET=/run/display.sock
+# Clover's legacy KGSL/BufferQueue path must complete each buffer before the
+# producer reuses it. Native-fence import is opt-in only; enabling it here
+# causes the entire scene to tear/flicker on the 4.4 userspace.
+export ANLAND_NATIVE_FENCE=0
 # Mi Pad 4's KGSL node is not a DRM/GBM render node. The patched backend must
 # select its surfaceless EGL path instead of forcing RenderDevice::open().
 unset ANLAND_DRM_DEVICE
@@ -124,7 +128,7 @@ fi
 # HOME is an Android bind mount, not /home/user. Apply profile defaults once per
 # revision so upgrades can repair known-bad Plasma state without resetting user
 # changes on every start.
-profile_revision=20260810-1
+profile_revision=20260822-1
 profile_stamp="$HOME/.config/.mi-pad4-profile-revision"
 profile_defaults=/usr/share/droidspaces/mi-pad4-profile
 if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; then
@@ -178,6 +182,16 @@ if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; t
   fi
   rm -f "$HOME"/.cache/drkonqi/application-not-responding/dolphin.*.json 2>/dev/null || true
   printf '%s\n' "$profile_revision" >"$profile_stamp"
+fi
+
+# KWin may persist the temporary Flipped transform after an Anland reconnect.
+# The Clover producer already presents the buffer in the native orientation;
+# keeping this transform would mirror the whole desktop vertically, including
+# the panel. Normalize it before KWin reads output state.
+if [[ -f "$HOME/.config/kwinoutputconfig.json" ]] && \
+   grep -q '"transform"[[:space:]]*:[[:space:]]*"Flipped"' "$HOME/.config/kwinoutputconfig.json"; then
+  sed -i 's/"transform"[[:space:]]*:[[:space:]]*"Flipped"/"transform": "Normal"/g' \
+    "$HOME/.config/kwinoutputconfig.json" 2>/dev/null || true
 fi
 
 # Prefer the experimental Clover wrapper only when it is installed.  The

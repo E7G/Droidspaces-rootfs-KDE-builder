@@ -140,7 +140,11 @@ bool AnlandEglLayer::importBuffers(int count)
     m_backend->openglContext()->makeCurrent();
     releaseBuffers();
 
-    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
+    // The Android producer already exposes the Clover buffer in the same
+    // top-left origin used by this EGL import path. Applying FlipY here
+    // mirrors the complete scene vertically (the visible symptom is an
+    // upside-down desktop). Keep only the actual output transform.
+    const OutputTransform contentTransform = m_output->transform();
 
     for (int i = 0; i < count; i++) {
         const int fd = get_dmabuf_fd_at(m_display, i);
@@ -237,7 +241,7 @@ bool AnlandEglLayer::needsRepaint() const
 
 void AnlandEglLayer::onOutputTransformChanged()
 {
-    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
+    const OutputTransform contentTransform = m_output->transform();
     for (int i = 0; i < m_bufCount; i++) {
         m_textures[i]->setContentTransform(contentTransform);
     }
@@ -278,11 +282,12 @@ bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region
     m_sceneInvalid = false;
     m_hasPendingDamage = false;
 
-    // Extreme mode defaults to asynchronous native fences: KWin does not
-    // block on GPU completion and the fence worker sleeps in poll(). Set
-    // ANLAND_NATIVE_FENCE=0 for the legacy synchronous fallback.
-    const bool nativeFence = !qEnvironmentVariableIsSet("ANLAND_NATIVE_FENCE")
-        || qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1;
+    // Clover's 4.4 KGSL/BufferQueue path is not reliable with an imported
+    // native fence: it can consume a slot before the fence is signalled,
+    // producing full-screen tearing/flicker. Use the synchronous completion
+    // path by default; native fences remain an explicit opt-in for newer
+    // consumers with ANLAND_NATIVE_FENCE=1.
+    const bool nativeFence = qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1;
     if (nativeFence) {
         EGLNativeFence fence{
             m_backend->openglContext()->displayObject()
