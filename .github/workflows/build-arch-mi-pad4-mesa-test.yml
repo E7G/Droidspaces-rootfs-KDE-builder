@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 env:
-  MESA_KGSL_REV: 9a79b39f15ddb58d1fabbe1e590b630435016981
+  MESA_KGSL_REV: e6250622794358a186afe3e00271f744728dbbb7
 
 jobs:
   build:

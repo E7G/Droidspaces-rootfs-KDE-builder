@@ -33,10 +33,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # First Clover Mesa revision that advertises KGSL dma-buf import. Without
-  # this, Wayland EGL clients silently select llvmpipe even though KWin itself
-  # renders on FD512 through the GBM/surfaceless path.
-  MESA_KGSL_REV: 9a79b39f15ddb58d1fabbe1e590b630435016981
+  # Clover Mesa revision that ignores KWin synthetic DRM feedback and opens
+  # /dev/kgsl-3d0 for forced KGSL Wayland clients. This keeps the Android 4.4
+  # kernel-compatible branch while preventing silent llvmpipe selection.
+  MESA_KGSL_REV: e6250622794358a186afe3e00271f744728dbbb7
 
 jobs:
   firefox:
