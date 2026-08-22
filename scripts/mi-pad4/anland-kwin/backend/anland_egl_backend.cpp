@@ -131,7 +131,9 @@ void AnlandEglLayer::blitSceneToDmabuf()
     // it for both READ and DRAW and accidentally blit the Android slot onto
     // itself.
     GLFramebuffer::pushFramebuffer(m_sceneFbo.get());
-    m_fbos[m_currentIndex]->blitFromFramebuffer(Rect(), Rect(), GL_NEAREST);
+    // GL framebuffer and Android BufferQueue use opposite Y origins. Texture
+    // metadata does not affect glBlitFramebuffer(), so flip the actual copy.
+    m_fbos[m_currentIndex]->blitFromFramebuffer(Rect(), Rect(), GL_NEAREST, false, true);
     GLFramebuffer::popFramebuffer();
 }
 
@@ -140,11 +142,9 @@ bool AnlandEglLayer::importBuffers(int count)
     m_backend->openglContext()->makeCurrent();
     releaseBuffers();
 
-    // GL framebuffer coordinates are bottom-left based, while Android's
-    // imported BufferQueue slot is consumed in top-left display space. Keep a
-    // permanent Y flip at this boundary; KWin's output transform is normalized
-    // separately so it cannot double-rotate the Clover surface.
-    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
+    // The explicit scene-to-BufferQueue blit handles the GL/Android Y-origin
+    // mismatch. Keep texture metadata limited to the real KWin output transform.
+    const OutputTransform contentTransform = m_output->transform();
 
     for (int i = 0; i < count; i++) {
         const int fd = get_dmabuf_fd_at(m_display, i);
@@ -241,7 +241,7 @@ bool AnlandEglLayer::needsRepaint() const
 
 void AnlandEglLayer::onOutputTransformChanged()
 {
-    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
+    const OutputTransform contentTransform = m_output->transform();
     for (int i = 0; i < m_bufCount; i++) {
         m_textures[i]->setContentTransform(contentTransform);
     }
