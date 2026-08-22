@@ -6,6 +6,9 @@ on:
 permissions:
   contents: read
 
+env:
+  MESA_KGSL_REV: 9a79b39f15ddb58d1fabbe1e590b630435016981
+
 jobs:
   build:
     runs-on: ubuntu-24.04-arm
@@ -21,6 +24,8 @@ jobs:
           git clone --depth 1 --branch freedreno \
             https://github.com/E7G/archlinuxarm-PKGBUILDs.git \
             .ci/archlinuxarm-PKGBUILDs
+          grep -Fq "$MESA_KGSL_REV" \
+            .ci/archlinuxarm-PKGBUILDs/extra/mesa/PKGBUILD
           docker run --privileged --rm \
             -v "$PWD/.ci/archlinuxarm-PKGBUILDs:/src" \
             lfdevs/archlinuxarm:base-devel bash -lc '

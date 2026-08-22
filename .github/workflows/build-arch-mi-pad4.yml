@@ -32,6 +32,12 @@ concurrency:
   group: arch-mi-pad4-${{ inputs.profile }}
   cancel-in-progress: false
 
+env:
+  # First Clover Mesa revision that advertises KGSL dma-buf import. Without
+  # this, Wayland EGL clients silently select llvmpipe even though KWin itself
+  # renders on FD512 through the GBM/surfaceless path.
+  MESA_KGSL_REV: 9a79b39f15ddb58d1fabbe1e590b630435016981
+
 jobs:
   firefox:
     runs-on: ubuntu-24.04-arm
@@ -161,7 +167,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: mesa-mi-pad4
-          key: mesa-${{ hashFiles('scripts/mi-pad4/mesa/**') }}
+          key: mesa-kgsl-${{ env.MESA_KGSL_REV }}
 
       - name: Build patched Mesa for KGSL
         if: steps.mesa-cache.outputs.cache-hit != 'true'
@@ -176,6 +182,8 @@ jobs:
             --branch freedreno \
             https://github.com/E7G/archlinuxarm-PKGBUILDs.git \
             .ci/archlinuxarm-PKGBUILDs
+          grep -Fq "$MESA_KGSL_REV" \
+            .ci/archlinuxarm-PKGBUILDs/extra/mesa/PKGBUILD
 
           docker run \
             --privileged \

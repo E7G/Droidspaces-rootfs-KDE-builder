@@ -19,6 +19,7 @@ concurrency:
 env:
   HANGOVER_VERSION: '11.9'
   HANGOVER_SHA256: 0c66e48800c03d32c3c22029b5053cef3d61376aedcf44eaddf82dce63e410dd
+  MESA_KGSL_REV: 9a79b39f15ddb58d1fabbe1e590b630435016981
 
 jobs:
   build-kwin:
@@ -91,7 +92,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: mesa-winlite
-          key: mesa-winlite-${{ hashFiles('scripts/mi-pad4/mesa/**') }}
+          key: mesa-winlite-${{ env.MESA_KGSL_REV }}
 
       - name: Build KGSL Mesa
         if: steps.mesa-cache.outputs.cache-hit != 'true'
@@ -102,6 +103,8 @@ jobs:
           git clone --depth 1 --branch freedreno \
             https://github.com/E7G/archlinuxarm-PKGBUILDs.git \
             .ci/archlinuxarm-PKGBUILDs
+          grep -Fq "$MESA_KGSL_REV" \
+            .ci/archlinuxarm-PKGBUILDs/extra/mesa/PKGBUILD
           docker run --privileged --rm \
             -v "$PWD/.ci/archlinuxarm-PKGBUILDs:/src" \
             lfdevs/archlinuxarm:base-devel bash -lc '
