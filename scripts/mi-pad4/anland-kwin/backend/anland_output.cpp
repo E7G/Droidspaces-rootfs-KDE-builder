@@ -12,6 +12,8 @@
 #include "core/renderbackend.h" // OutputFrame
 #include "core/renderloop.h"
 
+#include <QTimer>
+
 #include <chrono>
 
 namespace KWin
@@ -33,6 +35,24 @@ AnlandOutput::AnlandOutput(AnlandBackend *parent, const QString &name)
         .physicalSize = QSize(172, 108),
         .internal = true,
     });
+
+    // The consumer waits at most five seconds in refresh_done(). Do not answer
+    // clean idle selections immediately: that spins BufferQueue at the display
+    // rate despite zero desktop damage. A one-shot keepalive leaves the selected
+    // slot available for real client damage and reduces idle hand-offs to 0.33Hz.
+    m_idleAckTimer = new QTimer(this);
+    m_idleAckTimer->setSingleShot(true);
+    int idleAckMs = qEnvironmentVariableIntValue("ANLAND_IDLE_ACK_MS");
+    if (idleAckMs <= 0 || idleAckMs >= 5000) {
+        idleAckMs = 3000;
+    }
+    m_idleAckTimer->setInterval(idleAckMs);
+    connect(m_idleAckTimer, &QTimer::timeout, this, [this]() {
+        if (!m_awaitingPresent && !m_unframedPresentInhibited
+            && (!m_eglLayer || !m_eglLayer->needsRepaint())) {
+            handOffWithoutFrame();
+        }
+    });
 }
 
 AnlandOutput::~AnlandOutput()
@@ -53,6 +73,7 @@ bool AnlandOutput::present(const QList<OutputLayer *> &layersToUpdate, const std
 {
     // The scene has already been rendered into the daemon's dmabuf by the layer
     // (AnlandEglLayer::doEndFrame). Hand it to the consumer now.
+    m_idleAckTimer->stop();
     m_frame = frame;
     const bool handedToConsumer = m_backend->notifyFramePresented();
     if (handedToConsumer) {
@@ -125,6 +146,7 @@ void AnlandOutput::handOffWithoutFrame()
     // Direct stale-slot copies and clean acknowledgements have no OutputFrame,
     // so RenderLoop would otherwise accept client damage while Android still
     // owns the selected slot. Hold composition until its matching ready event.
+    m_idleAckTimer->stop();
     m_renderLoop->inhibit();
     m_unframedPresentInhibited = true;
     if (!m_backend->notifyFramePresented()) {
@@ -162,12 +184,10 @@ void AnlandOutput::onConsumerReady()
         return;
     }
 
-    // Idle scene: acknowledge the selected clean buffer without rendering. The
-    // old code returned after completing the previous OutputFrame and left this
-    // new request unanswered; the consumer hit its five-second safety timeout,
-    // tore down every dmabuf and reconnected, producing the periodic full-screen
-    // flash. A bare refresh message keeps BufferQueue alive while the GPU sleeps.
-    handOffWithoutFrame();
+    // Idle scene: leave the clean selected slot parked and available for future
+    // client damage. Send only a low-frequency keepalive before the consumer's
+    // five-second timeout instead of rotating BufferQueue at panel refresh rate.
+    m_idleAckTimer->start();
 }
 
 void AnlandOutput::resize(const QSize &newSize)
@@ -213,6 +233,7 @@ AnlandEglLayer *AnlandOutput::eglLayer() const
 
 void AnlandOutput::stopRendering()
 {
+    m_idleAckTimer->stop();
     if (m_awaitingPresent) {
         m_awaitingPresent = false;
         m_frame.reset();
