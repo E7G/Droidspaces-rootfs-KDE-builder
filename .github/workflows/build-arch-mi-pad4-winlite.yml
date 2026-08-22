@@ -53,7 +53,10 @@ jobs:
               cp -a /repo/scripts/mi-pad4 /tmp/mi-pad4
               chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh
               BUILD_KDE=min \
-              BUILD_KIO=false \
+              # The patched KWin PKGBUILD is validated against the matching
+              # runtime-named-socket KIO build. Build it in this isolated job;
+              # WinLite only installs the resulting KWin package.
+              BUILD_KIO=true \
               BUILD_KWIN=true \
               BUILD_XWAYLAND=false \
               BUILD_PLASMA_WORKSPACE=false \
@@ -176,7 +179,12 @@ jobs:
           for deb in "${debs[@]}"; do
             member="$(ar t "$deb" | grep '^data\.tar' | head -n1)"
             [[ -n "$member" ]]
-            ar p "$deb" "$member" | tar -x -C hangover-winlite/rootfs
+            case "$member" in
+              *.zst) ar p "$deb" "$member" | tar --zstd -x -C hangover-winlite/rootfs ;;
+              *.xz)  ar p "$deb" "$member" | tar -xJ -C hangover-winlite/rootfs ;;
+              *.gz)  ar p "$deb" "$member" | tar -xz -C hangover-winlite/rootfs ;;
+              *)     ar p "$deb" "$member" | tar -x -C hangover-winlite/rootfs ;;
+            esac
           done
 
           rm -rf \
