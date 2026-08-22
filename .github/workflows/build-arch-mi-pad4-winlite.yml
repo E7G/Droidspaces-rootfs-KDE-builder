@@ -234,13 +234,26 @@ jobs:
             -print -quit | grep -q .
           du -sh hangover-winlite/rootfs
 
+      # GitHub artifact ZIPs normalize regular files to 0644.  Upload a tarball
+      # instead so Wine, wineserver and the remaining Hangover helpers keep
+      # their executable mode bits across jobs.
+      - name: Pack slim Hangover runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --zstd -cf hangover-winlite.tar.zst -C hangover-winlite .
+          tar --zstd -tf hangover-winlite.tar.zst >/dev/null
+          sha256sum hangover-winlite.tar.zst
+
       - name: Upload slim Hangover runtime
         uses: actions/upload-artifact@v4
         with:
           name: hangover-winlite
-          path: hangover-winlite/
+          path: hangover-winlite.tar.zst
           if-no-files-found: error
-          compression-level: 6
+          # The payload is already compressed. Avoid wrapping it in another
+          # expensive deflate pass.
+          compression-level: 0
           retention-days: 7
 
   build-rootfs:
@@ -267,7 +280,18 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: hangover-winlite
-          path: hangover-winlite
+          path: hangover-artifact
+
+      - name: Restore Hangover runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=hangover-artifact/hangover-winlite.tar.zst
+          test -s "$archive"
+          mkdir -p hangover-winlite
+          tar --zstd -xf "$archive" -C hangover-winlite
+          test -x hangover-winlite/rootfs/usr/bin/wine
+          test -x hangover-winlite/rootfs/usr/bin/wineserver
 
       - name: Validate build inputs
         shell: bash
