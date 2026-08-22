@@ -179,9 +179,9 @@ user_pref("media.ffvpx-hw.enabled", true);
 user_pref("media.rdd-ffvpx.enabled", true);
 user_pref("media.rdd-ffmpeg.enabled", true);
 user_pref("media.rdd-vpx.enabled", true);
-// Prefer the native FFmpeg/V4L2-M2M path. The opposite value silently
-// selects the software ffvpx decoder and is the main cause of high CPU use.
-user_pref("media.prefer-non-ffvpx", false);
+// Prefer the native FFmpeg/V4L2-M2M path. false prefers Mozilla's bundled
+// ffvpx codecs and can silently turn H.264 playback into a CPU-bound path.
+user_pref("media.prefer-non-ffvpx", true);
 user_pref("media.ffmpeg.vaapi.enabled", false);
 user_pref("media.mediasource.vp9.enabled", true);
 user_pref("media.av1.enabled", false);
@@ -191,6 +191,10 @@ user_pref("media.av1.enabled", false);
 user_pref("media.ffmpeg.disable-software-fallback", false);
 user_pref("media.decoder.recycle.enabled", true);
 user_pref("media.ffvpx.enabled", true);
+// OpenH264 is for WebRTC interoperability, not normal web video. On Clover it
+// can be selected for H.264 playback and consume an entire big core.
+user_pref("media.gmp-gmpopenh264.enabled", false);
+user_pref("media.gmp-gmpopenh264.provider.enabled", false);
 // ---------- WebRender - Clover Extreme v3 ----------
 user_pref("media.gpu-process-decoder", true);
 user_pref("gfx.webrender.all", true);

@@ -266,15 +266,15 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
 
     ensureSceneFbo();
 
-    // The persistent scene texture is owned by KWin, so unlike Android's
-    // rotating BufferQueue its unchanged pixels are reliable. Repaint it in
-    // full only after allocation/reconnect/rotation; normal client damage is
-    // composed only into the damaged scene region. The completed scene is
-    // still copied in full to the selected Android slot below, which avoids
-    // depending on Clover's broken buffer-age preservation.
+    // Clover's Android 4.4 KGSL stack is not reliable when KWin updates only a
+    // transformed sub-region of the persistent scene FBO: the copied Android
+    // slot can briefly contain pixels from two scene generations. Always
+    // compose one complete scene for each event-driven frame. This does not
+    // introduce a timer or idle repaint; it only makes an already requested
+    // frame atomic before the full dmabuf blit below.
     return OutputLayerBeginFrameInfo{
         RenderTarget(m_sceneFbo.get()),
-        m_sceneInvalid ? Region::infinite() : Region()
+        Region::infinite()
     };
 }
 
