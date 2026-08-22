@@ -140,11 +140,11 @@ bool AnlandEglLayer::importBuffers(int count)
     m_backend->openglContext()->makeCurrent();
     releaseBuffers();
 
-    // The Android producer already exposes the Clover buffer in the same
-    // top-left origin used by this EGL import path. Applying FlipY here
-    // mirrors the complete scene vertically (the visible symptom is an
-    // upside-down desktop). Keep only the actual output transform.
-    const OutputTransform contentTransform = m_output->transform();
+    // GL framebuffer coordinates are bottom-left based, while Android's
+    // imported BufferQueue slot is consumed in top-left display space. Keep a
+    // permanent Y flip at this boundary; KWin's output transform is normalized
+    // separately so it cannot double-rotate the Clover surface.
+    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
 
     for (int i = 0; i < count; i++) {
         const int fd = get_dmabuf_fd_at(m_display, i);
@@ -241,7 +241,7 @@ bool AnlandEglLayer::needsRepaint() const
 
 void AnlandEglLayer::onOutputTransformChanged()
 {
-    const OutputTransform contentTransform = m_output->transform();
+    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
     for (int i = 0; i < m_bufCount; i++) {
         m_textures[i]->setContentTransform(contentTransform);
     }

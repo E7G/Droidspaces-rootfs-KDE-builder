@@ -128,7 +128,7 @@ fi
 # HOME is an Android bind mount, not /home/user. Apply profile defaults once per
 # revision so upgrades can repair known-bad Plasma state without resetting user
 # changes on every start.
-profile_revision=20260822-1
+profile_revision=20260822-2
 profile_stamp="$HOME/.config/.mi-pad4-profile-revision"
 profile_defaults=/usr/share/droidspaces/mi-pad4-profile
 if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; then
@@ -184,13 +184,16 @@ if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; t
   printf '%s\n' "$profile_revision" >"$profile_stamp"
 fi
 
-# KWin may persist the temporary Flipped transform after an Anland reconnect.
-# The Clover producer already presents the buffer in the native orientation;
-# keeping this transform would mirror the whole desktop vertically, including
-# the panel. Normalize it before KWin reads output state.
+# Android already owns Clover's physical display orientation. KWin's tablet
+# sensor can otherwise re-apply a 180-degree rotation after startup even when
+# the persisted transform is Normal, making alternating BufferQueue slots look
+# vertically mirrored. Keep the virtual Anland output fixed in native space.
 if [[ -f "$HOME/.config/kwinoutputconfig.json" ]] && \
-   grep -q '"transform"[[:space:]]*:[[:space:]]*"Flipped"' "$HOME/.config/kwinoutputconfig.json"; then
-  sed -i 's/"transform"[[:space:]]*:[[:space:]]*"Flipped"/"transform": "Normal"/g' \
+   grep -Eq '"transform"[[:space:]]*:[[:space:]]*"Flipped"|"autoRotation"[[:space:]]*:[[:space:]]*"InTabletMode"' \
+     "$HOME/.config/kwinoutputconfig.json"; then
+  sed -i \
+    -e 's/"transform"[[:space:]]*:[[:space:]]*"Flipped"/"transform": "Normal"/g' \
+    -e 's/"autoRotation"[[:space:]]*:[[:space:]]*"InTabletMode"/"autoRotation": "Never"/g' \
     "$HOME/.config/kwinoutputconfig.json" 2>/dev/null || true
 fi
 
