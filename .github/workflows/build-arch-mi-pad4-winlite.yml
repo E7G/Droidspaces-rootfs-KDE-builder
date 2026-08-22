@@ -1,0 +1,328 @@
+name: Build Arch Mi Pad 4 WinLite RootFS
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish this build to GitHub Releases
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: arch-mi-pad4-winlite
+  cancel-in-progress: false
+
+env:
+  HANGOVER_VERSION: '11.9'
+  HANGOVER_SHA256: 0c66e48800c03d32c3c22029b5053cef3d61376aedcf44eaddf82dce63e410dd
+
+jobs:
+  build-kwin:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore patched KWin package
+        id: kwin-cache
+        uses: actions/cache@v4
+        with:
+          path: kwin-winlite
+          key: kwin-winlite-${{ hashFiles('scripts/mi-pad4/anland-kwin/**', 'scripts/mi-pad4/build-arch-anland-kwin.sh') }}
+
+      - name: Build patched KWin
+        if: steps.kwin-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf kwin-winlite
+          mkdir -p kwin-winlite
+          docker run --privileged --rm \
+            -v "$PWD:/repo" \
+            -v "$PWD/kwin-winlite:/out" \
+            lfdevs/archlinuxarm:base-devel bash -lc '
+              set -euo pipefail
+              pacman -Syyu --noconfirm
+              pacman -S --needed --noconfirm sudo
+              useradd -m -s /bin/bash user
+              cp -a /repo/scripts/mi-pad4 /tmp/mi-pad4
+              chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh
+              BUILD_KDE=min \
+              BUILD_KIO=false \
+              BUILD_KWIN=true \
+              BUILD_XWAYLAND=false \
+              BUILD_PLASMA_WORKSPACE=false \
+              ANLAND_PACKAGE_OUTPUT_DIR=/out \
+                /tmp/mi-pad4/build-arch-anland-kwin.sh
+            '
+          shopt -s nullglob
+          packages=(kwin-winlite/kwin-[0-9]*.pkg.tar.*)
+          ((${#packages[@]} == 1))
+          for package in "${packages[@]}"; do
+            safe_name="${package//:/_}"
+            [[ "$safe_name" == "$package" ]] || mv -v "$package" "$safe_name"
+          done
+          sha256sum kwin-winlite/*.pkg.tar.* > kwin-winlite/SHA256SUMS
+
+      - name: Upload patched KWin
+        uses: actions/upload-artifact@v4
+        with:
+          name: kwin-winlite
+          path: kwin-winlite/
+          if-no-files-found: error
+          retention-days: 7
+
+  build-mesa:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore KGSL Mesa package
+        id: mesa-cache
+        uses: actions/cache@v4
+        with:
+          path: mesa-winlite
+          key: mesa-winlite-${{ hashFiles('scripts/mi-pad4/mesa/**') }}
+
+      - name: Build KGSL Mesa
+        if: steps.mesa-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .ci/archlinuxarm-PKGBUILDs mesa-winlite
+          git clone --depth 1 --branch freedreno \
+            https://github.com/E7G/archlinuxarm-PKGBUILDs.git \
+            .ci/archlinuxarm-PKGBUILDs
+          docker run --privileged --rm \
+            -v "$PWD/.ci/archlinuxarm-PKGBUILDs:/src" \
+            lfdevs/archlinuxarm:base-devel bash -lc '
+              set -euo pipefail
+              pacman -Syyu --noconfirm
+              pacman -S --needed --noconfirm sudo base-devel git ccache
+              useradd -m -s /bin/bash builder
+              echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
+              chmod 0440 /etc/sudoers.d/builder
+              chown -R builder:builder /src
+              sudo -u builder bash -lc "
+                set -euo pipefail
+                export CCACHE_DIR=/home/builder/.ccache
+                ccache --max-size=2G
+                cd /src/extra/mesa
+                makepkg -s --noconfirm --needed
+              "
+            '
+          mkdir -p mesa-winlite
+          shopt -s nullglob
+          packages=(.ci/archlinuxarm-PKGBUILDs/extra/mesa/mesa-[0-9]*.pkg.tar.*)
+          ((${#packages[@]} == 1))
+          cp -v "${packages[0]}" mesa-winlite/
+          cd mesa-winlite
+          for package in *.pkg.tar.*; do
+            safe_name="${package//:/_}"
+            [[ "$safe_name" == "$package" ]] || mv -v "$package" "$safe_name"
+          done
+          sha256sum *.pkg.tar.* > SHA256SUMS
+
+      - name: Upload KGSL Mesa
+        uses: actions/upload-artifact@v4
+        with:
+          name: mesa-winlite
+          path: mesa-winlite/
+          if-no-files-found: error
+          retention-days: 7
+
+  prepare-hangover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore slim Hangover runtime
+        id: hangover-cache
+        uses: actions/cache@v4
+        with:
+          path: hangover-winlite
+          key: hangover-winlite-${{ env.HANGOVER_VERSION }}-${{ env.HANGOVER_SHA256 }}
+
+      - name: Extract required Hangover runtime
+        if: steps.hangover-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .ci/hangover hangover-winlite
+          mkdir -p .ci/hangover hangover-winlite/rootfs
+          bundle=".ci/hangover/hangover_${HANGOVER_VERSION}_ubuntu2404_noble_arm64.tar"
+          curl -fL --retry 5 --retry-all-errors \
+            -o "$bundle" \
+            "https://github.com/AndreRH/hangover/releases/download/hangover-${HANGOVER_VERSION}/hangover_${HANGOVER_VERSION}_ubuntu2404_noble_arm64.tar"
+          echo "${HANGOVER_SHA256}  $bundle" | sha256sum -c -
+          tar -xf "$bundle" -C .ci/hangover
+
+          shopt -s nullglob
+          debs=(
+            .ci/hangover/hangover-wine_*_arm64.deb
+            .ci/hangover/hangover-libarm64ecfex_*_arm64.deb
+            .ci/hangover/hangover-wowbox64_*_arm64.deb
+          )
+          ((${#debs[@]} == 3))
+          for deb in "${debs[@]}"; do
+            member="$(ar t "$deb" | grep '^data\.tar' | head -n1)"
+            [[ -n "$member" ]]
+            ar p "$deb" "$member" | tar -x -C hangover-winlite/rootfs
+          done
+
+          rm -rf \
+            hangover-winlite/rootfs/usr/share/doc \
+            hangover-winlite/rootfs/usr/share/man \
+            hangover-winlite/rootfs/usr/lib/debug
+          printf '%s\n' \
+            "hangover=${HANGOVER_VERSION}" \
+            "sha256=${HANGOVER_SHA256}" \
+            'x64=arm64ec-fex' \
+            'x86=wowbox64' \
+            >hangover-winlite/rootfs/usr/share/hangover-winlite-version
+          test -x hangover-winlite/rootfs/usr/bin/wine
+          test -x hangover-winlite/rootfs/usr/bin/wineserver
+
+      - name: Upload slim Hangover runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: hangover-winlite
+          path: hangover-winlite/
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 7
+
+  build-rootfs:
+    needs: [build-kwin, build-mesa, prepare-hangover]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download patched KWin
+        uses: actions/download-artifact@v4
+        with:
+          name: kwin-winlite
+          path: local-packages-winlite
+
+      - name: Download KGSL Mesa
+        uses: actions/download-artifact@v4
+        with:
+          name: mesa-winlite
+          path: local-packages-winlite
+
+      - name: Download Hangover
+        uses: actions/download-artifact@v4
+        with:
+          name: hangover-winlite
+          path: hangover-winlite
+
+      - name: Validate build inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          kwin=(local-packages-winlite/kwin-[0-9]*.pkg.tar.*)
+          mesa=(local-packages-winlite/mesa-[0-9]*.pkg.tar.*)
+          ((${#kwin[@]} == 1))
+          ((${#mesa[@]} == 1))
+          test -x hangover-winlite/rootfs/usr/bin/wine
+          sha256sum "${kwin[@]}" "${mesa[@]}"
+
+      - name: Build WinLite rootfs
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx create --name winlite-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
+          docker buildx build \
+            --platform linux/arm64 \
+            --target export \
+            --output type=tar,dest=winlite-rootfs.tar \
+            -f Arch-WinLite.Dockerfile \
+            .
+          xz -T0 -9e winlite-rootfs.tar
+          mkdir -p release_assets
+          final="Arch-WinLite-Anland-MiPad4-aarch64-v${GITHUB_RUN_NUMBER}.tar.xz"
+          mv winlite-rootfs.tar.xz "release_assets/$final"
+          sha256sum "release_assets/$final" >release_assets/SHA256SUMS
+
+      - name: Validate WinLite rootfs
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=(release_assets/Arch-WinLite-Anland-MiPad4-aarch64-v*.tar.xz)
+          ((${#archive[@]} == 1))
+          xz -t "${archive[0]}"
+          tar -tf "${archive[0]}" | sed 's#^\./##' >rootfs-files.txt
+          for path in \
+            sbin/droidspaces-init \
+            usr/bin/tini \
+            usr/bin/wine \
+            usr/bin/wineserver \
+            usr/local/bin/winrun \
+            usr/local/bin/winlite-session \
+            usr/local/bin/winlite-supervisor \
+            usr/local/lib/libion-legacy-shim.so \
+            usr/sbin/kwin_wayland_wrapper \
+            usr/share/droidspaces/anland-kwin-package \
+            usr/share/droidspaces/mesa-kgsl \
+            usr/share/droidspaces/winlite-profile \
+            usr/share/winlite/container.config
+          do
+            grep -Fxq "$path" rootfs-files.txt || {
+              echo "Missing $path" >&2
+              exit 1
+            }
+          done
+          grep -Eq '^var/lib/pacman/local/kwin-6\.7\.3-2/' rootfs-files.txt
+          grep -Eq '^var/lib/pacman/local/mesa-1:26\.2\.0-9/' rootfs-files.txt
+          for unwanted in firefox plasmashell dolphin baloo_file xdg-desktop-portal; do
+            if grep -Eq "(^|/)${unwanted}($|[./-])" rootfs-files.txt; then
+              echo "Unexpected heavyweight component: $unwanted" >&2
+              exit 1
+            fi
+          done
+          printf 'archive-size-bytes='; stat -c %s "${archive[0]}"
+          echo 'WinLite RootFS validation passed'
+
+      - name: Upload WinLite rootfs
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-arch-mi-pad4-winlite
+          path: release_assets/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: build-rootfs
+    if: inputs.publish_release == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Download WinLite rootfs
+        uses: actions/download-artifact@v4
+        with:
+          name: rootfs-arch-mi-pad4-winlite
+          path: release_assets
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mi-pad4-winlite-${{ github.run_number }}
+          name: Mi Pad 4 Arch WinLite RootFS - Build ${{ github.run_number }}
+          prerelease: true
+          generate_release_notes: true
+          files: release_assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

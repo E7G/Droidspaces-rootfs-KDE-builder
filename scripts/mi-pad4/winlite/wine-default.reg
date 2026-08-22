@@ -1,0 +1,19 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Wine\Drivers]
+"Graphics"="wayland,x11"
+"Audio"="pulse"
+
+[HKEY_CURRENT_USER\Software\Wine\Direct3D]
+"DirectDrawRenderer"="opengl"
+"Direct3DRenderer"="opengl"
+"OffscreenRenderingMode"="fbo"
+"VideoMemorySize"="1024"
+"Multisampling"="disabled"
+
+[HKEY_CURRENT_USER\Software\Wine\X11 Driver]
+"Managed"="Y"
+"Decorated"="Y"
+
+[HKEY_CURRENT_USER\Control Panel\Desktop]
+"LogPixels"=dword:00000090

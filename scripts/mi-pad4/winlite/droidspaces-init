@@ -1,0 +1,38 @@
+#!/usr/bin/bash
+
+set -eu
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LANG=zh_CN.UTF-8
+export LANGUAGE=zh_CN:zh
+export LC_ALL=zh_CN.UTF-8
+export container=droidspaces
+
+mkdir -p /run/droidspaces /run/dbus
+
+# Droidspaces creates the NAT veth, but Clover's 4.4 kernel can miss the guest
+# address. Configure it once at PID 1 without starting networkd or polling later.
+if [[ -r /run/droidspaces/container.config ]] \
+    && grep -q '^net_mode=nat$' /run/droidspaces/container.config; then
+    nat_ip="$(sed -n 's/^static_nat_ip=//p' /run/droidspaces/container.config | head -n1)"
+    if [[ -n "$nat_ip" ]]; then
+        for _ in $(seq 1 60); do
+            if ip link show eth0 >/dev/null 2>&1; then
+                ip link set eth0 up 2>/dev/null || true
+                ip addr replace "${nat_ip}/16" dev eth0 2>/dev/null || true
+                ip route replace default via 172.28.0.1 dev eth0 2>/dev/null || true
+                ip route get 1.1.1.1 >/dev/null 2>&1 && break
+            fi
+            sleep 0.1
+        done
+        printf '%s\n' \
+            'nameserver 172.28.0.1' \
+            'nameserver 223.5.5.5' \
+            'nameserver 119.29.29.29' \
+            >/run/droidspaces/resolv.conf 2>/dev/null || true
+    fi
+fi
+
+# tini is the only permanent PID-1 helper. No systemd user/system manager,
+# timers, portals or polling daemons are needed by this image.
+exec /usr/bin/tini -s -- /usr/local/bin/winlite-supervisor

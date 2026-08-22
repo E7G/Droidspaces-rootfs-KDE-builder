@@ -1,0 +1,46 @@
+#!/usr/bin/bash
+
+set -euo pipefail
+
+if (($# == 0)); then
+    echo '用法: winrun <程序.exe|程序.msi> [参数...]' >&2
+    exit 2
+fi
+
+export HOME="${HOME:-/tmp/droidspaces-home}"
+export WINEPREFIX="${WINEPREFIX:-$HOME/.wine-winlite}"
+export WINEARCH=win64
+export WINEDEBUG="${WINEDEBUG:--all}"
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=}"
+export WINEESYNC=1
+export WINEFSYNC=0
+export HODLL64="${HODLL64:-libarm64ecfex.dll}"
+export HODLL="${HODLL:-wowbox64.dll}"
+export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+export FD_FORCE_KGSL=1
+export FD_KGSL_ENABLE_DMABUF=1
+export mesa_glthread=true
+export MALLOC_ARENA_MAX=2
+
+mkdir -p "$WINEPREFIX"
+
+if [[ ! -f "$WINEPREFIX/system.reg" ]]; then
+    wineboot -u
+    regedit /S /usr/share/winlite/wine-default.reg || true
+fi
+
+target="$1"
+shift
+
+if [[ "${target,,}" == *.msi ]]; then
+    command=(wine msiexec /i "$target" "$@")
+else
+    command=(wine "$target" "$@")
+fi
+
+# Prefer SDM660's performance cluster only while translated code runs. Do not
+# pin frequency, force cores online or change governor, so idle power stays low.
+if command -v taskset >/dev/null 2>&1; then
+    exec nice -n -4 taskset -c 4-7 "${command[@]}"
+fi
+exec "${command[@]}"

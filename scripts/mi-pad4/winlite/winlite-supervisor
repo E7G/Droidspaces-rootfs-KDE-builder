@@ -1,0 +1,31 @@
+#!/usr/bin/bash
+
+set -u
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+mkdir -p /run/dbus /run/winlite
+rm -f /run/dbus/system_bus_socket /run/dbus/pid
+dbus-daemon --system --fork --nopidfile \
+    >/run/winlite/system-dbus.log 2>&1 || true
+
+session_pid=""
+stop_session() {
+    if [[ -n "$session_pid" ]]; then
+        kill -TERM "$session_pid" 2>/dev/null || true
+        wait "$session_pid" 2>/dev/null || true
+    fi
+    pkill -TERM -x dbus-daemon 2>/dev/null || true
+}
+trap stop_session EXIT INT TERM
+
+# Keep container alive and restart only the graphical generation. A crash does
+# not spawn duplicate KWin, PipeWire or Wine processes.
+while true; do
+    dbus-run-session -- /usr/local/bin/winlite-session \
+        >>/run/winlite/session.log 2>&1 &
+    session_pid=$!
+    wait "$session_pid" || true
+    session_pid=""
+    sleep 2
+done

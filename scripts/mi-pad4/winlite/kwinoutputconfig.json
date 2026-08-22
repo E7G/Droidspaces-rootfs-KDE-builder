@@ -1,0 +1,15 @@
+[
+    {
+        "name": "Anland-1",
+        "data": [
+            {
+                "autoRotation": "Never",
+                "enabled": true,
+                "position": { "x": 0, "y": 0 },
+                "priority": 1,
+                "scale": 1,
+                "transform": "Normal"
+            }
+        ]
+    }
+]

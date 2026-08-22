@@ -1,0 +1,8 @@
+.git
+.ci
+work
+release_assets
+*.zip
+/*-Droidspaces-rootfs-*.tar.xz
+/custom-*-rootfs.tar
+rootfs-files*.txt
