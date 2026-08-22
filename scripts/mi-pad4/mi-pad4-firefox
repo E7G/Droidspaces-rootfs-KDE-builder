@@ -185,7 +185,10 @@ user_pref("media.prefer-non-ffvpx", false);
 user_pref("media.ffmpeg.vaapi.enabled", false);
 user_pref("media.mediasource.vp9.enabled", true);
 user_pref("media.av1.enabled", false);
-user_pref("media.ffmpeg.disable-software-fallback", true);
+// Keep FFmpeg software fallback available for AAC/MP4 audio. Hardware video
+// remains first in the PDM order; disabling fallback globally also rejects
+// Douyin's audio/mp4a-latm track and produces a video-only stream.
+user_pref("media.ffmpeg.disable-software-fallback", false);
 user_pref("media.decoder.recycle.enabled", true);
 user_pref("media.ffvpx.enabled", true);
 // ---------- WebRender - Clover Extreme v3 ----------

@@ -37,7 +37,9 @@ pref("media.prefer-non-ffvpx", false);
 pref("media.ffmpeg.vaapi.enabled", false);
 pref("media.rdd-ffmpeg.enabled", true);
 pref("media.rdd-vpx.enabled", true);
-pref("media.ffmpeg.disable-software-fallback", true);
+// This switch applies to audio as well as video. AAC needs FFmpeg software
+// decoding even while H.264/HEVC use the preferred V4L2/GPU decoder.
+pref("media.ffmpeg.disable-software-fallback", false);
 pref("media.decoder.recycle.enabled", true);
 pref("media.ffvpx.enabled", true);
 pref("browser.ml.enable", false);
