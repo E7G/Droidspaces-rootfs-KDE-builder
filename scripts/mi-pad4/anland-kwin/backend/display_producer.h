@@ -35,8 +35,9 @@ int  get_screen_info(display_ctx *ctx, uint32_t *width, uint32_t *height, uint32
  * Takes ownership of fence_fd (-1 = none). */
 void set_render_fence(display_ctx *ctx, int fence_fd);
 
-/* Signal the consumer. A fenced frame is completed asynchronously by the worker;
- * an idle/no-fence frame is acknowledged immediately. No-op in fallback. */
+/* Signal the consumer. Fenced frames are serialized through the asynchronous
+ * worker queue; idle/no-fence frames are acknowledged immediately. No-op in
+ * fallback. */
 int  trigger_refresh(display_ctx *ctx);
 
 /* Pull one pending input event. Returns 1 if an event was written, 0 if none was

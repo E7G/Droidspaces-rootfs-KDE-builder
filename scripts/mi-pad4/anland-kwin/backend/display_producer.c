@@ -20,6 +20,13 @@
  * caller's reconnect loop stays responsive when no consumer is present yet. */
 #define HANDSHAKE_TIMEOUT_MS 100
 #define FENCE_WAIT_TIMEOUT_MS 4000
+#define FENCE_QUEUE_SIZE (MAX_BUFS * 4)
+
+struct fence_job {
+    int render_fence;
+    int notify_fd;
+    uint64_t generation;
+};
 
 struct display_ctx {
     int      ctrl_fd;
@@ -33,13 +40,13 @@ struct display_ctx {
     pthread_mutex_t fence_lock;
     pthread_cond_t fence_idle;
     int      fence_wake_efd;
-    int      queued_render_fence;
-    int      queued_notify_fd;
+    struct fence_job fence_queue[FENCE_QUEUE_SIZE];
+    size_t   fence_queue_head;
+    size_t   fence_queue_tail;
+    size_t   fence_queue_count;
     uint64_t fence_generation;
-    uint64_t queued_generation;
     bool     fence_worker_started;
     bool     fence_worker_stop;
-    bool     fence_worker_busy;
     bool     fence_worker_active;
     volatile uint32_t *shm_ptr;
     uint32_t screen_w, screen_h;
@@ -98,35 +105,35 @@ static void *fence_worker_main(void *userdata)
     (void)pthread_setname_np(pthread_self(), "anland-fence");
 
     for (;;) {
-        uint64_t wake_count;
-        while (eventfd_read(ctx->fence_wake_efd, &wake_count) < 0) {
-            if (errno == EINTR)
-                continue;
-            return NULL;
-        }
-
         pthread_mutex_lock(&ctx->fence_lock);
         if (ctx->fence_worker_stop) {
             pthread_mutex_unlock(&ctx->fence_lock);
             return NULL;
         }
 
-        int render_fence = ctx->queued_render_fence;
-        int notify_fd = ctx->queued_notify_fd;
-        const uint64_t generation = ctx->queued_generation;
-        ctx->queued_render_fence = -1;
-        ctx->queued_notify_fd = -1;
-        ctx->fence_worker_active = render_fence >= 0 && notify_fd >= 0;
-        pthread_mutex_unlock(&ctx->fence_lock);
-
-        if (render_fence < 0 || notify_fd < 0)
+        if (ctx->fence_queue_count == 0) {
+            pthread_mutex_unlock(&ctx->fence_lock);
+            uint64_t wake_count;
+            while (eventfd_read(ctx->fence_wake_efd, &wake_count) < 0) {
+                if (errno == EINTR)
+                    continue;
+                return NULL;
+            }
             continue;
+        }
+
+        const struct fence_job job = ctx->fence_queue[ctx->fence_queue_head];
+        ctx->fence_queue_head = (ctx->fence_queue_head + 1) % FENCE_QUEUE_SIZE;
+        ctx->fence_queue_count--;
+        ctx->fence_worker_active = true;
+        pthread_cond_broadcast(&ctx->fence_idle);
+        pthread_mutex_unlock(&ctx->fence_lock);
 
         bool completed = false;
         bool cancelled = false;
         for (;;) {
             struct pollfd pfds[2] = {
-                { .fd = render_fence, .events = POLLIN | POLLERR | POLLHUP },
+                { .fd = job.render_fence, .events = POLLIN | POLLERR | POLLHUP },
                 { .fd = ctx->fence_wake_efd, .events = POLLIN },
             };
             const int ret = poll(pfds, 2, FENCE_WAIT_TIMEOUT_MS);
@@ -142,17 +149,17 @@ static void *fence_worker_main(void *userdata)
             }
 
             if (pfds[1].revents & POLLIN) {
+                uint64_t wake_count;
                 while (eventfd_read(ctx->fence_wake_efd, &wake_count) < 0
                        && errno == EINTR) {
                 }
                 pthread_mutex_lock(&ctx->fence_lock);
                 cancelled = ctx->fence_worker_stop
-                    || generation != ctx->fence_generation;
+                    || job.generation != ctx->fence_generation;
                 pthread_mutex_unlock(&ctx->fence_lock);
                 if (cancelled)
                     break;
-                // A queued wake cannot happen in normal lockstep operation, but
-                // re-check the fence if a harmless/spurious wake was observed.
+                // Harmless stale wake; re-check the current sync_file.
                 continue;
             }
 
@@ -165,19 +172,18 @@ static void *fence_worker_main(void *userdata)
         }
 
         pthread_mutex_lock(&ctx->fence_lock);
-        if (generation != ctx->fence_generation || ctx->fence_worker_stop)
+        if (job.generation != ctx->fence_generation || ctx->fence_worker_stop)
             cancelled = true;
         pthread_mutex_unlock(&ctx->fence_lock);
 
         if (completed && !cancelled)
-            (void)send_refresh_ready(notify_fd);
+            (void)send_refresh_ready(job.notify_fd);
 
-        close(render_fence);
-        close(notify_fd);
+        close(job.render_fence);
+        close(job.notify_fd);
 
         pthread_mutex_lock(&ctx->fence_lock);
         ctx->fence_worker_active = false;
-        ctx->fence_worker_busy = false;
         pthread_cond_broadcast(&ctx->fence_idle);
         pthread_mutex_unlock(&ctx->fence_lock);
     }
@@ -217,16 +223,15 @@ static void cancel_fence_job(display_ctx *ctx)
 
     pthread_mutex_lock(&ctx->fence_lock);
     ctx->fence_generation++;
-    if (ctx->queued_render_fence >= 0) {
-        close(ctx->queued_render_fence);
-        ctx->queued_render_fence = -1;
+    while (ctx->fence_queue_count > 0) {
+        struct fence_job *job = &ctx->fence_queue[ctx->fence_queue_head];
+        close(job->render_fence);
+        close(job->notify_fd);
+        ctx->fence_queue_head = (ctx->fence_queue_head + 1) % FENCE_QUEUE_SIZE;
+        ctx->fence_queue_count--;
     }
-    if (ctx->queued_notify_fd >= 0) {
-        close(ctx->queued_notify_fd);
-        ctx->queued_notify_fd = -1;
-    }
-    if (!ctx->fence_worker_active)
-        ctx->fence_worker_busy = false;
+    ctx->fence_queue_tail = ctx->fence_queue_head;
+    pthread_cond_broadcast(&ctx->fence_idle);
     pthread_mutex_unlock(&ctx->fence_lock);
     (void)eventfd_write(ctx->fence_wake_efd, 1);
 
@@ -246,14 +251,18 @@ static void stop_fence_worker(display_ctx *ctx)
     pthread_mutex_lock(&ctx->fence_lock);
     ctx->fence_worker_stop = true;
     ctx->fence_generation++;
+    while (ctx->fence_queue_count > 0) {
+        struct fence_job *job = &ctx->fence_queue[ctx->fence_queue_head];
+        close(job->render_fence);
+        close(job->notify_fd);
+        ctx->fence_queue_head = (ctx->fence_queue_head + 1) % FENCE_QUEUE_SIZE;
+        ctx->fence_queue_count--;
+    }
+    pthread_cond_broadcast(&ctx->fence_idle);
     pthread_mutex_unlock(&ctx->fence_lock);
     (void)eventfd_write(ctx->fence_wake_efd, 1);
     pthread_join(ctx->fence_worker, NULL);
 
-    if (ctx->queued_render_fence >= 0)
-        close(ctx->queued_render_fence);
-    if (ctx->queued_notify_fd >= 0)
-        close(ctx->queued_notify_fd);
     pthread_cond_destroy(&ctx->fence_idle);
     pthread_mutex_destroy(&ctx->fence_lock);
     close(ctx->fence_wake_efd);
@@ -408,8 +417,6 @@ int connect_to_deamon(display_ctx **out, const char *socket_path)
     ctx->audio_fd = -1;
     ctx->pending_render_fence = -1;
     ctx->fence_wake_efd = -1;
-    ctx->queued_render_fence = -1;
-    ctx->queued_notify_fd = -1;
     ctx->shm_ptr = NULL;
     ctx->fallback = true; // stay in fallback until try_exit_fallback() succeeds
     for (int i = 0; i < MAX_BUFS; i++)
@@ -508,21 +515,32 @@ int trigger_refresh(display_ctx *ctx)
         }
 
         pthread_mutex_lock(&ctx->fence_lock);
-        if (ctx->fence_worker_busy || ctx->queued_render_fence >= 0) {
+        const uint64_t generation = ctx->fence_generation;
+        while (ctx->fence_queue_count == FENCE_QUEUE_SIZE
+               && generation == ctx->fence_generation
+               && !ctx->fence_worker_stop) {
+            pthread_cond_wait(&ctx->fence_idle, &ctx->fence_lock);
+        }
+        if (generation != ctx->fence_generation || ctx->fence_worker_stop) {
             pthread_mutex_unlock(&ctx->fence_lock);
             close(notify_fd);
             close(ctx->pending_render_fence);
             ctx->pending_render_fence = -1;
-            fprintf(stderr, "anland: fence worker received overlapping frames\n");
             return -1;
         }
-        ctx->queued_render_fence = ctx->pending_render_fence;
+
+        const bool wake_worker = ctx->fence_queue_count == 0
+            && !ctx->fence_worker_active;
+        struct fence_job *job = &ctx->fence_queue[ctx->fence_queue_tail];
+        job->render_fence = ctx->pending_render_fence;
+        job->notify_fd = notify_fd;
+        job->generation = generation;
+        ctx->fence_queue_tail = (ctx->fence_queue_tail + 1) % FENCE_QUEUE_SIZE;
+        ctx->fence_queue_count++;
         ctx->pending_render_fence = -1;
-        ctx->queued_notify_fd = notify_fd;
-        ctx->queued_generation = ctx->fence_generation;
-        ctx->fence_worker_busy = true;
         pthread_mutex_unlock(&ctx->fence_lock);
-        (void)eventfd_write(ctx->fence_wake_efd, 1);
+        if (wake_worker)
+            (void)eventfd_write(ctx->fence_wake_efd, 1);
         return 0;
     }
 
