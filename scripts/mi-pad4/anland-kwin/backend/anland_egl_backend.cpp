@@ -441,6 +441,11 @@ bool AnlandEglBackend::init()
         return false;
     }
 
+    // Publish linux-dmabuf after the KGSL EGL display and context are ready.
+    // Without this, KWin exposes only wl_shm and every Wayland client silently
+    // falls back to llvmpipe even though the compositor itself runs on FD512.
+    initWayland();
+
     for (auto *output : m_backend->outputs()) {
         addOutput(output);
     }
