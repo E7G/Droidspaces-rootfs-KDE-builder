@@ -282,12 +282,11 @@ bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region
     m_sceneInvalid = false;
     m_hasPendingDamage = false;
 
-    // Clover's 4.4 KGSL/BufferQueue path is not reliable with an imported
-    // native fence: it can consume a slot before the fence is signalled,
-    // producing full-screen tearing/flicker. Use the synchronous completion
-    // path by default; native fences remain an explicit opt-in for newer
-    // consumers with ANLAND_NATIVE_FENCE=1.
-    const bool nativeFence = qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1;
+    // The producer-side compatibility worker waits on this native fence, then
+    // notifies Clover with fence=-1. KWin stays asynchronous without exposing
+    // Android 4.4 BufferQueue to the unreliable imported-fence path.
+    const bool nativeFence = !qEnvironmentVariableIsSet("ANLAND_NATIVE_FENCE")
+        || qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1;
     if (nativeFence) {
         EGLNativeFence fence{
             m_backend->openglContext()->displayObject()

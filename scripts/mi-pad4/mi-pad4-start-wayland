@@ -20,10 +20,10 @@ export QT_QPA_PLATFORM=wayland
 export MOZ_ENABLE_WAYLAND=1
 export ANLAND=1
 export ANLAND_SOCKET=/run/display.sock
-# Clover's legacy KGSL/BufferQueue path must complete each buffer before the
-# producer reuses it. Native-fence import is opt-in only; enabling it here
-# causes the entire scene to tear/flicker on the 4.4 userspace.
-export ANLAND_NATIVE_FENCE=0
+# KWin exports an EGL native fence, but the patched producer waits on a sleeping
+# worker and sends Android a completed buffer with fence=-1. This avoids both
+# glFinish stalls and Clover's broken BufferQueue fence import.
+export ANLAND_NATIVE_FENCE=1
 # Mi Pad 4's KGSL node is not a DRM/GBM render node. The patched backend must
 # select its surfaceless EGL path instead of forcing RenderDevice::open().
 unset ANLAND_DRM_DEVICE
