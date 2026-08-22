@@ -101,6 +101,7 @@ void AnlandEglLayer::ensureSceneFbo()
         qCWarning(KWIN_ANLAND) << "failed to allocate scene texture";
         return;
     }
+    m_sceneTexture->setContentTransform(m_output->transform().combine(OutputTransform::FlipY));
     m_sceneTexture->setFilter(GL_LINEAR);
     m_sceneTexture->setWrapMode(GL_CLAMP_TO_EDGE);
 
@@ -131,9 +132,10 @@ void AnlandEglLayer::blitSceneToDmabuf()
     // it for both READ and DRAW and accidentally blit the Android slot onto
     // itself.
     GLFramebuffer::pushFramebuffer(m_sceneFbo.get());
-    // GL framebuffer and Android BufferQueue use opposite Y origins. Texture
-    // metadata does not affect glBlitFramebuffer(), so flip the actual copy.
-    m_fbos[m_currentIndex]->blitFromFramebuffer(Rect(), Rect(), GL_NEAREST, false, true);
+    // The scene RenderTarget carries FlipY, matching KWin's normal offscreen
+    // rendering path. Its raw pixels are already in BufferQueue orientation;
+    // preserve their positions during the full-slot copy.
+    m_fbos[m_currentIndex]->blitFromFramebuffer(Rect(), Rect(), GL_NEAREST);
     GLFramebuffer::popFramebuffer();
 }
 
@@ -142,9 +144,7 @@ bool AnlandEglLayer::importBuffers(int count)
     m_backend->openglContext()->makeCurrent();
     releaseBuffers();
 
-    // The explicit scene-to-BufferQueue blit handles the GL/Android Y-origin
-    // mismatch. Keep texture metadata limited to the real KWin output transform.
-    const OutputTransform contentTransform = m_output->transform();
+    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
 
     for (int i = 0; i < count; i++) {
         const int fd = get_dmabuf_fd_at(m_display, i);
@@ -241,9 +241,12 @@ bool AnlandEglLayer::needsRepaint() const
 
 void AnlandEglLayer::onOutputTransformChanged()
 {
-    const OutputTransform contentTransform = m_output->transform();
+    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
     for (int i = 0; i < m_bufCount; i++) {
         m_textures[i]->setContentTransform(contentTransform);
+    }
+    if (m_sceneTexture) {
+        m_sceneTexture->setContentTransform(contentTransform);
     }
     m_sceneInvalid = true;
     m_hasPendingDamage = true;
