@@ -135,17 +135,32 @@ init_prefix
 target="$1"
 shift
 
+# File-manager launches arrive as Linux paths (or file:// URIs). Wine's
+# Hangover launcher is more reliable when the working directory is the
+# executable's directory and the command contains only its basename; this
+# also preserves Unity's sibling *_Data lookup.
+if [[ "$target" == file://* ]]; then
+    target="${target#file://}"
+    target="${target//%20/ }"
+    target="${target//%5B/[}"
+    target="${target//%5D/]}"
+fi
+target="$(realpath -e -- "$target" 2>/dev/null || printf '%s' "$target")"
+target_dir="$(dirname -- "$target")"
+target_name="$(basename -- "$target")"
+cd -- "$target_dir"
+
 if [[ "$mode" == desktop ]]; then
     if [[ "${target,,}" == *.msi ]]; then
-        command=(wine explorer.exe /desktop=shell,,x11 msiexec.exe /i "$target" "$@")
+        command=(wine explorer.exe /desktop=shell,,x11 msiexec.exe /i "$target_name" "$@")
     else
-        command=(wine explorer.exe /desktop=shell,,x11 "$target" "$@")
+        command=(wine explorer.exe /desktop=shell,,x11 "$target_name" "$@")
     fi
 else
     if [[ "${target,,}" == *.msi ]]; then
-        command=(wine msiexec /i "$target" "$@")
+        command=(wine msiexec /i "$target_name" "$@")
     else
-        command=(wine "$target" "$@")
+        command=(wine "$target_name" "$@")
     fi
 fi
 
