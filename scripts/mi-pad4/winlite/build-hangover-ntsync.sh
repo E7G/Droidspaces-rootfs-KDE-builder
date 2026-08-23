@@ -35,16 +35,23 @@ fi
 
 # Official 11.9 gates NTSync on HAVE_LINUX_NTSYNC_H. Android kernels may expose
 # /dev/ntsync while the Ubuntu cross-build headers do not contain that header.
-# Carry the small UAPI locally and compile the in-process synchronization path
-# unconditionally. This is intentionally a narrow patch, not a different Wine.
+# Carry the small UAPI locally, then inject it into the packaging image as the
+# system <linux/ntsync.h> before configure runs. This keeps Wine's upstream
+# feature detection and source guards intact instead of teaching makedep about
+# a private Wine header.
 git -C "$SOURCE_DIR/wine" apply "$PATCH_FILE"
-grep -Fq '#include "wine/ntsync.h"' "$SOURCE_DIR/wine/server/inproc_sync.c"
+grep -Fq '<linux/ntsync.h>' "$SOURCE_DIR/wine/server/inproc_sync.c"
+grep -Fq '<linux/ntsync.h>' "$SOURCE_DIR/wine/dlls/ntdll/unix/sync.c"
 grep -Fq 'NTSYNC_IOC_CREATE_EVENT' "$SOURCE_DIR/wine/include/wine/ntsync.h"
 
 # Use Hangover's own Noble cross-package recipe so ARM64EC behavior and paths
 # stay compatible with the upstream 11.9 FEX / wowbox64 payloads.
 cp -a "$SOURCE_DIR/.packaging/ubuntu2404/wine/." "$SOURCE_DIR/wine/"
 sed -i "s/HOVERSION/${HANGOVER_VERSION}/g" "$SOURCE_DIR/wine/Dockerfile"
+sed -i '/^ENV PATH=/a COPY include/wine/ntsync.h /usr/include/linux/ntsync.h' \
+    "$SOURCE_DIR/wine/Dockerfile"
+grep -Fq 'COPY include/wine/ntsync.h /usr/include/linux/ntsync.h' \
+    "$SOURCE_DIR/wine/Dockerfile"
 
 changelog="$SOURCE_DIR/wine/debian/changelog"
 cp "$changelog" "$changelog.old"
