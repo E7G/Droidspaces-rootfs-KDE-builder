@@ -80,6 +80,7 @@ RUN set -eux; \
         pipewire-pulse \
         procps-ng \
         sed \
+        shared-mime-info \
         ttf-liberation \
         tzdata \
         unzip \
@@ -116,6 +117,9 @@ RUN set -eux; \
     install -Dm755 /tmp/winlite/winlite-supervisor /usr/local/bin/winlite-supervisor; \
     install -Dm755 /tmp/winlite/winlite-session /usr/local/bin/winlite-session; \
     install -Dm755 /tmp/winlite/winrun /usr/local/bin/winrun; \
+    install -Dm755 /tmp/winlite/winrun-open /usr/local/bin/winrun-open; \
+    install -Dm644 /tmp/winlite/winrun.desktop /usr/share/applications/winrun.desktop; \
+    install -Dm644 /tmp/winlite/mimeapps.list /etc/xdg/mimeapps.list; \
     install -Dm755 /usr/local/libexec/mi-pad4-kwin-wayland-wrapper \
         /usr/sbin/kwin_wayland_wrapper; \
     install -Dm644 /tmp/winlite/wine-default.reg /usr/share/winlite/wine-default.reg; \
