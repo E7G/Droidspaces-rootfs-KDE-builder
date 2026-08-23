@@ -55,6 +55,7 @@ RUN set -eux; \
         iputils \
         krb5 \
         kwin \
+        libcap \
         libepoxy \
         libglvnd \
         libpulse \
@@ -98,6 +99,7 @@ RUN set -eux; \
         /tmp/local-packages-winlite/mesa-[0-9]*.pkg.tar.*; \
     pacman --config /tmp/pacman-local.conf -U --noconfirm \
         /tmp/local-packages-winlite/kwin-[0-9]*.pkg.tar.*; \
+    setcap -r /usr/bin/kwin_wayland; \
     rm -f /tmp/pacman-local.conf; \
     install -Dm755 /tmp/winlite/droidspaces-init /sbin/droidspaces-init; \
     install -Dm755 /tmp/winlite/winlite-supervisor /usr/local/bin/winlite-supervisor; \
