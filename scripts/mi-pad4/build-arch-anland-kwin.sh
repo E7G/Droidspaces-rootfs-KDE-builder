@@ -60,7 +60,8 @@ download_with_fallback() {
     for url in "$@"; do
         echo "Downloading $(basename "$output") from $url"
         if curl -4 -fL \
-            --connect-timeout 20 \
+            --connect-timeout 30 \
+            --max-time 180 \
             --retry 4 \
             --retry-all-errors \
             --retry-delay 3 \
@@ -86,14 +87,19 @@ prefetch_xwayland_sources() {
         return 1
     }
 
-    # These are X.Org mirrors carrying identical release tarballs. Pre-fetching
-    # into makepkg's default SRCDEST lets makepkg keep its normal checksum and
-    # PGP validation while avoiding a single-point dependency on freedesktop.org.
+    # Prefer X.Org's canonical release directory, then fall back to independent
+    # mirrors known to carry individual/xserver releases. Some mirrors can lag
+    # behind a new security release, so never make one mirror a hard dependency.
+    # Pre-fetching into makepkg's default SRCDEST preserves Arch's normal
+    # checksum/PGP validation.
     mirrors=(
-        'https://mirror.csclub.uwaterloo.ca/x.org/individual/xserver/'
+        'https://xorg.freedesktop.org/releases/individual/xserver/'
+        'https://artfiles.org/x.org/pub/individual/xserver/'
         'https://ftp.gwdg.de/pub/x11/x.org/pub/individual/xserver/'
+        'https://mirror.csclub.uwaterloo.ca/x.org/individual/xserver/'
+        'https://ftp.yz.yamagata-u.ac.jp/pub/X11/x.org/individual/xserver/'
+        'https://mirrors.ircam.fr/pub/x.org/individual/xserver/'
         'https://www.mirrorservice.org/sites/ftp.x.org/pub/individual/xserver/'
-        'https://xorg.freedesktop.org/archive/individual/xserver/'
     )
 
     for suffix in '' '.sig'; do
