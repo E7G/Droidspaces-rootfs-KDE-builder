@@ -80,7 +80,7 @@ RUN set -eux; \
         pipewire-pulse \
         procps-ng \
         sed \
-        ttf-dejavu \
+        ttf-liberation \
         tzdata \
         unzip \
         util-linux \
@@ -119,6 +119,7 @@ RUN set -eux; \
     install -Dm755 /usr/local/libexec/mi-pad4-kwin-wayland-wrapper \
         /usr/sbin/kwin_wayland_wrapper; \
     install -Dm644 /tmp/winlite/wine-default.reg /usr/share/winlite/wine-default.reg; \
+    install -Dm644 /tmp/winlite/99-winlite-fonts.conf /etc/fonts/conf.d/99-winlite-fonts.conf; \
     install -Dm644 /tmp/winlite/kwinrc /usr/share/winlite/kwinrc; \
     install -Dm644 /tmp/winlite/kwinoutputconfig.json /usr/share/winlite/kwinoutputconfig.json; \
     install -Dm644 /tmp/winlite/container.config /usr/share/winlite/container.config; \
@@ -134,6 +135,9 @@ RUN set -eux; \
     printf '%s\n' 'LANG=zh_CN.UTF-8' 'LC_ALL=zh_CN.UTF-8' >/etc/locale.conf; \
     sed -i 's/^#\(zh_CN.UTF-8 UTF-8\)/\1/' /etc/locale.gen; \
     locale-gen; \
+    fc-cache -f; \
+    fc-match -f '%{family}\n' Arial | grep -qi 'Liberation Sans'; \
+    fc-match -f '%{family}\n' 'Microsoft YaHei' | grep -qi 'WenQuanYi Zen Hei'; \
     printf '%s\n' \
         '/usr/lib/aarch64-linux-gnu' \
         '/usr/lib/aarch64-linux-gnu/wine' \
@@ -149,9 +153,12 @@ RUN set -eux; \
         'linux-file-manager=none' \
         'pid1=droidspaces-tini' \
         'systemd=not-started' \
-        'windows=hangover-arm64ec-fex+wowbox64' \
+        'windows=hangover-11.9-winlite-ntsync+arm64ec-fex+wowbox64' \
+        'sync=ntsync-auto+esync-fallback' \
+        'proton-style=lean-runtime-tuning-without-steam-runtime' \
         'graphics=wine-shell-x11+direct-wayland-opengl-kgsl' \
         'audio=pipewire-anland' \
+        'fonts=liberation+wqy-zenhei' \
         >/usr/share/droidspaces/winlite-profile; \
     printf '%s\n' \
         'source=E7G/mesa-for-android-container' \
@@ -165,6 +172,9 @@ RUN set -eux; \
         >/usr/share/droidspaces/anland-kwin-package; \
     test -x /usr/bin/wine; \
     test -x /usr/bin/wineserver; \
+    grep -aFq '/dev/ntsync' /usr/bin/wineserver; \
+    grep -Fq 'ntsync=compiled-in-android-uapi' /usr/share/hangover-winlite-version; \
+    grep -Fq 'ntsync-fallback=esync' /usr/share/hangover-winlite-version; \
     find /usr/lib -type f -name explorer.exe -print -quit | grep -q .; \
     test -e /usr/lib/wine/aarch64-windows/libarm64ecfex.dll \
         -o -e /usr/lib/aarch64-linux-gnu/wine/aarch64-windows/libarm64ecfex.dll; \
