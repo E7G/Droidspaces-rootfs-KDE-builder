@@ -84,6 +84,14 @@ grep -Fq 'ENV ac_cv_header_linux_ntsync_h=yes' "$SOURCE_DIR/wine/Dockerfile"
 grep -Fq '/usr/aarch64-linux-gnu/include/linux/ntsync.h' "$SOURCE_DIR/wine/Dockerfile"
 grep -Fq 'aarch64-linux-gnu-gcc -x c -c' "$SOURCE_DIR/wine/Dockerfile"
 
+# Wine's Unix-side modules depend on ntdll.so/win32u.so from this same package.
+# Teach dh_shlibdeps where those private libraries live so package generation
+# does not emit a wall of misleading "cannot find library" warnings.
+sed -i \
+    's#dh_shlibdeps -l $(CURDIR)/debian/tmp/usr/lib/#dh_shlibdeps -l $(CURDIR)/debian/tmp/usr/lib/ -l $(CURDIR)/debian/tmp/usr/lib/wine/aarch64-unix/#' \
+    "$SOURCE_DIR/wine/debian/rules"
+grep -Fq 'debian/tmp/usr/lib/wine/aarch64-unix/' "$SOURCE_DIR/wine/debian/rules"
+
 changelog="$SOURCE_DIR/wine/debian/changelog"
 cp "$changelog" "$changelog.old"
 {
