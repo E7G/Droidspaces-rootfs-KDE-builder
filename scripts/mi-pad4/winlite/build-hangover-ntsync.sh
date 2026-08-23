@@ -39,11 +39,9 @@ if [[ "$actual_wine_commit" != "$HANGOVER_WINE_COMMIT" ]]; then
 fi
 
 # Official 11.9 gates NTSync on HAVE_LINUX_NTSYNC_H. Android kernels may expose
-# /dev/ntsync while the Ubuntu cross-build headers do not contain that header.
-# Carry the small UAPI locally, then inject it into the packaging image as the
-# system <linux/ntsync.h> before configure runs. This keeps Wine's upstream
-# feature detection and source guards intact instead of teaching makedep about
-# a private Wine header.
+# /dev/ntsync while Ubuntu Noble's ARM64 cross headers do not contain that UAPI.
+# Carry the small UAPI locally; it is injected into the actual aarch64-linux-gnu
+# sysroot below before Wine's cross configure runs.
 stage="apply Android NTSync UAPI"
 git -C "$SOURCE_DIR/wine" apply "$PATCH_FILE"
 grep -Fq '<linux/ntsync.h>' "$SOURCE_DIR/wine/server/inproc_sync.c"
@@ -55,10 +53,19 @@ grep -Fq 'NTSYNC_IOC_CREATE_EVENT' "$SOURCE_DIR/wine/include/wine/ntsync.h"
 stage="prepare Hangover Noble packaging"
 cp -a "$SOURCE_DIR/.packaging/ubuntu2404/wine/." "$SOURCE_DIR/wine/"
 sed -i "s/HOVERSION/${HANGOVER_VERSION}/g" "$SOURCE_DIR/wine/Dockerfile"
-sed -i '/^ENV PATH=/a COPY include/wine/ntsync.h /usr/include/linux/ntsync.h' \
+
+# dpkg-buildpackage -a arm64 configures Wine with CC=aarch64-linux-gnu-gcc.
+# Putting ntsync.h only in /usr/include is insufficient for that cross compiler:
+# its libc-dev-arm64-cross sysroot is /usr/aarch64-linux-gnu/include. Install the
+# UAPI there as well, prove that the target compiler can consume it, then seed
+# Autoconf's header result so the server/ntdll NTSync code cannot be compiled out.
+sed -i '/^ENV PATH=/a ENV ac_cv_header_linux_ntsync_h=yes\
+COPY include/wine/ntsync.h /tmp/winlite-ntsync.h\
+RUN install -Dm644 /tmp/winlite-ntsync.h /usr/aarch64-linux-gnu/include/linux/ntsync.h \\\n    && install -Dm644 /tmp/winlite-ntsync.h /usr/include/linux/ntsync.h \\\n    && printf '\''#include <linux/ntsync.h>\\n#ifndef NTSYNC_IOC_EVENT_READ\\n#error NTSync UAPI incomplete\\n#endif\\nint main(void){return 0;}\\n'\'' \\\n       | aarch64-linux-gnu-gcc -x c -c -o /tmp/winlite-ntsync-test.o - \\\n    && rm -f /tmp/winlite-ntsync-test.o /tmp/winlite-ntsync.h' \
     "$SOURCE_DIR/wine/Dockerfile"
-grep -Fq 'COPY include/wine/ntsync.h /usr/include/linux/ntsync.h' \
-    "$SOURCE_DIR/wine/Dockerfile"
+
+grep -Fq 'ac_cv_header_linux_ntsync_h=yes' "$SOURCE_DIR/wine/Dockerfile"
+grep -Fq '/usr/aarch64-linux-gnu/include/linux/ntsync.h' "$SOURCE_DIR/wine/Dockerfile"
 
 changelog="$SOURCE_DIR/wine/debian/changelog"
 cp "$changelog" "$changelog.old"
@@ -141,8 +148,9 @@ printf '%s\n' \
     'x86=wowbox64' \
     >"$ROOTFS/usr/share/hangover-winlite-version"
 
-# Do not trust package names alone: the custom wineserver must literally carry
-# the /dev/ntsync path, proving inproc_sync.c was compiled into the binary.
+# This is a functional check, not a version pin. The literal lives only in the
+# NTSync implementation guarded by HAVE_LINUX_NTSYNC_H/NTSYNC_IOC_EVENT_READ,
+# so its presence proves the target server actually contains the code path.
 stage="validate extracted Hangover runtime"
 ls -l "$ROOTFS/usr/bin/wine" "$ROOTFS/usr/bin/wineserver"
 test -x "$ROOTFS/usr/bin/wine"
