@@ -23,7 +23,7 @@
                 "mode": { "flags": 1, "height": 1200, "refreshRate": 60000, "width": 1920 },
                 "overscan": 0,
                 "rgbRange": "Automatic",
-                "scale": 1,
+                "scale": 1.5,
                 "sdrBrightness": 200,
                 "sdrGamutWideness": 0,
                 "sharpness": 0,

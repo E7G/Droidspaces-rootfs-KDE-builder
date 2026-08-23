@@ -18,6 +18,10 @@ REGEDIT4
 "Managed"="N"
 "Decorated"="N"
 
+[HKEY_CURRENT_USER\Control Panel\Desktop]
+; Restore the previous 150% Wine UI scale used by the Mi Pad 4 profile.
+"LogPixels"=dword:00000090
+
 [HKEY_CURRENT_USER\Software\Wine\DllOverrides]
 "*d3d8"="native,builtin"
 "*d3d9"="native,builtin"

@@ -58,7 +58,13 @@ init_prefix() {
     # Apply WinLite defaults versioned rather than only on first wineboot so an
     # existing prefix receives later font/performance fixes without recreation.
     if [[ ! -e "$WINEPREFIX/.winlite-tuning-v3" ]]; then
-        regedit /S /usr/share/winlite/wine-default.reg || true
+        if command -v regedit >/dev/null 2>&1; then
+            regedit /S /usr/share/winlite/wine-default.reg || true
+        else
+            # Hangover images may not ship a Linux regedit wrapper, but Wine's
+            # builtin regedit.exe is always available after wineboot.
+            wine regedit /S /usr/share/winlite/wine-default.reg || true
+        fi
         touch "$WINEPREFIX/.winlite-tuning-v3"
     fi
 
@@ -168,6 +174,15 @@ else
     else
         command=(wine "$target_name" "$@")
     fi
+fi
+
+# Unity players otherwise choose a small window on the first Wine launch.
+# KWin presents the 1920x1200 panel at the restored 1.5 desktop scale, so
+# Wayland clients see a 1280x800 logical output.  Render at that logical mode;
+# KWin/Anland scales the completed buffer to the physical panel without the
+# 1920x1200 oversize-surface/clipping bug.
+if [[ "${target_name,,}" == *.exe ]] && compgen -G "*_Data" >/dev/null 2>&1; then
+    command+=( -force-d3d11 -screen-fullscreen 1 -screen-width 1280 -screen-height 800 )
 fi
 
 # Only translated application launches are biased to SDM660's performance
