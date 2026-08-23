@@ -129,6 +129,7 @@ RUN set -eux; \
     printf '%s\n' \
         '/usr/lib/aarch64-linux-gnu' \
         '/usr/lib/aarch64-linux-gnu/wine' \
+        '/usr/lib/wine/aarch64-unix' \
         >/etc/ld.so.conf.d/hangover.conf; \
     ldconfig; \
     update-desktop-database /usr/share/applications; \
