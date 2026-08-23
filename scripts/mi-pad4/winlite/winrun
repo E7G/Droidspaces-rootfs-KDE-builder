@@ -2,11 +2,6 @@
 
 set -euo pipefail
 
-if (($# == 0)); then
-    echo '用法: winrun <程序.exe|程序.msi> [参数...]' >&2
-    exit 2
-fi
-
 export HOME="${HOME:-/tmp/droidspaces-home}"
 export WINEPREFIX="${WINEPREFIX:-$HOME/.wine-winlite}"
 export WINEARCH=win64
@@ -23,24 +18,83 @@ export FD_KGSL_ENABLE_DMABUF=1
 export mesa_glthread=true
 export MALLOC_ARENA_MAX=2
 
-mkdir -p "$WINEPREFIX"
+init_prefix() {
+    mkdir -p "$WINEPREFIX" "$HOME/Windows"
+    if [[ ! -f "$WINEPREFIX/system.reg" ]]; then
+        wineboot -u
+        regedit /S /usr/share/winlite/wine-default.reg || true
+    fi
 
-if [[ ! -f "$WINEPREFIX/system.reg" ]]; then
-    wineboot -u
-    regedit /S /usr/share/winlite/wine-default.reg || true
-fi
+    # Wine's shell desktop is populated from the prefix Desktop folder. Expose
+    # the persistent Droidspaces Windows directory there without a resident
+    # Linux file manager or desktop shell.
+    if [[ -d "$WINEPREFIX/drive_c/users" ]]; then
+        while IFS= read -r desktop; do
+            ln -snf "$HOME/Windows" "$desktop/Windows" 2>/dev/null || true
+        done < <(find "$WINEPREFIX/drive_c/users" -mindepth 2 -maxdepth 2 -type d -name Desktop -print 2>/dev/null)
+    fi
+}
+
+usage() {
+    cat >&2 <<'EOF'
+用法:
+  winrun <程序.exe|程序.msi> [参数...]       # 最快：Wine Wayland 直出
+  winrun --desktop <程序.exe|程序.msi> [...] # 在 Wine 桌面/任务栏内运行
+  winrun --shell                             # 打开/恢复极简 Wine 桌面
+  winrun --winecfg                           # Wine 设置
+EOF
+}
+
+mode=direct
+case "${1:-}" in
+    --shell)
+        init_prefix
+        # Wine 11.x 的 shell desktop 在 X11 驱动下最完整：自带开始菜单、
+        # 任务栏和托盘。它替代 LXQt Panel + PCManFM-Qt，两套 Qt 常驻进程
+        # 都不再需要。空尺寸让 Wine 跟随 Xwayland 当前输出尺寸。
+        exec wine explorer.exe /desktop=shell,,x11
+        ;;
+    --winecfg)
+        init_prefix
+        shift
+        exec wine winecfg "$@"
+        ;;
+    --desktop)
+        mode=desktop
+        shift
+        ;;
+    --direct)
+        shift
+        ;;
+    -h|--help|"")
+        usage
+        exit 0
+        ;;
+esac
+
+(($# > 0)) || { usage; exit 2; }
+init_prefix
 
 target="$1"
 shift
 
-if [[ "${target,,}" == *.msi ]]; then
-    command=(wine msiexec /i "$target" "$@")
+if [[ "$mode" == desktop ]]; then
+    if [[ "${target,,}" == *.msi ]]; then
+        command=(wine explorer.exe /desktop=shell,,x11 msiexec.exe /i "$target" "$@")
+    else
+        command=(wine explorer.exe /desktop=shell,,x11 "$target" "$@")
+    fi
 else
-    command=(wine "$target" "$@")
+    if [[ "${target,,}" == *.msi ]]; then
+        command=(wine msiexec /i "$target" "$@")
+    else
+        command=(wine "$target" "$@")
+    fi
 fi
 
-# Prefer SDM660's performance cluster only while translated code runs. Do not
-# pin frequency, force cores online or change governor, so idle power stays low.
+# Only translated application launches are biased to SDM660's performance
+# cluster. The always-visible Wine shell is deliberately left unpinned so the
+# kernel can park big cores while idle.
 if command -v taskset >/dev/null 2>&1; then
     exec nice -n -4 taskset -c 4-7 "${command[@]}"
 fi
