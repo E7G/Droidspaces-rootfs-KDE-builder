@@ -60,7 +60,6 @@ RUN set -eux; \
         iproute2 \
         iputils \
         krb5 \
-        kwin \
         libcap \
         libepoxy \
         libglvnd \
@@ -103,8 +102,18 @@ RUN set -eux; \
         /tmp/pacman-local.conf; \
     pacman --config /tmp/pacman-local.conf -U --noconfirm \
         /tmp/local-packages-winlite/mesa-[0-9]*.pkg.tar.*; \
+    # Install the custom KWin directly so pacman resolves its dependencies from
+    # our lock-screen-free package metadata instead of first pulling stock KWin
+    # (which hard-depends on kscreenlocker).
     pacman --config /tmp/pacman-local.conf -U --noconfirm \
         /tmp/local-packages-winlite/kwin-[0-9]*.pkg.tar.*; \
+    # Defensive cleanup: WinLite has no logind/ConsoleKit session manager, so a
+    # KScreenLocker payload would create an unrecoverable lock screen.
+    if pacman -Q kscreenlocker >/dev/null 2>&1; then \
+        pacman -Rdd --noconfirm kscreenlocker; \
+    fi; \
+    ! pacman -Q kscreenlocker >/dev/null 2>&1; \
+    ! find /usr -type f \( -name 'kscreenlocker_greet' -o -name 'kcheckpass' \) -print -quit | grep -q .; \
     setcap -r /usr/bin/kwin_wayland; \
     rm -f /tmp/pacman-local.conf; \
     install -Dm755 /tmp/winlite/droidspaces-init /sbin/droidspaces-init; \

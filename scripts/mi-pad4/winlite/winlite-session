@@ -65,7 +65,20 @@ cp -f /usr/share/winlite/pcmanfm-qt.conf "$XDG_CONFIG_HOME/pcmanfm-qt/lxqt/setti
 }
 cp -f /usr/share/winlite/mimeapps.list "$XDG_CONFIG_HOME/mimeapps.list"
 
-for process in kwin_wayland Xwayland lxqt-panel pcmanfm-qt pipewire pipewire-pulse wireplumber; do
+# WinLite intentionally has no systemd-logind or ConsoleKit. KScreenLocker
+# cannot safely unlock in this environment, so disable every automatic/manual
+# lock path as a runtime safeguard even if the package is accidentally present.
+cat >"$XDG_CONFIG_HOME/kscreenlockerrc" <<'EOF_KSCREENLOCKER'
+[Daemon]
+Autolock=false
+Lock=false
+LockOnResume=false
+LockOnStart=false
+RequirePassword=false
+Timeout=0
+EOF_KSCREENLOCKER
+
+for process in kwin_wayland Xwayland kscreenlocker_greet lxqt-panel pcmanfm-qt pipewire pipewire-pulse wireplumber; do
     pkill -KILL -x "$process" 2>/dev/null || true
 done
 rm -f "$XDG_RUNTIME_DIR"/wayland-* "$XDG_RUNTIME_DIR"/pipewire-* \
