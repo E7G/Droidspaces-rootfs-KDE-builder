@@ -43,15 +43,12 @@ RUN set -eux; \
     pacman -S --noconfirm --needed \
         alsa-lib \
         bash \
-        breeze-icons \
         ca-certificates \
         coreutils \
         dbus \
-        desktop-file-utils \
         file \
         findutils \
         fontconfig \
-        foot \
         freetype2 \
         gawk \
         glibc \
@@ -77,17 +74,12 @@ RUN set -eux; \
         libxrender \
         libxshmfence \
         libxxf86vm \
-        lxqt-panel \
         ncurses \
-        noto-fonts-emoji \
         pam \
-        pcmanfm-qt \
         pipewire \
         pipewire-pulse \
         procps-ng \
-        qt6-wayland \
         sed \
-        shared-mime-info \
         ttf-dejavu \
         tzdata \
         unzip \
@@ -114,6 +106,10 @@ RUN set -eux; \
     fi; \
     ! pacman -Q kscreenlocker >/dev/null 2>&1; \
     ! find /usr -type f \( -name 'kscreenlocker_greet' -o -name 'kcheckpass' \) -print -quit | grep -q .; \
+    # The user interface is Wine explorer itself. Do not ship a second Linux
+    # desktop/panel/file-manager stack in the WinLite image.
+    ! pacman -Q lxqt-panel >/dev/null 2>&1; \
+    ! pacman -Q pcmanfm-qt >/dev/null 2>&1; \
     setcap -r /usr/bin/kwin_wayland; \
     rm -f /tmp/pacman-local.conf; \
     install -Dm755 /tmp/winlite/droidspaces-init /sbin/droidspaces-init; \
@@ -125,11 +121,6 @@ RUN set -eux; \
     install -Dm644 /tmp/winlite/wine-default.reg /usr/share/winlite/wine-default.reg; \
     install -Dm644 /tmp/winlite/kwinrc /usr/share/winlite/kwinrc; \
     install -Dm644 /tmp/winlite/kwinoutputconfig.json /usr/share/winlite/kwinoutputconfig.json; \
-    install -Dm644 /tmp/winlite/panel.conf /usr/share/winlite/panel.conf; \
-    install -Dm644 /tmp/winlite/pcmanfm-qt.conf /usr/share/winlite/pcmanfm-qt.conf; \
-    install -Dm644 /tmp/winlite/mimeapps.list /usr/share/winlite/mimeapps.list; \
-    install -Dm644 /tmp/winlite/winrun.desktop /usr/share/applications/winrun.desktop; \
-    install -Dm644 /tmp/winlite/winecfg.desktop /usr/share/applications/winecfg.desktop; \
     install -Dm644 /tmp/winlite/container.config /usr/share/winlite/container.config; \
     install -Dm644 /tmp/winlite/README.txt /root/WINLITE-README.txt; \
     ln -sf /usr/local/bin/winrun /usr/local/bin/wine-run; \
@@ -150,16 +141,16 @@ RUN set -eux; \
         >/etc/ld.so.conf.d/hangover.conf; \
     ldconfig; \
     export LD_LIBRARY_PATH="/usr/lib/wine/aarch64-unix${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; \
-    update-desktop-database /usr/share/applications; \
-    update-mime-database /usr/share/mime; \
     install -d /usr/share/droidspaces; \
     printf '%s\n' \
         'profile=winlite' \
-        'desktop=kwin-anland+lxqt-panel' \
+        'desktop=kwin-anland+wine-explorer-shell' \
+        'linux-panel=none' \
+        'linux-file-manager=none' \
         'pid1=droidspaces-tini' \
         'systemd=not-started' \
         'windows=hangover-arm64ec-fex+wowbox64' \
-        'graphics=wined3d-wayland-opengl-kgsl' \
+        'graphics=wine-shell-x11+direct-wayland-opengl-kgsl' \
         'audio=pipewire-anland' \
         >/usr/share/droidspaces/winlite-profile; \
     printf '%s\n' \
@@ -174,6 +165,7 @@ RUN set -eux; \
         >/usr/share/droidspaces/anland-kwin-package; \
     test -x /usr/bin/wine; \
     test -x /usr/bin/wineserver; \
+    find /usr/lib -type f -name explorer.exe -print -quit | grep -q .; \
     test -e /usr/lib/wine/aarch64-windows/libarm64ecfex.dll \
         -o -e /usr/lib/aarch64-linux-gnu/wine/aarch64-windows/libarm64ecfex.dll; \
     test -e /usr/lib/wine/aarch64-windows/wowbox64.dll \
