@@ -10,6 +10,7 @@ export SHELL=/usr/bin/bash
 export LANG=zh_CN.UTF-8
 export LANGUAGE=zh_CN:zh
 export LC_ALL=zh_CN.UTF-8
+export LD_LIBRARY_PATH="/usr/lib/wine/aarch64-unix${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 export ANLAND=1
 export ANLAND_SOCKET=/run/display.sock
