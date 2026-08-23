@@ -324,11 +324,13 @@ static int pickup_fds(display_ctx *ctx)
     if (poll(&pfd, 1, HANDSHAKE_TIMEOUT_MS) <= 0)
         return -1;
 
-    int fds[5];
+    int fds[DISPLAY_DEPOSITED_FD_COUNT];
     int fd_count = 0;
     struct ctrl_msg resp;
-    int n = recv_fds(ctx->ctrl_fd, &resp, sizeof(resp), fds, 5, &fd_count);
-    if (n <= 0 || resp.type != CTRL_MSG_FDS_READY || fd_count < 5) {
+    int n = recv_fds(ctx->ctrl_fd, &resp, sizeof(resp), fds,
+                     DISPLAY_DEPOSITED_FD_COUNT, &fd_count);
+    if (n <= 0 || resp.type != CTRL_MSG_FDS_READY ||
+        fd_count < DISPLAY_DEPOSITED_FD_COUNT) {
         for (int i = 0; i < fd_count; i++)
             close(fds[i]);
         return -1;

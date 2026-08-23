@@ -155,6 +155,19 @@ struct OutputEvent{
 #define CONSUMER_VAR_CAPTURE_MOUSE 1
 #define CONSUMER_VAR_ANDROID_IME 2
 
+/* V3.1: the Anland daemon deposits five ancillary fds during the producer
+ * handshake. Keep this in the shared header so the producer and the newer
+ * Droidspaces-OSS daemon cannot silently drift in their fd numbering. */
+#define DISPLAY_DEPOSITED_FD_COUNT 5
+
+enum display_deposited_fd {
+    DISPLAY_FD_BUF_READY = 0,
+    DISPLAY_FD_FENCE     = 1,
+    DISPLAY_FD_DATA      = 2,
+    DISPLAY_FD_SHM       = 3,
+    DISPLAY_FD_AUDIO     = 4,
+};
+
 /*
  * Audio runs on its own dedicated bidirectional socketpair (hello fd slot 4),
  * deliberately kept off the data channel so a burst of PCM never head-of-line
@@ -176,8 +189,6 @@ struct OutputEvent{
  */
 #define AUDIO_MSG_FORMAT 1
 #define AUDIO_MSG_PCM    2
-#define AUDIO_MSG_SHM 3 //请求使用共享内存环形缓冲区传输音频数据,而不是使用socket传输,这样可以减少数据拷贝和延迟
-#define AUDIO_MSG_SHM_FD 4 //producer -> consumer: 共享内存fd, consumer mmap后可以直接读取音频数据
 
 /* PCM sample format codes for struct audio_format.format. */
 #define AUDIO_FORMAT_S16LE 0

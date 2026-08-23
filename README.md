@@ -49,6 +49,7 @@ Release 同时提供 `mi-pad4-container.config`、设备 profile 和 `SHA256SUMS
 | `Fedora-43-KDE` | `fedora:43` | `min`、`conc`、`mobile`、`none` | 支持 | 某些设备需要启用硬件访问。 |
 | `Fedora-44-KDE` | `fedora:44` | `min`、`conc`、`mobile`、`none` | 支持 | 某些设备需要启用硬件访问。 |
 | `Arch-KDE` | `ogarcia/archlinux` | `min`、`conc`、`none` | 不支持 | 内核建议 5.10 或更新；当前不建议使用本项目的 QEMU/binfmt 跨架构方案。 |
+| Arch-Mi-Pad4 | ogarcia/archlinux | min | supported | Dedicated Clover/SDM660 Arch + Anland workflow; use the bundled Mi Pad 4 config. |
 
 `all` 会构建全部 Dockerfile 模板。`all-wayland` 只构建支持 Wayland/Anland 的目标，也就是 `Debian-13-KDE`、`Ubuntu-26-KDE`、`Fedora-43-KDE` 和 `Fedora-44-KDE`，并强制启用 Wayland 支持。
 
@@ -240,6 +241,11 @@ startplasmamobile
 
 Wayland 支持依赖 [anland](https://github.com/superturtlee/anland) 以及本仓库内的 patched KWin/Xwayland 预编译包。建议使用 `Ubuntu-26-KDE`，也可以使用 `Debian-13-KDE`、`Fedora-43-KDE` 或 `Fedora-44-KDE`。Fedora 44 已稳定支持 Wayland/Anland；它使用 Fedora 43 的 Anland 构建脚本，但在 Fedora 44 容器内重新构建 RPM。
 
+
+### Arch / Mi Pad 4 with current Droidspaces-OSS
+
+The dedicated Build Arch Mi Pad 4 RootFS workflow is the supported Arch Wayland/Anland path for Clover. It packages the patched native KWin, the KGSL Mesa profile, and /usr/share/droidspaces/mi-pad4-container.config. With current Droidspaces-OSS, set enable_anland=1; the runtime starts a per-container Anland daemon and bind-mounts its generated socket to /run/display.sock. Do not carry over the old display_daemon.sock bind mount.
+
 ### 一键安装 anland-build 包
 
 `anland-build/install.sh` 会自动识别当前发行版，安装对应的 patched KWin/Xwayland 包，并防止系统更新将它们覆盖。如果系统仓库中的版本更新，脚本会允许将相关包降级到本仓库的 patched 版本；已经 hold 的相关包也会在更新后重新设置 hold。
@@ -268,16 +274,19 @@ sudo ./anland-build/install.sh
 1. 从 [anland Releases](https://github.com/superturtlee/anland/releases) 下载 `virtual-drm-daemon.zip`，刷入后重启设备。
 2. 从同一 Release 下载并安装 `app-debug.apk`。
 3. 导入 Droidspaces 容器时开启硬件访问。
-4. 开启 SELinux 宽容模式，或使用后文的精确 SELinux 策略修补。
-5. 在特权模式中开启 `nocaps` 和 `noseccomp`。
-6. 在高级选项中添加绑定挂载：
+4. Keep SELinux enforcing where possible; use the existing Clover compatibility fallback only when KGSL or Anland is blocked.
+5. Use privileged=noseccomp with current Droidspaces-OSS; do not add the obsolete full/nocaps or manual display-socket settings.
+6. Start the container and choose the normal user account.
 
 ```text
-/data/local/tmp/display_daemon.sock -> /run/display.sock
+Droidspaces-OSS current runtime (no manual bind required):
+
+host: /data/local/tmp/anland-<uuid>.sock
+container: /run/display.sock
+
 ```
 
-7. 启动容器，选择普通用户登录。
-8. 在容器内执行：
+7. Inside the container run:
 
 ```bash
 startplasma-wayland

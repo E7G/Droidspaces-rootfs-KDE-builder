@@ -49,7 +49,9 @@
 namespace KWin
 {
 
-static const QString s_defaultSocketPath = QStringLiteral("/tmp/display_daemon.sock");
+// Droidspaces-OSS creates a per-container Anland daemon socket on the host
+// and bind-mounts it into the container at this stable path.
+static const QString s_defaultSocketPath = QStringLiteral("/run/display.sock");
 static const int s_reconnectIntervalMs = 200;
 
 using EglGetPlatformDisplayExt = EGLDisplay (*)(EGLenum, void *, const EGLint *);

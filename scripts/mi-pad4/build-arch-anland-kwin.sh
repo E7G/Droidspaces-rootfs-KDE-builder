@@ -173,5 +173,10 @@ if [[ -n "$PACKAGE_OUTPUT_DIR" ]]; then
     cp -a "$BUILD_ROOT/packages"/*.pkg.tar.* "$PACKAGE_OUTPUT_DIR/"
 fi
 install -d -m 0755 /usr/share/droidspaces
-printf '%s\n' 'patched-kwin=arch-native-6.7.3-anland' > /usr/share/droidspaces/anland-kwin-package
+printf '%s\n' \
+  'patched-kwin=arch-native-6.7.3-anland' \
+  'anland-protocol=b80bf63b75049bc92d7deb964c67336ef4651467' \
+  'droidspaces-oss=1bc8208e85f4e31d9b11d0cb009c6e1db2a88408' \
+  'socket=/run/display.sock' \
+  > /usr/share/droidspaces/anland-kwin-package
 printf '%s\n' 'patched-plasma-workspace=6.7.4-anland-panel-remap' > /usr/share/droidspaces/plasma-workspace-panel-remap

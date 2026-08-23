@@ -726,6 +726,7 @@ jobs:
             etc/profile.d/90-mi-pad4-cachyos-environment.sh \
             usr/lib/firefox/defaults/pref/mi-pad4-anland.js \
             usr/share/droidspaces/cachyos-mi-pad4 \
+            usr/share/droidspaces/mi-pad4-container.config \
             usr/bin/startplasma-wayland \
             usr/bin/kwin_wayland
           do
@@ -752,6 +753,21 @@ jobs:
           grep -Fxq \
             'usr/share/droidspaces/mesa-kgsl-dmabuf-import' \
             rootfs-files.txt
+
+          anland_config="$(tar_cat usr/share/droidspaces/mi-pad4-container.config)"
+          grep -Fxq 'enable_anland=1' <<<"$anland_config"
+          grep -Fxq 'enable_termux_x11=0' <<<"$anland_config"
+          grep -Fxq 'enable_pulseaudio=0' <<<"$anland_config"
+          grep -Fxq 'privileged=noseccomp' <<<"$anland_config"
+          if grep -Fq 'display_daemon.sock:/run/display.sock' <<<"$anland_config"; then
+            echo 'The Arch profile still contains the obsolete manual Anland socket bind' >&2
+            exit 1
+          fi
+
+          anland_marker="$(tar_cat usr/share/droidspaces/anland-kwin-package)"
+          grep -Fxq 'anland-protocol=b80bf63b75049bc92d7deb964c67336ef4651467' <<<"$anland_marker"
+          grep -Fxq 'droidspaces-oss=1bc8208e85f4e31d9b11d0cb009c6e1db2a88408' <<<"$anland_marker"
+          grep -Fxq 'socket=/run/display.sock' <<<"$anland_marker"
 
           #
           # Validate locally built package versions
