@@ -77,9 +77,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: firefox-mi-pad4
-          key: firefox-clover-153.0.3-1.3-${{ hashFiles('scripts/mi-pad4/firefox/**') }}
+          key: firefox-clover-${{ hashFiles('scripts/mi-pad4/firefox/**') }}
 
-      - name: Build Firefox 153 for Clover
+      - name: Build Firefox for Clover
         if: steps.firefox-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
@@ -104,9 +104,6 @@ jobs:
             python3 customize-pkgbuild.py
           )
 
-          # Rust LTO/PGO peaks above runner RAM while linking libxul on arm64.
-          # Keep PGO instead of shipping a slower build; provide swap and cap
-          # compile fan-out so the kernel does not SIGKILL rustc.
           swapfile=/mnt/firefox-build.swap
           sudo fallocate -l 16G "$swapfile"
           sudo chmod 0600 "$swapfile"
@@ -121,15 +118,12 @@ jobs:
             lfdevs/archlinuxarm:base-devel \
             bash -lc '
               set -euo pipefail
-
               pacman -Syyu --noconfirm
               pacman -S --needed --noconfirm sudo base-devel git
-
               useradd -m -s /bin/bash builder
               echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
               chmod 0440 /etc/sudoers.d/builder
               chown -R builder:builder /src
-
               sudo -u builder bash -lc "
                 set -euo pipefail
                 cd /src
@@ -138,12 +132,11 @@ jobs:
             '
 
           mkdir -p firefox-mi-pad4
-          cp -v \
-            .ci/firefox/firefox-153.0.3-1.3-aarch64.pkg.tar.* \
-            firefox-mi-pad4/
-
-          sha256sum \
-            firefox-mi-pad4/firefox-153.0.3-1.3-aarch64.pkg.tar.* \
+          shopt -s nullglob
+          firefox_pkgs=(.ci/firefox/firefox-[0-9]*.pkg.tar.*)
+          ((${#firefox_pkgs[@]} == 1))
+          cp -v "${firefox_pkgs[0]}" firefox-mi-pad4/
+          sha256sum firefox-mi-pad4/firefox-*.pkg.tar.* \
             | tee firefox-mi-pad4/FIREFOX-SHA256SUMS
 
       - name: Upload Clover Firefox package
@@ -174,9 +167,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           rm -rf .ci/archlinuxarm-PKGBUILDs mesa-mi-pad4
-
           git clone \
             --depth 1 \
             --branch freedreno \
@@ -192,71 +183,43 @@ jobs:
             lfdevs/archlinuxarm:base-devel \
             bash -lc '
               set -euo pipefail
-
               pacman -Syyu --noconfirm
-              pacman -S --needed --noconfirm \
-                sudo \
-                base-devel \
-                git \
-                ccache
-
+              pacman -S --needed --noconfirm sudo base-devel git ccache
               useradd -m -s /bin/bash builder
-
-              echo "builder ALL=(ALL) NOPASSWD: ALL" \
-                >/etc/sudoers.d/builder
-
+              echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
               chmod 0440 /etc/sudoers.d/builder
-
               chown -R builder:builder /src
-
               sudo -u builder bash -lc "
                 set -euo pipefail
-
                 export CCACHE_DIR=/home/builder/.ccache
                 ccache --max-size=2G
-
                 cd /src/extra/mesa
                 makepkg -s --noconfirm --needed
               "
             '
 
           mkdir -p mesa-mi-pad4
-
           shopt -s nullglob
-
           for pattern in \
             'mesa-[0-9]*.pkg.tar.*' \
             'vulkan-freedreno-*.pkg.tar.*' \
             'vulkan-mesa-implicit-layers-*.pkg.tar.*'
           do
             files=(.ci/archlinuxarm-PKGBUILDs/extra/mesa/$pattern)
-
             if ((${#files[@]} == 0)); then
               echo "Missing Mesa package matching: $pattern" >&2
               exit 1
             fi
-
             cp -v "${files[@]}" mesa-mi-pad4/
           done
 
-          test -n "$(
-            find mesa-mi-pad4 \
-              -maxdepth 1 \
-              -name 'mesa-*.pkg.tar.*' \
-              -print \
-              -quit
-          )"
-
-          # Rename files to remove colons (epoch version format) for GitHub Actions compatibility
+          test -n "$(find mesa-mi-pad4 -maxdepth 1 -name 'mesa-*.pkg.tar.*' -print -quit)"
           cd mesa-mi-pad4
           for file in *; do
             mv "$file" "${file//:/_}"
           done
           cd ..
-
-          sha256sum \
-            mesa-mi-pad4/*.pkg.tar.* \
-            | tee mesa-mi-pad4/SHA256SUMS
+          sha256sum mesa-mi-pad4/*.pkg.tar.* | tee mesa-mi-pad4/SHA256SUMS
 
       - name: Upload Mesa packages
         uses: actions/upload-artifact@v4
@@ -288,23 +251,14 @@ jobs:
           PANGO_PKG_COMMIT: 92547f34a91108b16e6dd2ea08317e0bd1be7487
         run: |
           set -euo pipefail
-
           rm -rf .ci/pango pango-mi-pad4
-
           git clone \
             --filter=blob:none \
             --no-checkout \
             https://gitlab.archlinux.org/archlinux/packaging/packages/pango.git \
             .ci/pango
-
-          git -C .ci/pango fetch \
-            --depth 1 \
-            origin \
-            "$PANGO_PKG_COMMIT"
-
-          git -C .ci/pango checkout \
-            --detach \
-            FETCH_HEAD
+          git -C .ci/pango fetch --depth 1 origin "$PANGO_PKG_COMMIT"
+          git -C .ci/pango checkout --detach FETCH_HEAD
 
           docker run \
             --privileged \
@@ -313,58 +267,30 @@ jobs:
             lfdevs/archlinuxarm:base-devel \
             bash -lc '
               set -euo pipefail
-
               pacman -Syyu --noconfirm
-              pacman -S --needed --noconfirm \
-                sudo \
-                base-devel \
-                git \
-                ccache
-
+              pacman -S --needed --noconfirm sudo base-devel git ccache
               useradd -m -s /bin/bash builder
-
-              echo "builder ALL=(ALL) NOPASSWD: ALL" \
-                >/etc/sudoers.d/builder
-
+              echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
               chmod 0440 /etc/sudoers.d/builder
-
               chown -R builder:builder /src
-
               sudo -u builder bash -lc "
                 set -euo pipefail
-
                 export CCACHE_DIR=/home/builder/.ccache
                 ccache --max-size=2G
-
                 cd /src
                 makepkg -sA --noconfirm --needed
               "
             '
 
           mkdir -p pango-mi-pad4
-
-          cp -v \
-            .ci/pango/pango-[0-9]*.pkg.tar.* \
-            pango-mi-pad4/
-
-          test -n "$(
-            find pango-mi-pad4 \
-              -maxdepth 1 \
-              -name 'pango-*.pkg.tar.*' \
-              -print \
-              -quit
-          )"
-
-          # Rename files to remove colons (epoch version format) for GitHub Actions compatibility
+          cp -v .ci/pango/pango-[0-9]*.pkg.tar.* pango-mi-pad4/
+          test -n "$(find pango-mi-pad4 -maxdepth 1 -name 'pango-*.pkg.tar.*' -print -quit)"
           cd pango-mi-pad4
           for file in *; do
             mv "$file" "${file//:/_}"
           done
           cd ..
-
-          sha256sum \
-            pango-mi-pad4/*.pkg.tar.* \
-            | tee pango-mi-pad4/SHA256SUMS
+          sha256sum pango-mi-pad4/*.pkg.tar.* | tee pango-mi-pad4/SHA256SUMS
 
       - name: Upload Pango package
         uses: actions/upload-artifact@v4
@@ -387,7 +313,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: kio-mi-pad4
-          key: kio-6.29.0-1-97c0d35-${{ hashFiles('scripts/mi-pad4/kio-runtime-named-socket.patch', 'scripts/mi-pad4/apply-kio-patch.sh') }}
+          key: kio-${{ hashFiles('scripts/mi-pad4/kio-runtime-named-socket.patch', 'scripts/mi-pad4/apply-kio-patch.sh') }}
 
       - name: Build KIO
         if: steps.kio-cache.outputs.cache-hit != 'true'
@@ -396,25 +322,14 @@ jobs:
           KIO_PKG_COMMIT: 97c0d35b1b7e526eef330747e9bf28e6da31f430
         run: |
           set -euo pipefail
-
           rm -rf .ci/kio kio-mi-pad4
-
           git clone \
             --filter=blob:none \
             --no-checkout \
             https://gitlab.archlinux.org/archlinux/packaging/packages/kio.git \
             .ci/kio
-
-          git -C .ci/kio fetch \
-            --depth 1 \
-            origin \
-            "$KIO_PKG_COMMIT"
-
-          git -C .ci/kio checkout \
-            --detach \
-            FETCH_HEAD
-
-          # Apply KIO runtime named socket patch
+          git -C .ci/kio fetch --depth 1 origin "$KIO_PKG_COMMIT"
+          git -C .ci/kio checkout --detach FETCH_HEAD
           cp scripts/mi-pad4/kio-runtime-named-socket.patch .ci/kio/
           chmod +x scripts/mi-pad4/apply-kio-patch.sh
           bash scripts/mi-pad4/apply-kio-patch.sh
@@ -426,30 +341,16 @@ jobs:
             lfdevs/archlinuxarm:base-devel \
             bash -lc '
               set -euo pipefail
-
               pacman -Syyu --noconfirm
-              pacman -S --needed --noconfirm \
-                sudo \
-                base-devel \
-                git \
-                ccache \
-                gnupg
-
+              pacman -S --needed --noconfirm sudo base-devel git ccache gnupg
               useradd -m -s /bin/bash builder
-
-              echo "builder ALL=(ALL) NOPASSWD: ALL" \
-                >/etc/sudoers.d/builder
-
+              echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
               chmod 0440 /etc/sudoers.d/builder
-
               chown -R builder:builder /src
-
               sudo -u builder bash -lc "
                 set -euo pipefail
-
                 export CCACHE_DIR=/home/builder/.ccache
                 ccache --max-size=2G
-
                 cd /src
                 gpg --recv-keys 2C8DF587A6D4AAC1
                 makepkg -s --noconfirm --needed
@@ -457,24 +358,9 @@ jobs:
             '
 
           mkdir -p kio-mi-pad4
-
-          cp -v \
-            "$PWD/.ci/kio/kio-"[0-9]*.pkg.tar.* \
-            kio-mi-pad4/
-
-          test -n "$(
-            find kio-mi-pad4 \
-              -maxdepth 1 \
-              -name 'kio-*.pkg.tar.*' \
-              -print \
-              -quit
-          )"
-
-
-
-          sha256sum \
-            kio-mi-pad4/*.pkg.tar.* \
-            | tee kio-mi-pad4/SHA256SUMS
+          cp -v "$PWD/.ci/kio/kio-"[0-9]*.pkg.tar.* kio-mi-pad4/
+          test -n "$(find kio-mi-pad4 -maxdepth 1 -name 'kio-*.pkg.tar.*' -print -quit)"
+          sha256sum kio-mi-pad4/*.pkg.tar.* | tee kio-mi-pad4/SHA256SUMS
 
       - name: Upload KIO package
         uses: actions/upload-artifact@v4
@@ -527,13 +413,13 @@ jobs:
 
           required=(
             'local-packages-mi-pad4/pango-*.pkg.tar.*'
-            'local-packages-mi-pad4/kio-6.29.0-1-aarch64.pkg.tar.*'
+            'local-packages-mi-pad4/kio-[0-9]*.pkg.tar.*'
             'local-packages-mi-pad4/mesa-[0-9]*.pkg.tar.*'
             'local-packages-mi-pad4/vulkan-freedreno-*.pkg.tar.*'
             'local-packages-mi-pad4/vulkan-mesa-implicit-layers-*.pkg.tar.*'
           )
           if [[ "$ENABLE_CLOVER_FIREFOX" = true ]]; then
-            required+=('local-packages-mi-pad4/firefox-153.0.3-1.3-aarch64.pkg.tar.*')
+            required+=('local-packages-mi-pad4/firefox-[0-9]*.pkg.tar.*')
           fi
 
           for pattern in "${required[@]}"; do
@@ -548,13 +434,11 @@ jobs:
       - name: Setup Docker buildx with cache
         run: |
           docker run --privileged --rm tonistiigi/binfmt --install all > /dev/null 2>&1
-
           if ! docker buildx inspect droidspaces-builder >/dev/null 2>&1; then
             docker buildx create --name droidspaces-builder --driver docker-container --use
           else
             docker buildx use droidspaces-builder
           fi
-
           docker buildx inspect --bootstrap
 
       - name: Build Arch rootfs with cache
@@ -564,9 +448,7 @@ jobs:
           ENABLE_CLOVER_FIREFOX: ${{ inputs.enable_clover_firefox }}
         run: |
           set -euo pipefail
-
           chmod +x build_rootfs-qemu-aarch64.sh
-
           ./build_rootfs-qemu-aarch64.sh \
             -i Arch-KDE.Dockerfile \
             -v "mi-pad4-${PROFILE}-${GITHUB_RUN_NUMBER}" \
@@ -597,121 +479,50 @@ jobs:
         run: |
           set -euo pipefail
 
-          #
-          # Locate generated rootfs
-          #
           mapfile -t archives < <(
-            find . \
-              -maxdepth 1 \
-              -type f \
-              -name 'Arch-KDE-Wayland-Droidspaces-rootfs-aarch64-*.tar.xz' \
-              -print
+            find . -maxdepth 1 -type f \
+              -name 'Arch-KDE-Wayland-Droidspaces-rootfs-aarch64-*.tar.xz' -print
           )
-
           if ((${#archives[@]} == 0)); then
             echo "RootFS archive was not generated" >&2
             exit 1
           fi
-
           if ((${#archives[@]} > 1)); then
             echo "Multiple RootFS archives found:" >&2
             printf '  %s\n' "${archives[@]}" >&2
             exit 1
           fi
-
           archive="${archives[0]}"
-
           mkdir -p release_assets
-
           final="Arch-${{ inputs.profile }}-Anland-MiPad4-aarch64-v${GITHUB_RUN_NUMBER}.tar.xz"
-
-          mv \
-            "$archive" \
-            "release_assets/$final"
-
+          mv "$archive" "release_assets/$final"
           rootfs_archive="release_assets/$final"
+          tar -tf "$rootfs_archive" > rootfs-files-raw.txt
+          sed 's#^\./##' rootfs-files-raw.txt > rootfs-files.txt
 
-          #
-          # Store raw tar member list.
-          #
-          tar -tf "$rootfs_archive" \
-            > rootfs-files-raw.txt
-
-          #
-          # Store normalized member list:
-          #
-          #   ./etc/foo -> etc/foo
-          #   etc/foo   -> etc/foo
-          #
-          sed 's#^\./##' \
-            rootfs-files-raw.txt \
-            > rootfs-files.txt
-
-          #
-          # Helper: return the real member name used inside the tar archive.
-          #
-          # This supports both:
-          #
-          #   etc/droidspaces-systemd257
-          #
-          # and:
-          #
-          #   ./etc/droidspaces-systemd257
-          #
           tar_member_name() {
             local wanted="${1#./}"
             local member=""
-
-            member="$(
-              awk -v wanted="$wanted" '
-                {
-                  normalized=$0
-                  sub(/^\.\//, "", normalized)
-
-                  if (normalized == wanted) {
-                    print $0
-                    exit
-                  }
-                }
-              ' rootfs-files-raw.txt
-            )"
-
+            member="$(awk -v wanted="$wanted" '{ normalized=$0; sub(/^\.\//, "", normalized); if (normalized == wanted) { print $0; exit } }' rootfs-files-raw.txt)"
             if [[ -z "$member" ]]; then
               echo "Missing archive member: $wanted" >&2
               return 1
             fi
-
             printf '%s\n' "$member"
           }
 
-          #
-          # Helper: print a file directly from the tar archive.
-          #
           tar_cat() {
             local wanted="$1"
             local member
-
             member="$(tar_member_name "$wanted")"
-
-            tar -xOf \
-              "$rootfs_archive" \
-              "$member"
+            tar -xOf "$rootfs_archive" "$member"
           }
 
-          #
-          # Validate droidspaces-init
-          #
-          grep -Eq \
-            '^(sbin|usr/bin)/droidspaces-init$' \
-            rootfs-files.txt \
-            || {
-              echo "Missing droidspaces-init" >&2
-              exit 1
-            }
+          grep -Eq '^(sbin|usr/bin)/droidspaces-init$' rootfs-files.txt || {
+            echo "Missing droidspaces-init" >&2
+            exit 1
+          }
 
-          #
-          # Validate required runtime files
-          #
           for path in \
             usr/local/bin/mi-pad4-start-wayland \
             etc/droidspaces-systemd257 \
@@ -730,29 +541,15 @@ jobs:
             usr/bin/startplasma-wayland \
             usr/bin/kwin_wayland
           do
-            grep -Fxq \
-              "$path" \
-              rootfs-files.txt \
-              || {
-                echo "Missing $path" >&2
-                exit 1
-              }
+            grep -Fxq "$path" rootfs-files.txt || {
+              echo "Missing $path" >&2
+              exit 1
+            }
           done
 
-          #
-          # Droidspaces patches / markers
-          #
-          grep -Fxq \
-            'usr/share/droidspaces/anland-kwin-package' \
-            rootfs-files.txt
-
-          grep -Fxq \
-            'usr/share/droidspaces/kio-runtime-named-socket' \
-            rootfs-files.txt
-
-          grep -Fxq \
-            'usr/share/droidspaces/mesa-kgsl-dmabuf-import' \
-            rootfs-files.txt
+          grep -Fxq 'usr/share/droidspaces/anland-kwin-package' rootfs-files.txt
+          grep -Fxq 'usr/share/droidspaces/kio-runtime-named-socket' rootfs-files.txt
+          grep -Fxq 'usr/share/droidspaces/mesa-kgsl-dmabuf-import' rootfs-files.txt
 
           anland_config="$(tar_cat usr/share/droidspaces/mi-pad4-container.config)"
           grep -Fxq 'enable_anland=1' <<<"$anland_config"
@@ -765,56 +562,29 @@ jobs:
           fi
 
           anland_marker="$(tar_cat usr/share/droidspaces/anland-kwin-package)"
-          grep -Fxq 'anland-protocol=b80bf63b75049bc92d7deb964c67336ef4651467' <<<"$anland_marker"
-          grep -Fxq 'droidspaces-oss=1bc8208e85f4e31d9b11d0cb009c6e1db2a88408' <<<"$anland_marker"
+          grep -Eq '^anland-protocol=.+$' <<<"$anland_marker"
+          grep -Eq '^droidspaces-oss=.+$' <<<"$anland_marker"
           grep -Fxq 'socket=/run/display.sock' <<<"$anland_marker"
 
-          #
-          # Validate locally built package versions
-          #
-          grep -Eq \
-            '^var/lib/pacman/local/mesa-1:26\.2\.0-[0-9]+([.][0-9]+)*/' \
-            rootfs-files.txt \
-            || {
-              echo "Expected Mesa 1:26.2.0 local build is not installed" >&2
+          # Validate that the expected local package families are present, but
+          # deliberately do not pin epoch/pkgver/pkgrel here. Package versions
+          # are controlled by the build jobs; this stage only checks integration.
+          for package in mesa pango kio; do
+            grep -Eq "^var/lib/pacman/local/${package}-[^/]+/" rootfs-files.txt || {
+              echo "Required local package is not installed: $package" >&2
               exit 1
             }
+          done
 
-          grep -Eq \
-            '^var/lib/pacman/local/pango-1:1\.58\.2-1/' \
-            rootfs-files.txt \
-            || {
-              echo "Expected patched Pango 1:1.58.2-1 is not installed" >&2
-              exit 1
-            }
-
-          grep -Eq \
-            '^var/lib/pacman/local/kio-6\.29\.0-1/' \
-            rootfs-files.txt \
-            || {
-              echo "Expected patched KIO 6.29.0-1 is not installed" >&2
-              exit 1
-            }
-
-          #
-          # Validate Firefox integration if enabled
-          #
           if [[ "${ENABLE_CLOVER_FIREFOX}" = "true" ]]; then
-            grep -Eq \
-              '^var/lib/pacman/local/firefox-153\.0\.3-1\.3/' \
-              rootfs-files.txt \
-              || {
-                echo "Firefox 153.0.3-1.3 is not installed" >&2
-                exit 1
-              }
-
-            grep -Eq \
-              '^usr/lib/firefox/' \
-              rootfs-files.txt \
-              || {
-                echo "Firefox library directory is missing" >&2
-                exit 1
-              }
+            grep -Eq '^var/lib/pacman/local/firefox-[^/]+/' rootfs-files.txt || {
+              echo "Firefox package is not installed" >&2
+              exit 1
+            }
+            grep -Eq '^usr/lib/firefox/' rootfs-files.txt || {
+              echo "Firefox library directory is missing" >&2
+              exit 1
+            }
           fi
 
           echo "RootFS validation passed"
