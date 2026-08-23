@@ -59,13 +59,30 @@ sed -i "s/HOVERSION/${HANGOVER_VERSION}/g" "$SOURCE_DIR/wine/Dockerfile"
 # its libc-dev-arm64-cross sysroot is /usr/aarch64-linux-gnu/include. Install the
 # UAPI there as well, prove that the target compiler can consume it, then seed
 # Autoconf's header result so the server/ntdll NTSync code cannot be compiled out.
-sed -i '/^ENV PATH=/a ENV ac_cv_header_linux_ntsync_h=yes\
-COPY include/wine/ntsync.h /tmp/winlite-ntsync.h\
-RUN install -Dm644 /tmp/winlite-ntsync.h /usr/aarch64-linux-gnu/include/linux/ntsync.h \\\n    && install -Dm644 /tmp/winlite-ntsync.h /usr/include/linux/ntsync.h \\\n    && printf '\''#include <linux/ntsync.h>\\n#ifndef NTSYNC_IOC_EVENT_READ\\n#error NTSync UAPI incomplete\\n#endif\\nint main(void){return 0;}\\n'\'' \\\n       | aarch64-linux-gnu-gcc -x c -c -o /tmp/winlite-ntsync-test.o - \\\n    && rm -f /tmp/winlite-ntsync-test.o /tmp/winlite-ntsync.h' \
-    "$SOURCE_DIR/wine/Dockerfile"
+python3 - "$SOURCE_DIR/wine/Dockerfile" <<'PY_NTSYNC_DOCKERFILE'
+from pathlib import Path
+import sys
 
-grep -Fq 'ac_cv_header_linux_ntsync_h=yes' "$SOURCE_DIR/wine/Dockerfile"
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = 'ENV PATH="$LLVMMINGW_PATH:$PATH"\n'
+if text.count(needle) != 1:
+    raise SystemExit(f"expected exactly one PATH marker in {path}")
+
+snippet = r'''ENV ac_cv_header_linux_ntsync_h=yes
+COPY include/wine/ntsync.h /tmp/winlite-ntsync.h
+RUN install -Dm644 /tmp/winlite-ntsync.h /usr/aarch64-linux-gnu/include/linux/ntsync.h \
+    && install -Dm644 /tmp/winlite-ntsync.h /usr/include/linux/ntsync.h \
+    && printf '#include <linux/ntsync.h>\n#ifndef NTSYNC_IOC_EVENT_READ\n#error NTSync UAPI incomplete\n#endif\nint main(void){return 0;}\n' \
+       | aarch64-linux-gnu-gcc -x c -c -o /tmp/winlite-ntsync-test.o - \
+    && rm -f /tmp/winlite-ntsync-test.o /tmp/winlite-ntsync.h
+'''
+path.write_text(text.replace(needle, needle + snippet, 1))
+PY_NTSYNC_DOCKERFILE
+
+grep -Fq 'ENV ac_cv_header_linux_ntsync_h=yes' "$SOURCE_DIR/wine/Dockerfile"
 grep -Fq '/usr/aarch64-linux-gnu/include/linux/ntsync.h' "$SOURCE_DIR/wine/Dockerfile"
+grep -Fq 'aarch64-linux-gnu-gcc -x c -c' "$SOURCE_DIR/wine/Dockerfile"
 
 changelog="$SOURCE_DIR/wine/debian/changelog"
 cp "$changelog" "$changelog.old"
