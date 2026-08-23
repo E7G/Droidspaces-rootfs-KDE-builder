@@ -337,7 +337,7 @@ jobs:
           xz -t "${archive[0]}"
           tar -tf "${archive[0]}" | sed 's#^\./##' >rootfs-files.txt
           for path in \
-            sbin/droidspaces-init \
+            usr/bin/droidspaces-init \
             usr/bin/droidspaces-tini \
             usr/bin/wine \
             usr/bin/wineserver \
