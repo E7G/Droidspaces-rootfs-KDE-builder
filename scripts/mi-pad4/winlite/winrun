@@ -7,8 +7,6 @@ export WINEPREFIX="${WINEPREFIX:-$HOME/.wine-winlite}"
 export WINEARCH=win64
 export WINEDEBUG="${WINEDEBUG:--all}"
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=}"
-export WINEESYNC=1
-export WINEFSYNC=0
 export HODLL64="${HODLL64:-libarm64ecfex.dll}"
 export HODLL="${HODLL:-wowbox64.dll}"
 export LD_LIBRARY_PATH="/usr/lib/wine/aarch64-unix${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -17,6 +15,21 @@ export FD_FORCE_KGSL=1
 export FD_KGSL_ENABLE_DMABUF=1
 export mesa_glthread=true
 export MALLOC_ARENA_MAX=2
+
+# The WinLite Hangover Wine is built with NTSync unconditionally. Wine 11.x
+# selects /dev/ntsync automatically when it is available. Do not force ESYNC or
+# FSYNC in that case; doing so can hide the lower-overhead in-process path.
+# Older/non-NTSync Droidspaces kernels fall back to ESYNC rather than expensive
+# server-only synchronization. FSYNC stays off because many Android 4.x kernels
+# do not provide the futex_waitv ABI it requires.
+if [[ -e /dev/ntsync && -r /dev/ntsync ]]; then
+    unset WINEESYNC WINEFSYNC
+    export WINLITE_SYNC=ntsync
+else
+    export WINEESYNC="${WINEESYNC:-1}"
+    export WINEFSYNC="${WINEFSYNC:-0}"
+    export WINLITE_SYNC=esync
+fi
 
 init_prefix() {
     mkdir -p "$WINEPREFIX" "$HOME/Windows"
@@ -42,6 +55,7 @@ usage() {
   winrun --desktop <程序.exe|程序.msi> [...] # 在 Wine 桌面/任务栏内运行
   winrun --shell                             # 打开/恢复极简 Wine 桌面
   winrun --winecfg                           # Wine 设置
+  winrun --sync-info                         # 查看 NTSync/ESYNC 当前选择
 EOF
 }
 
@@ -58,6 +72,14 @@ case "${1:-}" in
         init_prefix
         shift
         exec wine winecfg "$@"
+        ;;
+    --sync-info)
+        printf 'sync=%s\n' "$WINLITE_SYNC"
+        if [[ "$WINLITE_SYNC" == ntsync ]]; then
+            ls -l /dev/ntsync 2>/dev/null || true
+        fi
+        cat /usr/share/hangover-winlite-version 2>/dev/null || true
+        exit 0
         ;;
     --desktop)
         mode=desktop
