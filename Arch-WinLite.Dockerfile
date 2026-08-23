@@ -168,7 +168,8 @@ RUN set -eux; \
         find /usr/bin /usr/lib /usr/libexec -type f -name "$name" -print 2>/dev/null || true; \
     done | sort -u | while IFS= read -r elf; do \
         file -Lb "$elf" | grep -q 'ELF' || continue; \
-        ldd "$elf" 2>/dev/null | grep 'not found' >>/tmp/hangover-missing-libs || true; \
+        LD_LIBRARY_PATH="$(dirname "$elf")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            ldd "$elf" 2>/dev/null | grep 'not found' >>/tmp/hangover-missing-libs || true; \
     done; \
     if [[ -s /tmp/hangover-missing-libs ]]; then \
         cat /tmp/hangover-missing-libs >&2; \
