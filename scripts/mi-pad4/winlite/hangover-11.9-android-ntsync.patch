@@ -3,7 +3,7 @@ new file mode 100644
 index 00000000000..33333333333
 --- /dev/null
 +++ b/include/wine/ntsync.h
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,67 @@
 +/*
 + * Local Linux NTSync UAPI for WinLite / Android container builds.
 + *
