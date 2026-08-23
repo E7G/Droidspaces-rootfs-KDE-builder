@@ -15,5 +15,47 @@ Windows Registry Editor Version 5.00
 "Managed"="Y"
 "Decorated"="Y"
 
+; The special desktop named "shell" keeps Wine's own lightweight taskbar,
+; Start menu and tray visible. This replaces LXQt Panel/PCManFM-Qt entirely.
+[HKEY_CURRENT_USER\Software\Wine\Explorer\Desktops\shell]
+"EnableShell"=dword:00000001
+
+; 144 DPI is much more usable on the Mi Pad 4 panel. Standard grayscale font
+; smoothing avoids RGB/BGR ClearType colour fringes when Android rotates it.
 [HKEY_CURRENT_USER\Control Panel\Desktop]
 "LogPixels"=dword:00000090
+"MenuShowDelay"="0"
+"FontSmoothing"="2"
+"FontSmoothingType"=dword:00000001
+"FontSmoothingGamma"=dword:00000578
+
+[HKEY_CURRENT_USER\Control Panel\Desktop\WindowMetrics]
+"MinAnimate"="0"
+
+; Keep this REG file ASCII-only for maximum regedit compatibility. Chinese
+; aliases are handled by Fontconfig plus the msyh.ttf/simsun.ttf links.
+[HKEY_CURRENT_USER\Software\Wine\Fonts\Replacements]
+"Arial"="Liberation Sans"
+"Arial Unicode MS"="WenQuanYi Zen Hei"
+"Tahoma"="Liberation Sans"
+"Segoe UI"="Liberation Sans"
+"Microsoft Sans Serif"="Liberation Sans"
+"Times New Roman"="Liberation Serif"
+"Courier New"="Liberation Mono"
+"Microsoft YaHei"="WenQuanYi Zen Hei"
+"Microsoft YaHei UI"="WenQuanYi Zen Hei"
+"SimSun"="WenQuanYi Zen Hei"
+"NSimSun"="WenQuanYi Zen Hei"
+"SimHei"="WenQuanYi Zen Hei"
+
+[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\FontSubstitutes]
+"MS Shell Dlg"="Liberation Sans"
+"MS Shell Dlg 2"="Liberation Sans"
+"Arial"="Liberation Sans"
+"Tahoma"="Liberation Sans"
+"Segoe UI"="Liberation Sans"
+"Microsoft YaHei"="WenQuanYi Zen Hei"
+"Microsoft YaHei UI"="WenQuanYi Zen Hei"
+"SimSun"="WenQuanYi Zen Hei"
+"NSimSun"="WenQuanYi Zen Hei"
+"SimHei"="WenQuanYi Zen Hei"

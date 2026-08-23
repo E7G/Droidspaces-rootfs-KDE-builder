@@ -1,0 +1,103 @@
+diff --git a/dlls/ntdll/unix/sync.c b/dlls/ntdll/unix/sync.c
+index fbf054e9d93..11111111111 100644
+--- a/dlls/ntdll/unix/sync.c
++++ b/dlls/ntdll/unix/sync.c
+@@ -57,9 +57,7 @@
+ #ifdef HAVE_KQUEUE
+ # include <sys/event.h>
+ #endif
+-#ifdef HAVE_LINUX_NTSYNC_H
+-# include <linux/ntsync.h>
+-#endif
++#include "wine/ntsync.h"
+ 
+ #include "ntstatus.h"
+ #include "windef.h"
+diff --git a/server/inproc_sync.c b/server/inproc_sync.c
+index ef68ee04902..22222222222 100644
+--- a/server/inproc_sync.c
++++ b/server/inproc_sync.c
+@@ -30,9 +30,7 @@
+ #include "thread.h"
+ #include "user.h"
+ 
+-#ifdef HAVE_LINUX_NTSYNC_H
+-# include <linux/ntsync.h>
+-#endif
++#include "wine/ntsync.h"
+ 
+ #ifdef NTSYNC_IOC_EVENT_READ
+ 
+diff --git a/include/wine/ntsync.h b/include/wine/ntsync.h
+new file mode 100644
+index 00000000000..33333333333
+--- /dev/null
++++ b/include/wine/ntsync.h
+@@ -0,0 +1,65 @@
++/*
++ * Local Linux NTSync UAPI for WinLite / Android container builds.
++ *
++ * Wine's NTSync implementation is normally compiled only when the build host
++ * provides <linux/ntsync.h>. Android kernels can expose /dev/ntsync while the
++ * Ubuntu cross-build headers do not, so carry the small userspace ABI locally.
++ * Keep this in sync with the Linux NTSync UAPI expected by Wine 11.x.
++ *
++ * SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
++ */
++
++#ifndef __WINE_LOCAL_LINUX_NTSYNC_H
++#define __WINE_LOCAL_LINUX_NTSYNC_H
++
++#include <linux/types.h>
++#include <sys/ioctl.h>
++
++struct ntsync_sem_args
++{
++    __u32 count;
++    __u32 max;
++};
++
++struct ntsync_mutex_args
++{
++    __u32 owner;
++    __u32 count;
++};
++
++struct ntsync_event_args
++{
++    __u32 manual;
++    __u32 signaled;
++};
++
++#define NTSYNC_WAIT_REALTIME 0x1
++
++struct ntsync_wait_args
++{
++    __u64 timeout;
++    __u64 objs;
++    __u32 count;
++    __u32 index;
++    __u32 flags;
++    __u32 owner;
++    __u32 alert;
++    __u32 pad;
++};
++
++#define NTSYNC_MAX_WAIT_COUNT 64
++
++#define NTSYNC_IOC_CREATE_SEM     _IOW ('N', 0x80, struct ntsync_sem_args)
++#define NTSYNC_IOC_SEM_RELEASE    _IOWR('N', 0x81, __u32)
++#define NTSYNC_IOC_WAIT_ANY       _IOWR('N', 0x82, struct ntsync_wait_args)
++#define NTSYNC_IOC_WAIT_ALL       _IOWR('N', 0x83, struct ntsync_wait_args)
++#define NTSYNC_IOC_CREATE_MUTEX   _IOW ('N', 0x84, struct ntsync_mutex_args)
++#define NTSYNC_IOC_MUTEX_UNLOCK   _IOWR('N', 0x85, struct ntsync_mutex_args)
++#define NTSYNC_IOC_MUTEX_KILL     _IOW ('N', 0x86, __u32)
++#define NTSYNC_IOC_CREATE_EVENT   _IOW ('N', 0x87, struct ntsync_event_args)
++#define NTSYNC_IOC_EVENT_SET      _IOR ('N', 0x88, __u32)
++#define NTSYNC_IOC_EVENT_RESET    _IOR ('N', 0x89, __u32)
++#define NTSYNC_IOC_EVENT_PULSE    _IOR ('N', 0x8a, __u32)
++#define NTSYNC_IOC_SEM_READ       _IOR ('N', 0x8b, struct ntsync_sem_args)
++#define NTSYNC_IOC_MUTEX_READ     _IOR ('N', 0x8c, struct ntsync_mutex_args)
++#define NTSYNC_IOC_EVENT_READ     _IOR ('N', 0x8d, struct ntsync_event_args)
++
++#endif /* __WINE_LOCAL_LINUX_NTSYNC_H */

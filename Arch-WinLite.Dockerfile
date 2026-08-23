@@ -43,15 +43,12 @@ RUN set -eux; \
     pacman -S --noconfirm --needed \
         alsa-lib \
         bash \
-        breeze-icons \
         ca-certificates \
         coreutils \
         dbus \
-        desktop-file-utils \
         file \
         findutils \
         fontconfig \
-        foot \
         freetype2 \
         gawk \
         glibc \
@@ -77,18 +74,13 @@ RUN set -eux; \
         libxrender \
         libxshmfence \
         libxxf86vm \
-        lxqt-panel \
         ncurses \
-        noto-fonts-emoji \
         pam \
-        pcmanfm-qt \
         pipewire \
         pipewire-pulse \
         procps-ng \
-        qt6-wayland \
         sed \
-        shared-mime-info \
-        ttf-dejavu \
+        ttf-liberation \
         tzdata \
         unzip \
         util-linux \
@@ -114,6 +106,10 @@ RUN set -eux; \
     fi; \
     ! pacman -Q kscreenlocker >/dev/null 2>&1; \
     ! find /usr -type f \( -name 'kscreenlocker_greet' -o -name 'kcheckpass' \) -print -quit | grep -q .; \
+    # The user interface is Wine explorer itself. Do not ship a second Linux
+    # desktop/panel/file-manager stack in the WinLite image.
+    ! pacman -Q lxqt-panel >/dev/null 2>&1; \
+    ! pacman -Q pcmanfm-qt >/dev/null 2>&1; \
     setcap -r /usr/bin/kwin_wayland; \
     rm -f /tmp/pacman-local.conf; \
     install -Dm755 /tmp/winlite/droidspaces-init /sbin/droidspaces-init; \
@@ -123,13 +119,9 @@ RUN set -eux; \
     install -Dm755 /usr/local/libexec/mi-pad4-kwin-wayland-wrapper \
         /usr/sbin/kwin_wayland_wrapper; \
     install -Dm644 /tmp/winlite/wine-default.reg /usr/share/winlite/wine-default.reg; \
+    install -Dm644 /tmp/winlite/99-winlite-fonts.conf /etc/fonts/conf.d/99-winlite-fonts.conf; \
     install -Dm644 /tmp/winlite/kwinrc /usr/share/winlite/kwinrc; \
     install -Dm644 /tmp/winlite/kwinoutputconfig.json /usr/share/winlite/kwinoutputconfig.json; \
-    install -Dm644 /tmp/winlite/panel.conf /usr/share/winlite/panel.conf; \
-    install -Dm644 /tmp/winlite/pcmanfm-qt.conf /usr/share/winlite/pcmanfm-qt.conf; \
-    install -Dm644 /tmp/winlite/mimeapps.list /usr/share/winlite/mimeapps.list; \
-    install -Dm644 /tmp/winlite/winrun.desktop /usr/share/applications/winrun.desktop; \
-    install -Dm644 /tmp/winlite/winecfg.desktop /usr/share/applications/winecfg.desktop; \
     install -Dm644 /tmp/winlite/container.config /usr/share/winlite/container.config; \
     install -Dm644 /tmp/winlite/README.txt /root/WINLITE-README.txt; \
     ln -sf /usr/local/bin/winrun /usr/local/bin/wine-run; \
@@ -143,6 +135,9 @@ RUN set -eux; \
     printf '%s\n' 'LANG=zh_CN.UTF-8' 'LC_ALL=zh_CN.UTF-8' >/etc/locale.conf; \
     sed -i 's/^#\(zh_CN.UTF-8 UTF-8\)/\1/' /etc/locale.gen; \
     locale-gen; \
+    fc-cache -f; \
+    fc-match -f '%{family}\n' Arial | grep -qi 'Liberation Sans'; \
+    fc-match -f '%{family}\n' 'Microsoft YaHei' | grep -qi 'WenQuanYi Zen Hei'; \
     printf '%s\n' \
         '/usr/lib/aarch64-linux-gnu' \
         '/usr/lib/aarch64-linux-gnu/wine' \
@@ -150,17 +145,20 @@ RUN set -eux; \
         >/etc/ld.so.conf.d/hangover.conf; \
     ldconfig; \
     export LD_LIBRARY_PATH="/usr/lib/wine/aarch64-unix${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; \
-    update-desktop-database /usr/share/applications; \
-    update-mime-database /usr/share/mime; \
     install -d /usr/share/droidspaces; \
     printf '%s\n' \
         'profile=winlite' \
-        'desktop=kwin-anland+lxqt-panel' \
+        'desktop=kwin-anland+wine-explorer-shell' \
+        'linux-panel=none' \
+        'linux-file-manager=none' \
         'pid1=droidspaces-tini' \
         'systemd=not-started' \
-        'windows=hangover-arm64ec-fex+wowbox64' \
-        'graphics=wined3d-wayland-opengl-kgsl' \
+        'windows=hangover-11.9-winlite-ntsync+arm64ec-fex+wowbox64' \
+        'sync=ntsync-auto+esync-fallback' \
+        'proton-style=lean-runtime-tuning-without-steam-runtime' \
+        'graphics=wine-shell-x11+direct-wayland-opengl-kgsl' \
         'audio=pipewire-anland' \
+        'fonts=liberation+wqy-zenhei' \
         >/usr/share/droidspaces/winlite-profile; \
     printf '%s\n' \
         'source=E7G/mesa-for-android-container' \
@@ -174,6 +172,10 @@ RUN set -eux; \
         >/usr/share/droidspaces/anland-kwin-package; \
     test -x /usr/bin/wine; \
     test -x /usr/bin/wineserver; \
+    grep -aFq '/dev/ntsync' /usr/bin/wineserver; \
+    grep -Fq 'ntsync=compiled-in-android-uapi' /usr/share/hangover-winlite-version; \
+    grep -Fq 'ntsync-fallback=esync' /usr/share/hangover-winlite-version; \
+    find /usr/lib -type f -name explorer.exe -print -quit | grep -q .; \
     test -e /usr/lib/wine/aarch64-windows/libarm64ecfex.dll \
         -o -e /usr/lib/aarch64-linux-gnu/wine/aarch64-windows/libarm64ecfex.dll; \
     test -e /usr/lib/wine/aarch64-windows/wowbox64.dll \
