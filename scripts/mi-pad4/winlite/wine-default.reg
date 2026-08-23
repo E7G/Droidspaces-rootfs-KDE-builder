@@ -15,5 +15,14 @@ Windows Registry Editor Version 5.00
 "Managed"="Y"
 "Decorated"="Y"
 
+; The special desktop named "shell" keeps Wine's own lightweight taskbar,
+; Start menu and tray visible. This replaces LXQt Panel/PCManFM-Qt entirely.
+[HKEY_CURRENT_USER\Software\Wine\Explorer\Desktops\shell]
+"EnableShell"=dword:00000001
+
 [HKEY_CURRENT_USER\Control Panel\Desktop]
 "LogPixels"=dword:00000090
+"MenuShowDelay"="0"
+
+[HKEY_CURRENT_USER\Control Panel\Desktop\WindowMetrics]
+"MinAnimate"="0"
