@@ -44,9 +44,14 @@ fi
 # sysroot below before Wine's cross configure runs.
 stage="apply Android NTSync UAPI"
 git -C "$SOURCE_DIR/wine" apply "$PATCH_FILE"
+uapi="$SOURCE_DIR/wine/include/wine/ntsync.h"
 grep -Fq '<linux/ntsync.h>' "$SOURCE_DIR/wine/server/inproc_sync.c"
 grep -Fq '<linux/ntsync.h>' "$SOURCE_DIR/wine/dlls/ntdll/unix/sync.c"
-grep -Fq 'NTSYNC_IOC_CREATE_EVENT' "$SOURCE_DIR/wine/include/wine/ntsync.h"
+grep -Fq 'NTSYNC_IOC_CREATE_EVENT' "$uapi"
+grep -Fq 'NTSYNC_IOC_EVENT_READ' "$uapi"
+tail -n 1 "$uapi" | grep -Fqx '#endif /* __WINE_LOCAL_LINUX_NTSYNC_H */'
+printf 'int main(void){return 0;}\n' \
+    | cc -x c -fsyntax-only -include "$uapi" -
 
 # Use Hangover's own Noble cross-package recipe so ARM64EC behavior and paths
 # stay compatible with the upstream 11.9 FEX / wowbox64 payloads.
