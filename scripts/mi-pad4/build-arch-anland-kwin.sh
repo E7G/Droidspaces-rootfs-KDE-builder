@@ -144,8 +144,10 @@ build_kwin() {
     clone_at https://gitlab.archlinux.org/archlinux/packaging/packages/kwin.git "$KWINKG" "$dir"
     sed -i "s/^arch=(.*)$/arch=('aarch64')/" "$dir/PKGBUILD"
 
-    # WinLite has no lock screen. Arch's KWin package normally hard-depends on
-    # kscreenlocker, so remove that runtime dependency from our custom package.
+    # Mi Pad 4's Anland KWin runs without screen-locker integration. Arch's KWin
+    # package normally hard-depends on kscreenlocker, so remove that dependency
+    # from the custom KWin package itself. The kscreenlocker package may still
+    # remain installed because plasma-workspace/kwin-x11 require it.
     sed -Ei "/^[[:space:]]*['\"]?kscreenlocker['\"]?[[:space:]]*$/d" "$dir/PKGBUILD"
 
     cp "$SCRIPT_DIR/anland-kwin/kwin.patch" "$dir/anland-kwin.patch"
@@ -181,8 +183,7 @@ EOF_KWIN_PATCH
 
     install_local_package "$package"
     if pacman -Q kscreenlocker >/dev/null 2>&1; then
-        echo 'kscreenlocker is still installed after custom KWin installation' >&2
-        exit 1
+        echo 'kscreenlocker package retained only for Plasma/kwin-x11 dependency compatibility; custom KWin screen-locker integration is disabled.' >&2
     fi
 }
 
@@ -259,7 +260,8 @@ printf '%s\n' \
   'patched-kwin=arch-native-6.7.3-anland' \
   'anland-protocol=b80bf63b75049bc92d7deb964c67336ef4651467' \
   'droidspaces-oss=1bc8208e85f4e31d9b11d0cb009c6e1db2a88408' \
-  'screenlocker=disabled' \
+  'screenlocker=disabled-in-custom-kwin' \
+  'screenlocker-package=may-remain-for-plasma-dependencies' \
   'socket=/run/display.sock' \
   > /usr/share/droidspaces/anland-kwin-package
 printf '%s\n' 'patched-plasma-workspace=6.7.4-anland-panel-remap' > /usr/share/droidspaces/plasma-workspace-panel-remap
