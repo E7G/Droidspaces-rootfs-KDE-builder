@@ -2,9 +2,12 @@ ARG TARGETPLATFORM
 
 FROM ogarcia/archlinux AS shim-builder
 RUN printf '%s\n' \
-        'Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo' \
         'Server = https://mirrors.ustc.edu.cn/archlinuxarm/$arch/$repo' \
+        'Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo' \
+        'Server = http://mirror.archlinuxarm.org/$arch/$repo' \
         >/etc/pacman.d/mirrorlist \
+    && sed -i '/^#ParallelDownloads/c\ParallelDownloads = 2' /etc/pacman.conf \
+    && { grep -qxF 'DisableDownloadTimeout' /etc/pacman.conf || sed -i '/^\[options\]/a DisableDownloadTimeout' /etc/pacman.conf; } \
     && pacman -Syu --noconfirm --needed gcc glibc
 COPY scripts/ion-legacy-shim.c /tmp/ion-legacy-shim.c
 COPY scripts/mi-pad4/winlite/droidspaces-tini.c /tmp/droidspaces-tini.c
@@ -25,10 +28,13 @@ COPY scripts/mi-pad4/winlite/ /tmp/winlite/
 
 RUN set -eux; \
     printf '%s\n' \
-        'Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo' \
         'Server = https://mirrors.ustc.edu.cn/archlinuxarm/$arch/$repo' \
+        'Server = https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/$arch/$repo' \
+        'Server = http://mirror.archlinuxarm.org/$arch/$repo' \
         >/etc/pacman.d/mirrorlist; \
-    sed -i '/^#ParallelDownloads/s/^#//' /etc/pacman.conf; \
+    sed -i '/^#ParallelDownloads/c\ParallelDownloads = 2' /etc/pacman.conf; \
+    grep -qxF 'DisableDownloadTimeout' /etc/pacman.conf || \
+        sed -i '/^\[options\]/a DisableDownloadTimeout' /etc/pacman.conf; \
     if [[ -f /etc/nsswitch.conf ]]; then \
         sed -i 's/^hosts:.*/hosts: files dns/' /etc/nsswitch.conf; \
     fi; \
