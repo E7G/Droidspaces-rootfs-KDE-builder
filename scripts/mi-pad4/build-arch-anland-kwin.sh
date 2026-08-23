@@ -147,9 +147,6 @@ build_kwin() {
     cat >> "$dir/PKGBUILD" <<'EOF_KWIN_PATCH'
 source+=(anland-kwin.patch)
 sha256sums+=('SKIP')
-# Keep the WinLite package lock-screen-free even if a stock KWin package was
-# installed earlier to seed dependencies in another build stage.
-conflicts+=(kscreenlocker)
 
 prepare() {
   cd "$srcdir/kwin-$pkgver"
@@ -173,10 +170,6 @@ EOF_KWIN_PATCH
 
     if bsdtar -xOf "$package" .PKGINFO | grep -Eq '^depend = kscreenlocker([<>=].*)?$'; then
         echo 'Custom KWin package still depends on kscreenlocker' >&2
-        exit 1
-    fi
-    if ! bsdtar -xOf "$package" .PKGINFO | grep -Eq '^conflict = kscreenlocker$'; then
-        echo 'Custom KWin package is missing the kscreenlocker conflict guard' >&2
         exit 1
     fi
 
