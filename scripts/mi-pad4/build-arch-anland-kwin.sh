@@ -137,17 +137,30 @@ build_kwin() {
     local dir="$BUILD_ROOT/kwin"
     clone_at https://gitlab.archlinux.org/archlinux/packaging/packages/kwin.git "$KWINKG" "$dir"
     sed -i "s/^arch=(.*)$/arch=('aarch64')/" "$dir/PKGBUILD"
+
+    # WinLite has no lock screen. Arch's KWin package normally hard-depends on
+    # kscreenlocker, so remove that runtime dependency from our custom package.
+    sed -Ei "/^[[:space:]]*['\"]?kscreenlocker['\"]?[[:space:]]*$/d" "$dir/PKGBUILD"
+
     cp "$SCRIPT_DIR/anland-kwin/kwin.patch" "$dir/anland-kwin.patch"
     cp -a "$SCRIPT_DIR/anland-kwin/backend" "$dir/anland-backend"
     cat >> "$dir/PKGBUILD" <<'EOF_KWIN_PATCH'
 source+=(anland-kwin.patch)
 sha256sums+=('SKIP')
+# Keep the WinLite package lock-screen-free even if a stock KWin package was
+# installed earlier to seed dependencies in another build stage.
+conflicts+=(kscreenlocker)
 
 prepare() {
   cd "$srcdir/kwin-$pkgver"
   patch -Np1 -i "$srcdir/anland-kwin.patch"
   mkdir -p src/backends/anland
   cp -a "$startdir/anland-backend/." src/backends/anland/
+
+  # KWin 6.7.x explicitly supports compiling without KScreenLocker. Change the
+  # default before CMake configuration so no locker integration is linked in.
+  sed -i 's/^\(option(KWIN_BUILD_SCREENLOCKER .* \)ON)$/\1OFF)/' CMakeLists.txt
+  grep -Eq '^option\(KWIN_BUILD_SCREENLOCKER .* OFF\)$' CMakeLists.txt
 }
 EOF_KWIN_PATCH
     mkdir -p "$BUILD_ROOT/packages"
@@ -157,7 +170,21 @@ EOF_KWIN_PATCH
     local package
     package="$(find "$BUILD_ROOT/packages" -maxdepth 1 -type f -name 'kwin-*.pkg.tar.*' -print -quit)"
     [ -n "$package" ] || { echo 'kwin package was not produced' >&2; find "$BUILD_ROOT" -maxdepth 3 -type f -name '*.pkg.tar.*' >&2; exit 1; }
+
+    if bsdtar -xOf "$package" .PKGINFO | grep -Eq '^depend = kscreenlocker([<>=].*)?$'; then
+        echo 'Custom KWin package still depends on kscreenlocker' >&2
+        exit 1
+    fi
+    if ! bsdtar -xOf "$package" .PKGINFO | grep -Eq '^conflict = kscreenlocker$'; then
+        echo 'Custom KWin package is missing the kscreenlocker conflict guard' >&2
+        exit 1
+    fi
+
     install_local_package "$package"
+    if pacman -Q kscreenlocker >/dev/null 2>&1; then
+        echo 'kscreenlocker is still installed after custom KWin installation' >&2
+        exit 1
+    fi
 }
 
 build_xwayland() {
@@ -233,6 +260,7 @@ printf '%s\n' \
   'patched-kwin=arch-native-6.7.3-anland' \
   'anland-protocol=b80bf63b75049bc92d7deb964c67336ef4651467' \
   'droidspaces-oss=1bc8208e85f4e31d9b11d0cb009c6e1db2a88408' \
+  'screenlocker=disabled' \
   'socket=/run/display.sock' \
   > /usr/share/droidspaces/anland-kwin-package
 printf '%s\n' 'patched-plasma-workspace=6.7.4-anland-panel-remap' > /usr/share/droidspaces/plasma-workspace-panel-remap
