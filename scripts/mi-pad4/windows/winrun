@@ -1,31 +1,115 @@
-#!/bin/bash
+#!/usr/bin/bash
 set -euo pipefail
 
-# winrun - Main Windows launcher for Mi Pad 4
-# Architecture: Hangover (preferred) -> Box64 fallback
-# Graphics: WineD3D -> OpenGL -> Freedreno/KGSL -> Adreno 512
-
-WINEPREFIX="${HOME:-/tmp/droidspaces-home}/.wine"
-EXE_PATH="$1"
-
-if [[ -z "$EXE_PATH" ]]; then
-    echo "Usage: winrun <executable.exe>"
-    exit 1
+if (($# == 0)); then
+    echo '用法: winrun <程序.exe|程序.msi> [参数...]' >&2
+    exit 2
 fi
+
+export HOME=/tmp/droidspaces-home
+export USER=user
+export LOGNAME=user
+export XDG_RUNTIME_DIR=/run/droidspaces-runtime/user-0
+export WAYLAND_DISPLAY=wayland-0
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=LXQt
+export QT_QPA_PLATFORM=wayland
+export XDG_CONFIG_HOME=/run/winlite-config
+export XDG_DATA_HOME=/tmp/droidspaces-home/.local/share
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/0/bus
+export WINEPREFIX=/tmp/droidspaces-home/.wine-winlite
+export WINEARCH=win64
+export USERNAME=user
+export USER=user
+export USERPROFILE='C:\users\user'
+export APPDATA='C:\users\user\AppData\Roaming'
+export LOCALAPPDATA='C:\users\user\AppData\Local'
+export HOMEDRIVE='C:'
+export HOMEPATH='\users\user'
+export TEMP='C:\users\user\AppData\Local\Temp'
+export TMP='C:\users\user\AppData\Local\Temp'
+export WINEDEBUG="${WINEDEBUG:--all}"
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=}"
+export WINEESYNC=1
+export WINEFSYNC=0
+export HODLL64="${HODLL64:-libarm64ecfex.dll}"
+export HODLL="${HODLL:-wowbox64.dll}"
+export LD_LIBRARY_PATH="/usr/lib/wine/aarch64-unix${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export MALLOC_ARENA_MAX=2
 
 mkdir -p "$WINEPREFIX"
 
-# Try Hangover first (preferred for Adreno 512)
-if command -v hangover >/dev/null 2>&1; then
-    BOX64_MAXCPU=4 BOX64_DYNAREC=1 hangover "$EXE_PATH"
-    exit $?
+if [[ ! -f "$WINEPREFIX/system.reg" ]]; then
+    wineboot -u
+    regedit /S /usr/share/winlite/wine-default.reg || true
 fi
 
-# Fallback to Box64 + Wine WoW64
-if command -v box64 >/dev/null 2>&1; then
-    BOX64_MAXCPU=4 BOX64_DYNAREC=1 box64 wine "$EXE_PATH"
-    exit $?
+# Hangover can inherit the Linux uid as the Windows profile name.  Unity
+# resolves persistentDataPath through the Windows shell-folder registry, so
+# keep every relevant folder on the same user profile.
+if [[ ! -f "$WINEPREFIX/.winlite-path-configured" ]]; then
+    mkdir -p "$WINEPREFIX/drive_c/users/user/AppData/LocalLow" \
+        "$WINEPREFIX/drive_c/users/user/AppData/Local" \
+        "$WINEPREFIX/drive_c/users/user/AppData/Roaming" \
+        "$WINEPREFIX/drive_c/users/user/AppData/Local/Temp"
+    shell_folders='HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders'
+    wine reg add "$shell_folders" /v AppData /d 'C:\users\user\AppData\Roaming' /f >/dev/null 2>&1 || true
+    wine reg add "$shell_folders" /v 'Local AppData' /d 'C:\users\user\AppData\Local' /f >/dev/null 2>&1 || true
+    wine reg add "$shell_folders" /v Personal /d 'C:\users\user\Documents' /f >/dev/null 2>&1 || true
+    wine reg add "$shell_folders" /v '{A520A1A4-1780-4FF6-BD18-167343C5AF16}' /d 'C:\users\user\AppData\LocalLow' /f >/dev/null 2>&1 || true
+    wine reg add "$shell_folders" /v '{374DE290-123F-4565-9164-39C4925E467B}' /d 'C:\users\user\Downloads' /f >/dev/null 2>&1 || true
+    touch "$WINEPREFIX/.winlite-path-configured"
 fi
 
-# Direct ARM64 Wine as last resort
-wine "$EXE_PATH"
+# WineD3D's Vulkan path has no ICD in this rootfs.  Use WineD3D/OpenGL and
+# keep Mesa on the Clover KGSL driver, rather than silently falling back to
+# llvmpipe.  The marker avoids running reg.exe on every launch.
+if [[ ! -f "$WINEPREFIX/.winlite-gpu-configured" ]]; then
+    wine reg add 'HKCU\Software\Wine\Direct3D' /v renderer /t REG_SZ /d gl /f >/dev/null 2>&1 || true
+    touch "$WINEPREFIX/.winlite-gpu-configured"
+fi
+
+export MESA_LOADER_DRIVER_OVERRIDE=kgsl
+export FD_FORCE_KGSL=1
+export FD_KGSL_ENABLE_DMABUF=1
+export LIBGL_ALWAYS_SOFTWARE=0
+export WINED3D_RENDERER=gl
+# KGSL exposes the OpenGL entry points needed by Unity but reports a
+# conservative profile.  WineD3D otherwise rejects D3D11 feature levels;
+# this makes it use the same hardware context with the compatibility profile.
+export MESA_GL_VERSION_OVERRIDE=4.6COMPAT
+export MESA_GLSL_VERSION_OVERRIDE=460
+export mesa_glthread=true
+
+target="$1"
+shift
+
+# PCManFM may pass a file:// URI.  Normalize it before deriving the working
+# directory; Unity requires its sibling *_Data directory as the cwd.
+if [[ "$target" == file://* ]]; then
+    target="${target#file://}"
+    target="$(printf '%b' "${target//%/\\x}")"
+fi
+target="$(realpath -e -- "$target" 2>/dev/null || printf '%s' "$target")"
+target_dir="$(dirname -- "$target")"
+target_name="$(basename -- "$target")"
+cd -- "$target_dir"
+
+if [[ "${target,,}" == *.msi ]]; then
+    command=(wine msiexec /i "$target_name" "$@")
+else
+    command=(wine "$target_name" "$@")
+fi
+
+# Unity 2021 ARM64EC player: use the real KGSL OpenGL path and a sane tablet
+# window size.  Do not substitute llvmpipe; that would be CPU rendering.
+if compgen -G "*_Data" >/dev/null 2>&1; then
+    if [[ "${target_name,,}" == *.exe ]]; then
+        command+=( -force-d3d11 -screen-fullscreen 0 -screen-width 1280 -screen-height 720 )
+    fi
+fi
+
+if command -v taskset >/dev/null 2>&1; then
+    exec nice -n -4 taskset -c 4-7 "${command[@]}"
+fi
+exec "${command[@]}"
