@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Wine 设置
-Comment=配置 WinLite Windows 运行环境
-Exec=/usr/local/bin/winrun winecfg.exe
-Icon=wine
-Terminal=false
-Categories=Settings;
