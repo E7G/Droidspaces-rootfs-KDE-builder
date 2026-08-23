@@ -132,6 +132,7 @@ RUN set -eux; \
         '/usr/lib/wine/aarch64-unix' \
         >/etc/ld.so.conf.d/hangover.conf; \
     ldconfig; \
+    export LD_LIBRARY_PATH="/usr/lib/wine/aarch64-unix${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; \
     update-desktop-database /usr/share/applications; \
     update-mime-database /usr/share/mime; \
     install -d /usr/share/droidspaces; \
