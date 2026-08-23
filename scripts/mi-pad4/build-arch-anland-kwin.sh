@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# Build Anland KWin/Xwayland with Arch's own Qt/ABI.  Fedora RPM payloads must
+# Build Anland KWin/Xwayland with Arch's own Qt/ABI. Fedora RPM payloads must
 # not be copied into Arch: they link against Fedora's private Qt ABI.
 
 case "${BUILD_KDE:-}" in
@@ -49,6 +49,61 @@ clone_at() {
     git clone --filter=blob:none --no-checkout "$url" "$dir"
     git -C "$dir" fetch --depth=1 origin "$commit"
     git -C "$dir" checkout --detach "$commit"
+}
+
+download_with_fallback() {
+    local output="$1"
+    shift
+    local url tmp="${output}.part"
+
+    rm -f "$output" "$tmp"
+    for url in "$@"; do
+        echo "Downloading $(basename "$output") from $url"
+        if curl -4 -fL \
+            --connect-timeout 20 \
+            --retry 4 \
+            --retry-all-errors \
+            --retry-delay 3 \
+            -o "$tmp" "$url"; then
+            mv "$tmp" "$output"
+            return 0
+        fi
+        rm -f "$tmp"
+        echo "Download failed, trying next X.Org mirror" >&2
+    done
+
+    echo "All download mirrors failed for $(basename "$output")" >&2
+    return 1
+}
+
+prefetch_xwayland_sources() {
+    local dir="$1" pkgver filename suffix base
+    local -a mirrors urls
+
+    pkgver="$(sed -n 's/^pkgver=//p' "$dir/PKGBUILD" | head -n1 | tr -d "'\"")"
+    [[ -n "$pkgver" ]] || {
+        echo 'Unable to determine xorg-xwayland pkgver' >&2
+        return 1
+    }
+
+    # These are X.Org mirrors carrying identical release tarballs. Pre-fetching
+    # into makepkg's default SRCDEST lets makepkg keep its normal checksum and
+    # PGP validation while avoiding a single-point dependency on freedesktop.org.
+    mirrors=(
+        'https://mirror.csclub.uwaterloo.ca/x.org/individual/xserver/'
+        'https://ftp.gwdg.de/pub/x11/x.org/pub/individual/xserver/'
+        'https://www.mirrorservice.org/sites/ftp.x.org/pub/individual/xserver/'
+        'https://xorg.freedesktop.org/archive/individual/xserver/'
+    )
+
+    for suffix in '' '.sig'; do
+        filename="xwayland-${pkgver}.tar.xz${suffix}"
+        urls=()
+        for base in "${mirrors[@]}"; do
+            urls+=("${base}${filename}")
+        done
+        download_with_fallback "$dir/$filename" "${urls[@]}"
+    done
 }
 
 build_kio() {
@@ -119,6 +174,7 @@ prepare() {
   patch -Np1 -i "$srcdir/anland-xwayland.patch"
 }
 EOF_XWAYLAND_PATCH
+    prefetch_xwayland_sources "$dir"
     mkdir -p "$BUILD_ROOT/packages"
     chown -R user:user "$BUILD_ROOT/packages"
     chown -R user:user "$dir"
