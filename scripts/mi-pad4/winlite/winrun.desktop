@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=运行 Windows 程序
-Comment=使用 Hangover 运行 EXE/MSI
-Exec=/usr/local/bin/winrun %f
-Icon=wine
-Terminal=false
-NoDisplay=true
-MimeType=application/x-ms-dos-executable;application/x-msdownload;application/vnd.microsoft.portable-executable;application/x-msi;
