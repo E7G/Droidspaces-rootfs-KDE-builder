@@ -19,6 +19,7 @@ concurrency:
 env:
   HANGOVER_VERSION: '11.9'
   HANGOVER_SHA256: 0c66e48800c03d32c3c22029b5053cef3d61376aedcf44eaddf82dce63e410dd
+  HANGOVER_WINE_COMMIT: 2e8ad15d5b7b87ef0e1520bf9fec2ecfb31fd1b1
   MESA_KGSL_REV: e6250622794358a186afe3e00271f744728dbbb7
 
 jobs:
@@ -53,8 +54,6 @@ jobs:
               useradd -m -s /bin/bash user
               cp -a /repo/scripts/mi-pad4 /tmp/mi-pad4
               chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh
-              # The patched KWin PKGBUILD requires matching patched KIO during
-              # validation; WinLite only installs the resulting KWin package.
               BUILD_KDE=min \
               BUILD_KIO=true \
               BUILD_KWIN=true \
@@ -145,22 +144,19 @@ jobs:
 
   prepare-hangover:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore slim Hangover runtime
+      - name: Restore WinLite NTSync Hangover runtime
         id: hangover-cache
         uses: actions/cache@v4
         with:
           path: hangover-winlite
-          # v2 invalidates the old cache created before data.tar.zst extraction
-          # was fixed. GitHub caches are immutable, so code changes alone cannot
-          # repair a bad entry under the original key.
-          key: hangover-winlite-v2-${{ env.HANGOVER_VERSION }}-${{ env.HANGOVER_SHA256 }}
+          key: hangover-winlite-ntsync-v1-${{ env.HANGOVER_VERSION }}-${{ hashFiles('scripts/mi-pad4/winlite/build-hangover-ntsync.sh', 'scripts/mi-pad4/winlite/hangover-11.9-android-ntsync.patch') }}
 
-      - name: Extract required Hangover runtime
+      - name: Build patched Hangover Wine with Android NTSync
         shell: bash
         env:
           CACHE_HIT: ${{ steps.hangover-cache.outputs.cache-hit }}
@@ -169,77 +165,49 @@ jobs:
           runtime_valid() {
             test -x hangover-winlite/rootfs/usr/bin/wine \
               && test -x hangover-winlite/rootfs/usr/bin/wineserver \
+              && grep -aFq '/dev/ntsync' hangover-winlite/rootfs/usr/bin/wineserver \
+              && grep -Fq 'ntsync=compiled-in-android-uapi' \
+                   hangover-winlite/rootfs/usr/share/hangover-winlite-version \
               && find hangover-winlite/rootfs/usr/lib -name libarm64ecfex.dll \
                    -print -quit | grep -q . \
               && find hangover-winlite/rootfs/usr/lib -name wowbox64.dll \
                    -print -quit | grep -q .
           }
+
           if [[ "$CACHE_HIT" == true ]] && runtime_valid; then
-            echo 'Validated cached Hangover runtime'
+            echo 'Validated cached WinLite NTSync Hangover runtime'
             exit 0
           fi
 
-          rm -rf .ci/hangover hangover-winlite
-          mkdir -p .ci/hangover hangover-winlite/rootfs
-          bundle=".ci/hangover/hangover_${HANGOVER_VERSION}_ubuntu2404_noble_arm64.tar"
-          curl -fL --retry 5 --retry-all-errors \
-            -o "$bundle" \
-            "https://github.com/AndreRH/hangover/releases/download/hangover-${HANGOVER_VERSION}/hangover_${HANGOVER_VERSION}_ubuntu2404_noble_arm64.tar"
-          echo "${HANGOVER_SHA256}  $bundle" | sha256sum -c -
-          tar -xf "$bundle" -C .ci/hangover
+          rm -rf hangover-winlite .ci/hangover-ntsync
+          chmod +x scripts/mi-pad4/winlite/build-hangover-ntsync.sh
+          HANGOVER_VERSION="$HANGOVER_VERSION" \
+          HANGOVER_SHA256="$HANGOVER_SHA256" \
+          HANGOVER_WINE_COMMIT="$HANGOVER_WINE_COMMIT" \
+            scripts/mi-pad4/winlite/build-hangover-ntsync.sh hangover-winlite
 
-          shopt -s nullglob
-          debs=(
-            .ci/hangover/hangover-wine_*_arm64.deb
-            .ci/hangover/hangover-libarm64ecfex_*_arm64.deb
-            .ci/hangover/hangover-wowbox64_*_arm64.deb
-          )
-          ((${#debs[@]} == 3))
-          for deb in "${debs[@]}"; do
-            member="$(ar t "$deb" | grep '^data\.tar' | head -n1)"
-            [[ -n "$member" ]]
-            case "$member" in
-              *.zst) ar p "$deb" "$member" | tar --zstd -x -C hangover-winlite/rootfs ;;
-              *.xz)  ar p "$deb" "$member" | tar -xJ -C hangover-winlite/rootfs ;;
-              *.gz)  ar p "$deb" "$member" | tar -xz -C hangover-winlite/rootfs ;;
-              *)     ar p "$deb" "$member" | tar -x -C hangover-winlite/rootfs ;;
-            esac
-          done
+          runtime_valid
 
-          rm -rf \
-            hangover-winlite/rootfs/usr/share/doc \
-            hangover-winlite/rootfs/usr/share/man \
-            hangover-winlite/rootfs/usr/lib/debug
-          install -d hangover-winlite/rootfs/usr/share
-          printf '%s\n' \
-            "hangover=${HANGOVER_VERSION}" \
-            "sha256=${HANGOVER_SHA256}" \
-            'x64=arm64ec-fex' \
-            'x86=wowbox64' \
-            >hangover-winlite/rootfs/usr/share/hangover-winlite-version
-          if ! runtime_valid; then
-            echo 'Hangover extraction is incomplete:' >&2
-            find hangover-winlite/rootfs/usr -maxdepth 5 -type f \
-              \( -name 'wine*' -o -name 'libarm64ecfex.dll' -o -name 'wowbox64.dll' \) \
-              -printf '%m %p\n' >&2 || true
-            exit 1
-          fi
-
-      - name: Validate slim Hangover runtime
+      - name: Validate patched Hangover runtime
         shell: bash
         run: |
           set -euo pipefail
           test -x hangover-winlite/rootfs/usr/bin/wine
           test -x hangover-winlite/rootfs/usr/bin/wineserver
+          grep -aFq '/dev/ntsync' hangover-winlite/rootfs/usr/bin/wineserver
+          grep -Fq "wine-base=${HANGOVER_WINE_COMMIT}" \
+            hangover-winlite/rootfs/usr/share/hangover-winlite-version
+          grep -Fq 'ntsync=compiled-in-android-uapi' \
+            hangover-winlite/rootfs/usr/share/hangover-winlite-version
+          grep -Fq 'ntsync-fallback=esync' \
+            hangover-winlite/rootfs/usr/share/hangover-winlite-version
           find hangover-winlite/rootfs/usr/lib -name libarm64ecfex.dll \
             -print -quit | grep -q .
           find hangover-winlite/rootfs/usr/lib -name wowbox64.dll \
             -print -quit | grep -q .
+          cat hangover-winlite/rootfs/usr/share/hangover-winlite-version
           du -sh hangover-winlite/rootfs
 
-      # GitHub artifact ZIPs normalize regular files to 0644. Upload a tarball
-      # instead so Wine, wineserver and the remaining Hangover helpers keep
-      # their executable mode bits across jobs.
       - name: Pack slim Hangover runtime
         shell: bash
         run: |
@@ -254,8 +222,6 @@ jobs:
           name: hangover-winlite
           path: hangover-winlite.tar.zst
           if-no-files-found: error
-          # The payload is already compressed. Avoid wrapping it in another
-          # expensive deflate pass.
           compression-level: 0
           retention-days: 7
 
@@ -295,6 +261,9 @@ jobs:
           tar --zstd -xf "$archive" -C hangover-winlite
           test -x hangover-winlite/rootfs/usr/bin/wine
           test -x hangover-winlite/rootfs/usr/bin/wineserver
+          grep -aFq '/dev/ntsync' hangover-winlite/rootfs/usr/bin/wineserver
+          grep -Fq 'ntsync=compiled-in-android-uapi' \
+            hangover-winlite/rootfs/usr/share/hangover-winlite-version
 
       - name: Validate build inputs
         shell: bash
@@ -308,6 +277,10 @@ jobs:
           ((${#kwin[@]} == 1))
           ((${#mesa[@]} == 1))
           test -x hangover-winlite/rootfs/usr/bin/wine
+          test -x hangover-winlite/rootfs/usr/bin/wineserver
+          grep -aFq '/dev/ntsync' hangover-winlite/rootfs/usr/bin/wineserver
+          grep -Fq 'ntsync=compiled-in-android-uapi' \
+            hangover-winlite/rootfs/usr/share/hangover-winlite-version
           sha256sum "${kwin[@]}" "${mesa[@]}"
 
       - name: Build WinLite rootfs
@@ -336,7 +309,9 @@ jobs:
           ((${#archive[@]} == 1))
           xz -t "${archive[0]}"
           tar -tf "${archive[0]}" | sed 's#^\./##' >rootfs-files.txt
+
           for path in \
+            etc/fonts/conf.d/99-winlite-fonts.conf \
             usr/bin/droidspaces-init \
             usr/bin/droidspaces-tini \
             usr/bin/wine \
@@ -349,21 +324,46 @@ jobs:
             usr/share/droidspaces/anland-kwin-package \
             usr/share/droidspaces/mesa-kgsl \
             usr/share/droidspaces/winlite-profile \
-            usr/share/winlite/container.config
+            usr/share/hangover-winlite-version \
+            usr/share/winlite/container.config \
+            usr/share/winlite/wine-default.reg
           do
             grep -Fxq "$path" rootfs-files.txt || {
               echo "Missing $path" >&2
               exit 1
             }
           done
+
           grep -Eq '^var/lib/pacman/local/kwin-6\.7\.3-2/' rootfs-files.txt
           grep -Eq '^var/lib/pacman/local/mesa-1:26\.2\.0-[0-9.]+/' rootfs-files.txt
-          for unwanted_pkg in firefox plasma-workspace dolphin baloo xdg-desktop-portal; do
+
+          for unwanted_pkg in \
+            firefox plasma-workspace dolphin baloo xdg-desktop-portal \
+            lxqt-panel pcmanfm-qt kscreenlocker
+          do
             if grep -Eq "^var/lib/pacman/local/${unwanted_pkg}-[0-9]" rootfs-files.txt; then
-              echo "Unexpected heavyweight package: $unwanted_pkg" >&2
+              echo "Unexpected heavyweight/broken package: $unwanted_pkg" >&2
               exit 1
             fi
           done
+
+          member="$(tar -tf "${archive[0]}" | grep -E '(^|^\./)usr/share/hangover-winlite-version$' | head -n1)"
+          [[ -n "$member" ]]
+          tar -xOf "${archive[0]}" "$member" >hangover-version.txt
+          grep -Fq 'hangover=11.9-winlite-ntsync' hangover-version.txt
+          grep -Fq "wine-base=${HANGOVER_WINE_COMMIT}" hangover-version.txt
+          grep -Fq 'ntsync=compiled-in-android-uapi' hangover-version.txt
+          grep -Fq 'ntsync-runtime=auto' hangover-version.txt
+          grep -Fq 'ntsync-fallback=esync' hangover-version.txt
+
+          profile_member="$(tar -tf "${archive[0]}" | grep -E '(^|^\./)usr/share/droidspaces/winlite-profile$' | head -n1)"
+          [[ -n "$profile_member" ]]
+          tar -xOf "${archive[0]}" "$profile_member" >winlite-profile.txt
+          grep -Fq 'linux-panel=none' winlite-profile.txt
+          grep -Fq 'linux-file-manager=none' winlite-profile.txt
+          grep -Fq 'sync=ntsync-auto+esync-fallback' winlite-profile.txt
+          grep -Fq 'fonts=liberation+wqy-zenhei' winlite-profile.txt
+
           printf 'archive-size-bytes='; stat -c %s "${archive[0]}"
           echo 'WinLite RootFS validation passed'
 
