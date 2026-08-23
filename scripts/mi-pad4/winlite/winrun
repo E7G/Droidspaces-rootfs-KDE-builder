@@ -6,7 +6,10 @@ export HOME="${HOME:-/tmp/droidspaces-home}"
 export WINEPREFIX="${WINEPREFIX:-$HOME/.wine-winlite}"
 export WINEARCH=win64
 export WINEDEBUG="${WINEDEBUG:--all}"
-export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=}"
+# Keep two of Proton's broadly useful defaults without pulling its runtime:
+# disable Wine's menu builder (avoids background scans/wakeups) and winebth.sys
+# (Proton disables the Bluetooth driver too). Gecko/Mono prompts stay disabled.
+export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=;winemenubuilder.exe=d;winebth.sys=d}"
 export HODLL64="${HODLL64:-libarm64ecfex.dll}"
 export HODLL="${HODLL:-wowbox64.dll}"
 export LD_LIBRARY_PATH="/usr/lib/wine/aarch64-unix${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -31,12 +34,44 @@ else
     export WINLITE_SYNC=esync
 fi
 
+install_font_link() {
+    local windows_name="$1" family="$2" source
+    command -v fc-match >/dev/null 2>&1 || return 0
+    source="$(fc-match -f '%{file}\n' "$family" 2>/dev/null | head -n1)"
+    [[ -n "$source" && -r "$source" ]] || return 0
+    mkdir -p "$WINEPREFIX/drive_c/windows/Fonts"
+    ln -snf "$source" "$WINEPREFIX/drive_c/windows/Fonts/$windows_name"
+}
+
 init_prefix() {
     mkdir -p "$WINEPREFIX" "$HOME/Windows"
     if [[ ! -f "$WINEPREFIX/system.reg" ]]; then
         wineboot -u
-        regedit /S /usr/share/winlite/wine-default.reg || true
     fi
+
+    # Apply WinLite defaults versioned rather than only on first wineboot so an
+    # existing prefix receives later font/performance fixes without recreation.
+    if [[ ! -e "$WINEPREFIX/.winlite-tuning-v3" ]]; then
+        regedit /S /usr/share/winlite/wine-default.reg || true
+        touch "$WINEPREFIX/.winlite-tuning-v3"
+    fi
+
+    # Proton exposes a dedicated game drive. Do the same with a symlink only:
+    # no daemon, no mount and no extra package. G: points at the persistent
+    # Windows payload directory used by WinLite.
+    mkdir -p "$WINEPREFIX/dosdevices"
+    ln -snf "$HOME/Windows" "$WINEPREFIX/dosdevices/g:"
+
+    # Fontconfig normally makes these fonts visible already, but a few Windows
+    # applications probe C:\Windows\Fonts by filename. Symlinks fix that class
+    # of application with effectively zero additional image/prefix size.
+    install_font_link arial.ttf 'Liberation Sans'
+    install_font_link segoeui.ttf 'Liberation Sans'
+    install_font_link tahoma.ttf 'Liberation Sans'
+    install_font_link times.ttf 'Liberation Serif'
+    install_font_link cour.ttf 'Liberation Mono'
+    install_font_link msyh.ttf 'WenQuanYi Zen Hei'
+    install_font_link simsun.ttf 'WenQuanYi Zen Hei'
 
     # Wine's shell desktop is populated from the prefix Desktop folder. Expose
     # the persistent Droidspaces Windows directory there without a resident
