@@ -17,6 +17,27 @@ KWINKG=365ae0acc5f521f53a85fe6d9a030646687324f8
 XWAYLANDKG=8f82d79d312192108bb6417187c6ea986cdfcb3c
 PLASMAWORKSPACEKG=864d8e5f78cb3665317efc5ca3f525e87a30f6dc
 
+# Normal RootFS keeps the complete Plasma screen-locker stack. The dedicated
+# WinLite package builder intentionally disables it because WinLite has no
+# logind/ConsoleKit session manager and cannot safely recover from a lock.
+# SCREENLOCKER_MODE can be set explicitly to keep/disable. Auto mode identifies
+# the existing WinLite KWin-only artifact build without changing other callers.
+SCREENLOCKER_MODE="${SCREENLOCKER_MODE:-auto}"
+if [[ "$SCREENLOCKER_MODE" == auto ]]; then
+    if [[ "${BUILD_KIO:-true}" == true \
+          && "${BUILD_XWAYLAND:-true}" == false \
+          && "${BUILD_PLASMA_WORKSPACE:-true}" == false \
+          && -n "$PACKAGE_OUTPUT_DIR" ]]; then
+        SCREENLOCKER_MODE=disable
+    else
+        SCREENLOCKER_MODE=keep
+    fi
+fi
+case "$SCREENLOCKER_MODE" in
+    keep|disable) ;;
+    *) echo "Invalid SCREENLOCKER_MODE=$SCREENLOCKER_MODE (expected keep or disable)" >&2; exit 1 ;;
+esac
+
 pacman -S --noconfirm --needed \
     base-devel cmake ninja meson extra-cmake-modules kdoctools krunner \
     plasma-wayland-protocols python qt6-tools vulkan-headers wayland-protocols \
@@ -144,15 +165,15 @@ build_kwin() {
     clone_at https://gitlab.archlinux.org/archlinux/packaging/packages/kwin.git "$KWINKG" "$dir"
     sed -i "s/^arch=(.*)$/arch=('aarch64')/" "$dir/PKGBUILD"
 
-    # Mi Pad 4's Anland KWin runs without screen-locker integration. Arch's KWin
-    # package normally hard-depends on kscreenlocker, so remove that dependency
-    # from the custom KWin package itself. The kscreenlocker package may still
-    # remain installed because plasma-workspace/kwin-x11 require it.
-    sed -Ei "/^[[:space:]]*['\"]?kscreenlocker['\"]?[[:space:]]*$/d" "$dir/PKGBUILD"
+    if [[ "$SCREENLOCKER_MODE" == disable ]]; then
+        # WinLite must not carry a hard dependency on KScreenLocker.
+        sed -Ei "/^[[:space:]]*['\"]?kscreenlocker['\"]?[[:space:]]*$/d" "$dir/PKGBUILD"
+    fi
 
     cp "$SCRIPT_DIR/anland-kwin/kwin.patch" "$dir/anland-kwin.patch"
     cp -a "$SCRIPT_DIR/anland-kwin/backend" "$dir/anland-backend"
-    cat >> "$dir/PKGBUILD" <<'EOF_KWIN_PATCH'
+    if [[ "$SCREENLOCKER_MODE" == disable ]]; then
+        cat >> "$dir/PKGBUILD" <<'EOF_KWIN_PATCH_NO_LOCKER'
 source+=(anland-kwin.patch)
 sha256sums+=('SKIP')
 
@@ -162,12 +183,28 @@ prepare() {
   mkdir -p src/backends/anland
   cp -a "$startdir/anland-backend/." src/backends/anland/
 
-  # KWin 6.7.x explicitly supports compiling without KScreenLocker. Change the
-  # default before CMake configuration so no locker integration is linked in.
+  # WinLite has no usable session locker. Compile the integration completely out.
   sed -i 's/^\(option(KWIN_BUILD_SCREENLOCKER .* \)ON)$/\1OFF)/' CMakeLists.txt
   grep -Eq '^option\(KWIN_BUILD_SCREENLOCKER .* OFF\)$' CMakeLists.txt
 }
-EOF_KWIN_PATCH
+EOF_KWIN_PATCH_NO_LOCKER
+    else
+        cat >> "$dir/PKGBUILD" <<'EOF_KWIN_PATCH_WITH_LOCKER'
+source+=(anland-kwin.patch)
+sha256sums+=('SKIP')
+
+prepare() {
+  cd "$srcdir/kwin-$pkgver"
+  patch -Np1 -i "$srcdir/anland-kwin.patch"
+  mkdir -p src/backends/anland
+  cp -a "$startdir/anland-backend/." src/backends/anland/
+
+  # Normal RootFS keeps the standard KScreenLocker integration enabled.
+  grep -Eq '^option\(KWIN_BUILD_SCREENLOCKER .* ON\)$' CMakeLists.txt
+}
+EOF_KWIN_PATCH_WITH_LOCKER
+    fi
+
     mkdir -p "$BUILD_ROOT/packages"
     chown -R user:user "$BUILD_ROOT/packages"
     chown -R user:user "$dir"
@@ -176,14 +213,22 @@ EOF_KWIN_PATCH
     package="$(find "$BUILD_ROOT/packages" -maxdepth 1 -type f -name 'kwin-*.pkg.tar.*' -print -quit)"
     [ -n "$package" ] || { echo 'kwin package was not produced' >&2; find "$BUILD_ROOT" -maxdepth 3 -type f -name '*.pkg.tar.*' >&2; exit 1; }
 
-    if bsdtar -xOf "$package" .PKGINFO | grep -Eq '^depend = kscreenlocker([<>=].*)?$'; then
-        echo 'Custom KWin package still depends on kscreenlocker' >&2
-        exit 1
+    if [[ "$SCREENLOCKER_MODE" == disable ]]; then
+        if bsdtar -xOf "$package" .PKGINFO | grep -Eq '^depend = kscreenlocker([<>=].*)?$'; then
+            echo 'WinLite KWin package still depends on kscreenlocker' >&2
+            exit 1
+        fi
+    else
+        if ! bsdtar -xOf "$package" .PKGINFO | grep -Eq '^depend = kscreenlocker([<>=].*)?$'; then
+            echo 'Normal RootFS KWin package unexpectedly lost its kscreenlocker dependency' >&2
+            exit 1
+        fi
     fi
 
     install_local_package "$package"
-    if pacman -Q kscreenlocker >/dev/null 2>&1; then
-        echo 'kscreenlocker package retained only for Plasma/kwin-x11 dependency compatibility; custom KWin screen-locker integration is disabled.' >&2
+    if [[ "$SCREENLOCKER_MODE" == keep ]] && ! pacman -Q kscreenlocker >/dev/null 2>&1; then
+        echo 'Normal RootFS must retain kscreenlocker' >&2
+        exit 1
     fi
 }
 
@@ -256,12 +301,16 @@ if [[ -n "$PACKAGE_OUTPUT_DIR" ]]; then
     cp -a "$BUILD_ROOT/packages"/*.pkg.tar.* "$PACKAGE_OUTPUT_DIR/"
 fi
 install -d -m 0755 /usr/share/droidspaces
+if [[ "$SCREENLOCKER_MODE" == disable ]]; then
+    screenlocker_status='disabled-for-winlite'
+else
+    screenlocker_status='enabled-and-retained'
+fi
 printf '%s\n' \
   'patched-kwin=arch-native-6.7.3-anland' \
   'anland-protocol=b80bf63b75049bc92d7deb964c67336ef4651467' \
   'droidspaces-oss=1bc8208e85f4e31d9b11d0cb009c6e1db2a88408' \
-  'screenlocker=disabled-in-custom-kwin' \
-  'screenlocker-package=may-remain-for-plasma-dependencies' \
+  "screenlocker=${screenlocker_status}" \
   'socket=/run/display.sock' \
   > /usr/share/droidspaces/anland-kwin-package
 printf '%s\n' 'patched-plasma-workspace=6.7.4-anland-panel-remap' > /usr/share/droidspaces/plasma-workspace-panel-remap
