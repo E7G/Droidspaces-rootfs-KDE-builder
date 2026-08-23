@@ -345,7 +345,7 @@ jobs:
             usr/local/bin/winlite-session \
             usr/local/bin/winlite-supervisor \
             usr/local/lib/libion-legacy-shim.so \
-            usr/sbin/kwin_wayland_wrapper \
+            usr/bin/kwin_wayland_wrapper \
             usr/share/droidspaces/anland-kwin-package \
             usr/share/droidspaces/mesa-kgsl \
             usr/share/droidspaces/winlite-profile \
