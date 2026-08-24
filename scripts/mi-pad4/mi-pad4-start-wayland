@@ -89,6 +89,7 @@ export KDE_APPLICATIONS_AS_SCOPE=0
 export XDG_MENU_PREFIX=plasma-
 export XDG_SESSION_TYPE=wayland
 export QT_WAYLAND_RECONNECT=1
+export QT_LOGGING_RULES="kwin_backend_anland.debug=true;kwin_scene_opengl.debug=true"
 export _JAVA_AWT_WM_NONREPARENTING=1
 export KDE_USE_SYSTEMD=0
 # KIO's in-process file worker is faster but a worker fault terminates Dolphin.
@@ -128,7 +129,7 @@ fi
 # HOME is an Android bind mount, not /home/user. Apply profile defaults once per
 # revision so upgrades can repair known-bad Plasma state without resetting user
 # changes on every start.
-profile_revision=20260822-2
+profile_revision=20260825-1
 profile_stamp="$HOME/.config/.mi-pad4-profile-revision"
 profile_defaults=/usr/share/droidspaces/mi-pad4-profile
 if [[ "$(cat "$profile_stamp" 2>/dev/null || true)" != "$profile_revision" ]]; then
@@ -445,7 +446,7 @@ if [[ "${1:-}" = session ]]; then
   # XDG_CONFIG_HOME is a tmpfs because config locks on Android's fscrypt mount
   # fail with ENOKEY. Seed every performance/stability setting before KWin and
   # Plasma start; otherwise they silently regenerate expensive defaults here.
-  for config in kwinrc kscreenlockerrc plasma-localerc kdeglobals \
+  for config in kwinrc kscreenlockerrc plasma-localerc kdeglobals kwinoutputconfig.json \
       dolphinrc baloofilerc kxkbrc mimeapps.list; do
     if [[ -s "$HOME/.config/$config" ]]; then
       cp -f "$HOME/.config/$config" "$plasma_config_home/$config"
@@ -507,6 +508,11 @@ if [[ "${1:-}" = session ]]; then
   # KWin writes this JSON after matching the virtual output. Normalize the
   # runtime copy before KWin starts as well; the persistent HOME config is not
   # the one used by this fscrypt-safe Plasma session.
+  if [[ ! -s "$plasma_config_home/kwinoutputconfig.json" && \
+        -s "$profile_defaults/kwinoutputconfig.json" ]]; then
+    cp -f "$profile_defaults/kwinoutputconfig.json" \
+      "$plasma_config_home/kwinoutputconfig.json"
+  fi
   if [[ -f "$plasma_config_home/kwinoutputconfig.json" ]]; then
     sed -i \
       -e 's/"transform"[[:space:]]*:[[:space:]]*"Flipped"/"transform": "Normal"/g' \
@@ -534,6 +540,12 @@ if [[ "${1:-}" = session ]]; then
     kill "$kwin_pid" 2>/dev/null || true
     wait "$kwin_pid" 2>/dev/null || true
     exit 1
+  fi
+  if [[ -f "$plasma_config_home/kwinoutputconfig.json" ]]; then
+    sed -i \
+      -e 's/"transform"[[:space:]]*:[[:space:]]*"Flipped"/"transform": "Normal"/g' \
+      -e 's/"autoRotation"[[:space:]]*:[[:space:]]*"InTabletMode"/"autoRotation": "Never"/g' \
+      "$plasma_config_home/kwinoutputconfig.json" 2>/dev/null || true
   fi
   # Anland audio nodes appear asynchronously after the backend connects.
   # Do not block Plasma startup while waiting for them.

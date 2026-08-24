@@ -531,7 +531,7 @@ void AnlandBackend::onReconnectTimer()
         return; // still down, keep retrying
     }
 
-    qCInfo(KWIN_ANLAND) << "consumer reconnected";
+    qCWarning(KWIN_ANLAND) << "consumer reconnected; importing buffers";
     m_inFallback = false;
     // The consumer has just handed over a selected BufferQueue slot.  It is
     // already ready for the first rendered frame; waiting for a
@@ -549,7 +549,9 @@ void AnlandBackend::onReconnectTimer()
     // balanced regardless of whether the GL layer is attached yet.
     AnlandEglLayer *layer = m_outputs[0]->eglLayer();
     if (layer) {
-        layer->importBuffers(get_buf_count(m_display));
+        const bool imported = layer->importBuffers(get_buf_count(m_display));
+        qCWarning(KWIN_ANLAND) << "consumer buffer import" << imported
+                               << "count" << get_buf_count(m_display);
     }
     setupNotifiers();
     // Attach the fresh audio socket (a new socketpair was installed by pickup_fds).
@@ -564,6 +566,7 @@ void AnlandBackend::onReconnectTimer()
     // immediately after every reconnect, even if it did not change meanwhile.
     sendConsumerVar(CONSUMER_VAR_ANDROID_IME, m_androidImeActive ? 1 : 0);
     m_outputs[0]->resumeRendering();
+    qCWarning(KWIN_ANLAND) << "consumer reconnect resumed render loop";
     if (layer) {
         layer->addDeviceRepaint(Region::infinite());
     }

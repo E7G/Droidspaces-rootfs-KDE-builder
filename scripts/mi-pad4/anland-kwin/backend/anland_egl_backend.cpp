@@ -320,6 +320,13 @@ void AnlandEglLayer::onOutputTransformChanged()
 
 std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
 {
+    static int debugBeginCount = 0;
+    if (debugBeginCount++ < 12) {
+        qCWarning(KWIN_ANLAND) << "begin frame" << debugBeginCount
+                               << "sceneInvalid" << m_sceneInvalid
+                               << "bufCount" << m_bufCount
+                               << "selected" << get_selected_idx(m_display);
+    }
     m_backend->openglContext()->makeCurrent();
 
     m_currentIndex = get_selected_idx(m_display);
@@ -343,6 +350,13 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
 
 bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame)
 {
+    static int debugEndCount = 0;
+    if (debugEndCount++ < 12) {
+        qCWarning(KWIN_ANLAND) << "end frame" << debugEndCount
+                               << "renderedEmpty" << renderedDeviceRegion.isEmpty()
+                               << "damagedEmpty" << damagedDeviceRegion.isEmpty()
+                               << "current" << m_currentIndex;
+    }
     // New client damage changes the persistent scene generation, making every
     // rotating Android slot stale. Do not re-arm the mask for a sync-only frame:
     // onConsumerReady() may request a frame solely to copy the unchanged scene

@@ -326,8 +326,9 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
                  sed -i 's#Exec=/usr/lib/firefox/firefox#Exec=/usr/local/bin/mi-pad4-firefox#g' "$desktop"; \
              done; \
          fi && \
-        install -Dm644 /tmp/mi-pad4/dolphinrc /usr/share/droidspaces/mi-pad4-profile/dolphinrc && \
-        install -Dm644 /tmp/mi-pad4/dolphin-global-viewproperties /usr/share/droidspaces/mi-pad4-profile/dolphin-global-viewproperties && \
+         install -Dm644 /tmp/mi-pad4/dolphinrc /usr/share/droidspaces/mi-pad4-profile/dolphinrc && \
+         install -Dm644 /tmp/mi-pad4/kwinoutputconfig.json /usr/share/droidspaces/mi-pad4-profile/kwinoutputconfig.json && \
+         install -Dm644 /tmp/mi-pad4/dolphin-global-viewproperties /usr/share/droidspaces/mi-pad4-profile/dolphin-global-viewproperties && \
         install -Dm644 /tmp/mi-pad4/user-places.xbel /usr/share/droidspaces/mi-pad4-profile/user-places.xbel && \
         install -Dm644 /tmp/mi-pad4/container.config /usr/share/droidspaces/mi-pad4-container.config && \
          install -Dm644 /tmp/mi-pad4/sepolicy.rule /usr/share/droidspaces/mi-pad4-sepolicy.rule && \
