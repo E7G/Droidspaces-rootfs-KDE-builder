@@ -257,8 +257,11 @@ void AnlandEglLayer::armRenderFence()
     // The producer-side compatibility worker waits on this native fence, then
     // notifies Clover with fence=-1. KWin stays asynchronous without exposing
     // Android 4.4 BufferQueue to the unreliable imported-fence path.
-    const bool nativeFence = !qEnvironmentVariableIsSet("ANLAND_NATIVE_FENCE")
-        || qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1;
+    // Clover's 4.4 KGSL sync_file implementation is not reliable enough to
+    // be the default presentation clock. Keep the proven synchronous path for
+    // this tablet; the producer worker remains available as an explicit
+    // ANLAND_NATIVE_FENCE=1 opt-in for newer Android consumers.
+    const bool nativeFence = qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1;
     if (nativeFence) {
         EGLNativeFence fence{
             m_backend->openglContext()->displayObject()
