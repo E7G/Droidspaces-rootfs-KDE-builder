@@ -82,6 +82,10 @@ void AnlandOutput::init(const QSize &pixelSize, int refresh, qreal scale)
         .scale = scale,
         .modes = {mode},
         .currentMode = mode,
+        // Android already owns the physical Clover sensor/orientation. KWin's
+        // default InTabletMode policy can apply a second transform to the
+        // virtual Anland output, leaving panel/client surfaces upside down.
+        .autoRotatePolicy = BackendOutput::AutoRotationPolicy::Never,
     });
 }
 
