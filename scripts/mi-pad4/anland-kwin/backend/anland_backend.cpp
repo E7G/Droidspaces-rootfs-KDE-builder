@@ -538,6 +538,12 @@ void AnlandBackend::onReconnectTimer()
     // buffer-ready event here deadlocks the initial handshake because that
     // event is emitted only after the consumer receives our first refresh.
     m_consumerReady = true;
+    // Bootstrap the first consumer dequeue.  Clover's BufferQueue can reach
+    // refresh_done() before the initial RenderLoop callback is scheduled; a
+    // bare refresh message is harmless (there is no pending GPU fence) and
+    // makes the consumer emit its buffer-ready event so KWin can submit the
+    // first real scene frame instead of leaving Anland black.
+    trigger_refresh(m_display);
     m_reconnectTimer->stop();
 
     // try_exit_fallback() already received a fresh dmabuf set. Import it into the
