@@ -531,7 +531,7 @@ void AnlandBackend::onReconnectTimer()
         return; // still down, keep retrying
     }
 
-    qCWarning(KWIN_ANLAND) << "consumer reconnected; importing buffers";
+    qCDebug(KWIN_ANLAND) << "consumer reconnected; importing buffers";
     m_inFallback = false;
     // The consumer has just handed over a selected BufferQueue slot.  It is
     // already ready for the first rendered frame; waiting for a
@@ -556,8 +556,8 @@ void AnlandBackend::onReconnectTimer()
     AnlandEglLayer *layer = m_outputs[0]->eglLayer();
     if (layer) {
         const bool imported = layer->importBuffers(get_buf_count(m_display));
-        qCWarning(KWIN_ANLAND) << "consumer buffer import" << imported
-                               << "count" << get_buf_count(m_display);
+        qCDebug(KWIN_ANLAND) << "consumer buffer import" << imported
+                              << "count" << get_buf_count(m_display);
     }
     setupNotifiers();
     // Attach the fresh audio socket (a new socketpair was installed by pickup_fds).
@@ -572,7 +572,7 @@ void AnlandBackend::onReconnectTimer()
     // immediately after every reconnect, even if it did not change meanwhile.
     sendConsumerVar(CONSUMER_VAR_ANDROID_IME, m_androidImeActive ? 1 : 0);
     m_outputs[0]->resumeRendering();
-    qCWarning(KWIN_ANLAND) << "consumer reconnect resumed render loop";
+    qCDebug(KWIN_ANLAND) << "consumer reconnect resumed render loop";
     if (layer) {
         layer->addDeviceRepaint(Region::infinite());
     }
@@ -584,7 +584,7 @@ void AnlandBackend::onReconnectTimer()
     // after the panel has had time to bind to the new output.  This is a
     // one-shot startup/reconnect nudge, not a polling loop, and is harmless
     // when the scene already produced a normal client-damage frame.
-    QTimer::singleShot(1500, this, [this]() {
+    QTimer::singleShot(2500, this, [this]() {
         if (m_inFallback || m_outputs.isEmpty()) {
             return;
         }

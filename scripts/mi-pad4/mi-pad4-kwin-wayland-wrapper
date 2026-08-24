@@ -16,7 +16,10 @@ export LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so
 # Clover exposes the SDM660 big cores as 4 and 7 to this container. Keep the
 # compositor there so frame submission does not migrate through the little
 # cluster while Android's SurfaceFlinger is handling the same frame.
-if [[ -x /usr/bin/taskset ]]; then
-    exec /usr/bin/taskset -c 4,7 /usr/sbin/kwin_wayland --anland "$@"
+if [[ -x /usr/bin/taskset ]] && /usr/bin/taskset -c 4-7 true 2>/dev/null; then
+    # Keep the compositor on the SDM660 performance cluster and give it a
+    # small priority boost.  The governor remains dynamic, so idle power is
+    # still controlled by Android.
+    exec /usr/bin/taskset -c 4-7 /usr/bin/nice -n -5 /usr/sbin/kwin_wayland --anland "$@"
 fi
 exec /usr/sbin/kwin_wayland --anland "$@"
