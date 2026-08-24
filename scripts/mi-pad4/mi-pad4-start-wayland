@@ -249,9 +249,10 @@ start_plasmashell() {
   export LIBGL_ALWAYS_SOFTWARE=1
   export GALLIUM_DRIVER=llvmpipe
   export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
-  export QT_QUICK_BACKEND=software
-  export QT_OPENGL=software
-  export QSG_RHI_BACKEND=software
+  # Qt Quick's software RHI aborts on this Qt 6/Wayland build before it
+  # submits the panel surface. Use llvmpipe through the normal OpenGL RHI
+  # instead; KWin and app windows remain on the separate KGSL path.
+  unset QT_QUICK_BACKEND QT_OPENGL QSG_RHI_BACKEND
   export QSG_RENDER_LOOP=basic
   exec /usr/bin/plasmashell -p org.kde.plasma.desktop
 }

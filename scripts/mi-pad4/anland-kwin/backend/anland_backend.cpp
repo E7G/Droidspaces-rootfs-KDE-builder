@@ -576,6 +576,22 @@ void AnlandBackend::onReconnectTimer()
     if (layer) {
         layer->addDeviceRepaint(Region::infinite());
     }
+
+    // Plasma starts just after KWin has resumed.  On Clover the first
+    // reconnect repaint can therefore finish before plasmashell commits its
+    // panel surface; the old BufferQueue then has no later damage event to
+    // wake the custom RenderLoop.  Give the session one deferred full repaint
+    // after the panel has had time to bind to the new output.  This is a
+    // one-shot startup/reconnect nudge, not a polling loop, and is harmless
+    // when the scene already produced a normal client-damage frame.
+    QTimer::singleShot(1500, this, [this]() {
+        if (m_inFallback || m_outputs.isEmpty()) {
+            return;
+        }
+        if (AnlandEglLayer *deferredLayer = m_outputs[0]->eglLayer()) {
+            deferredLayer->addDeviceRepaint(Region::infinite());
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
