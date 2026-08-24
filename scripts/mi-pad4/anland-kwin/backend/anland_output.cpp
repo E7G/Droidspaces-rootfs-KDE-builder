@@ -120,8 +120,26 @@ void AnlandOutput::completeFrame()
     m_frame.reset();
 }
 
+void AnlandOutput::handOffWithoutFrame()
+{
+    // Direct stale-slot copies and clean acknowledgements have no OutputFrame,
+    // so RenderLoop would otherwise accept client damage while Android still
+    // owns the selected slot. Hold composition until its matching ready event.
+    m_renderLoop->inhibit();
+    m_unframedPresentInhibited = true;
+    if (!m_backend->notifyFramePresented()) {
+        m_renderLoop->uninhibit();
+        m_unframedPresentInhibited = false;
+    }
+}
+
 void AnlandOutput::onConsumerReady()
 {
+    if (m_unframedPresentInhibited) {
+        m_renderLoop->uninhibit();
+        m_unframedPresentInhibited = false;
+    }
+
     if (m_awaitingPresent) {
         m_awaitingPresent = false;
         completeFrame();
@@ -129,11 +147,18 @@ void AnlandOutput::onConsumerReady()
 
     // A buffer-ready event means the consumer has already selected its *next*
     // dmabuf and is blocked in refresh_done() waiting for exactly one reply. If
-    // this buffer still carries old/undefined contents, render the current scene
-    // into it. This walks all rotation buffers after damage without free-running
-    // once they are synchronized.
+    // this slot still carries an older scene generation, copy the persistent
+    // scene into it directly. Do not schedule a synthetic KWin frame: KWin folds
+    // device repair into surfaceDamage, which would make that sync frame look
+    // like new client damage and dirty every slot again forever.
     if (m_eglLayer && m_eglLayer->needsRepaint()) {
-        m_renderLoop->scheduleRepaint();
+        if (m_eglLayer->syncSelectedBuffer()) {
+            handOffWithoutFrame();
+        } else {
+            // The persistent scene itself is invalid after startup, reconnect or
+            // rotation, so it must be composed once before direct slot copies.
+            m_eglLayer->addDeviceRepaint(Region::infinite());
+        }
         return;
     }
 
@@ -142,7 +167,7 @@ void AnlandOutput::onConsumerReady()
     // new request unanswered; the consumer hit its five-second safety timeout,
     // tore down every dmabuf and reconnected, producing the periodic full-screen
     // flash. A bare refresh message keeps BufferQueue alive while the GPU sleeps.
-    m_backend->notifyFramePresented();
+    handOffWithoutFrame();
 }
 
 void AnlandOutput::resize(const QSize &newSize)
@@ -191,6 +216,11 @@ void AnlandOutput::stopRendering()
     if (m_awaitingPresent) {
         m_awaitingPresent = false;
         m_frame.reset();
+    }
+
+    if (m_unframedPresentInhibited) {
+        m_renderLoop->uninhibit();
+        m_unframedPresentInhibited = false;
     }
 
     if (!m_renderingInhibited) {

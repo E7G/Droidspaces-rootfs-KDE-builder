@@ -12,25 +12,28 @@ export PULSE_RUNTIME_PATH="$XDG_RUNTIME_DIR/pulse"
 export PULSE_SERVER="unix:$PULSE_RUNTIME_PATH/native"
 export PIPEWIRE_REMOTE="$XDG_RUNTIME_DIR/pipewire-0"
 # Use Firefox's native FFmpeg V4L2-M2M path. On this Clover kernel the
-# Qualcomm decoder is /dev/video32; /dev/video2 is a single-plane graphics
-# node and must not be selected as the decoder.
-export MOZ_DRM_DEVICE=/dev/dri/renderD128
+# Qualcomm decoder is /dev/video32. Do not invent a DRM render node on KGSL-only
+# images; use it only when the container actually exposes one.
+if [[ -e /dev/dri/renderD128 ]]; then
+    export MOZ_DRM_DEVICE=/dev/dri/renderD128
+else
+    unset MOZ_DRM_DEVICE
+fi
 # Arch Firefox's generic RDD sandbox does not whitelist Qualcomm's legacy
 # msm_vidc ioctls. This affects only the media decoder process.
 export MOZ_DISABLE_RDD_SANDBOX=1
-# The stock Clover KGSL export path is kept as an opt-in diagnostic mode. It
-# spins the Firefox renderer on this Anland/4.4 combination even for a blank
-# page. The normal profile uses the low-power Wayland compositor; KWin remains
-# on KGSL and video still uses V4L2-M2M.
-if [[ "${MI_PAD4_FIREFOX_GPU:-0}" = 1 ]]; then
+# Extreme profile: use FD512/KGSL Hardware WebRender by default so Firefox's
+# FFmpeg V4L2 path can hand DRM_PRIME frames to an accelerated compositor.
+# MI_PAD4_FIREFOX_GPU=0 remains the emergency compatibility fallback.
+if [[ "${MI_PAD4_FIREFOX_GPU:-1}" = 1 ]]; then
+    export MOZ_WEBRENDER=1
     export MESA_LOADER_DRIVER_OVERRIDE=kgsl
     export FD_FORCE_KGSL=1
     export FD_KGSL_ENABLE_DMABUF=1
     export MOZ_DISABLE_GPU_SANDBOX=1
+    export LD_PRELOAD="/usr/local/lib/libion-legacy-shim.so${LD_PRELOAD:+:$LD_PRELOAD}"
 else
-    # Keep Firefox on the stable Wayland EGL path. KGSL is reserved for KWin;
-    # forcing it into Firefox's WebRender process causes shader retries and a
-    # busy-loop on this legacy Anland stack instead of improving playback.
+    # Fallback to software compositor only if explicitly disabled
     unset MESA_LOADER_DRIVER_OVERRIDE FD_FORCE_KGSL FD_KGSL_ENABLE_DMABUF
     unset MOZ_DISABLE_GPU_SANDBOX
     export MOZ_WEBRENDER=1
@@ -38,9 +41,6 @@ else
     # broken direct-DMABUF window export path. This accelerates page/video
     # composition without feeding recycled browser buffers into Anland.
     unset MOZ_DRM_DEVICE LD_PRELOAD
-fi
-if [[ "${MI_PAD4_FIREFOX_GPU:-0}" = 1 ]]; then
-    export LD_PRELOAD="/usr/local/lib/libion-legacy-shim.so${LD_PRELOAD:+:$LD_PRELOAD}"
 fi
 unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER
 unset XWAYLAND_FORCE_KGSL_SURFACELESS MOZ_X11_EGL
@@ -53,7 +53,7 @@ ulimit -n 8192
 
 # SDM660 has 4 efficiency + 4 performance cores.
 # Avoid Firefox creating a generic worker pool for all 8 CPUs.
-export MOZ_TASKCONTROLLER_THREADCOUNT="${MI_PAD4_FIREFOX_TASK_THREADS:-4}"
+export MOZ_TASKCONTROLLER_THREADCOUNT="${MI_PAD4_FIREFOX_TASK_THREADS:-3}"
 # Enabled by our Firefox source patch below.
 # Reuses Firefox Android's big.LITTLE policy for Stylo workers only.
 export MOZ_MI_PAD4_ANDROID_SCHED="${MI_PAD4_FIREFOX_ANDROID_SCHED:-1}"
@@ -123,8 +123,8 @@ cat >"$profile/user.js" <<'EOF'
 // ============================================================
 // ---------- Process model ----------
 // Do not disable Fission completely.
-// Two normal web processes are enough for 4 GB RAM.
-user_pref("dom.ipc.processCount", 2);
+// One web process is the best 4 GiB compromise; GPU/RDD remain separate.
+user_pref("dom.ipc.processCount", 1);
 user_pref("dom.ipc.processCount.webIsolated", 1);
 // Never keep spare content processes waiting in memory.
 user_pref("dom.ipc.processPrelaunch.enabled", false);
@@ -140,12 +140,11 @@ user_pref("browser.sessionhistory.max_total_viewers", 2);
 // A large "disk cache" would simply duplicate RAM usage.
 user_pref("browser.cache.disk.enable", false);
 user_pref("browser.cache.disk.capacity", 0);
-// 16 MiB was a little too aggressive and causes extra decode/refetch work.
-// 32 MiB is a better CPU/RAM compromise on this tablet.
-user_pref("browser.cache.memory.capacity", 32768);
-user_pref("media.cache_size", 32768);
-// Keep enough decoded images to avoid constant re-decoding.
-user_pref("image.cache.size", 16777216);
+// Keep the browser's RAM footprint bounded; hardware video frames do not use
+// these caches. The disk cache remains disabled because HOME is Android-backed.
+user_pref("browser.cache.memory.capacity", 16384);
+user_pref("media.cache_size", 16384);
+user_pref("image.cache.size", 8388608);
 user_pref("image.mem.decode_bytes_at_a_time", 65536);
 user_pref("image.mem.shared.unmap.min_expiration_ms", 60000);
 // ---------- Session / daily usability ----------
@@ -171,28 +170,32 @@ user_pref("general.smoothScroll", false);
 user_pref("apz.overscroll.enabled", false);
 // Follow Wayland/KWin vsync rather than forcing software timing.
 user_pref("layout.frame_rate", -1);
-// ---------- Video decode ----------
+// ---------- Video decode - Clover Extreme v3 ----------
+// Force hardware decoding via V4L2 /dev/video32 (msm_vidc)
 user_pref("media.hardware-video-decoding.enabled", true);
 user_pref("media.hardware-video-decoding.force-enabled", true);
+// Clover msm_vidc (/dev/video32) uses Firefox's FFmpeg/V4L2-M2M decoder.
 user_pref("media.ffvpx-hw.enabled", true);
 user_pref("media.rdd-ffvpx.enabled", true);
-user_pref("media.prefer-non-ffvpx", false);
-// Clover uses Firefox's patched FFmpeg/V4L2-M2M decoder.
-user_pref("media.ffmpeg.vaapi.enabled", false);
 user_pref("media.rdd-ffmpeg.enabled", true);
 user_pref("media.rdd-vpx.enabled", true);
+// Prefer the native FFmpeg/V4L2-M2M path. false prefers Mozilla's bundled
+// ffvpx codecs and can silently turn H.264 playback into a CPU-bound path.
+user_pref("media.prefer-non-ffvpx", true);
+user_pref("media.ffmpeg.vaapi.enabled", false);
+user_pref("media.mediasource.vp9.enabled", true);
+user_pref("media.av1.enabled", false);
+// Keep FFmpeg software fallback available for AAC/MP4 audio. Hardware video
+// remains first in the PDM order; disabling fallback globally also rejects
+// Douyin's audio/mp4a-latm track and produces a video-only stream.
+user_pref("media.ffmpeg.disable-software-fallback", false);
 user_pref("media.decoder.recycle.enabled", true);
 user_pref("media.ffvpx.enabled", true);
-user_pref("media.ffvpx.hw.enabled", true);
-// ---------- Do NOT cripple web compatibility ----------
-// WebRTC / online meetings / some H.264 fallbacks.
-user_pref("media.gmp-provider.enabled", true);
-user_pref("media.gmp-gmpopenh264.enabled", true);
-// Keep these codecs available.
-// Sites can still select H.264 hardware decode when available.
-user_pref("media.av1.enabled", true);
-user_pref("media.mediasource.vp9.enabled", true);
-// ---------- WebRender ----------
+// OpenH264 is for WebRTC interoperability, not normal web video. On Clover it
+// can be selected for H.264 playback and consume an entire big core.
+user_pref("media.gmp-gmpopenh264.enabled", false);
+user_pref("media.gmp-gmpopenh264.provider.enabled", false);
+// ---------- WebRender - Clover Extreme v3 ----------
 user_pref("media.gpu-process-decoder", true);
 user_pref("gfx.webrender.all", true);
 user_pref("gfx.webrender.enabled", true);
@@ -201,31 +204,31 @@ user_pref("gfx.webrender.precache-shaders", false);
 user_pref("gfx.webrender.program-binary-disk", false);
 user_pref("layers.acceleration.force-enabled", true);
 user_pref("layers.acceleration.disabled", false);
-// Keep the current low-RAM Linux arrangement.
-user_pref("layers.gpu-process.enabled", false);
+user_pref("layers.gpu-process.enabled", true);
 user_pref("gfx.canvas.accelerated.cache-items", 2048);
 user_pref("gfx.canvas.accelerated.cache-size", 512);
 user_pref("gfx.color_management.mode", 0);
 user_pref("gfx.webrender.low-quality-pinch-zoom", true);
-// ---------- Clover / Anland presentation workaround ----------
-// Do not remove these yet.
-// The legacy KGSL + Anland buffer-age path can expose stale regions.
+// ---------- Clover / Anland presentation - Clover Extreme v3 ----------
+// Persistent scene FBO in KWin handles damage tracking; allow Firefox to
+// expose accelerated Wayland/DMABUF paths without the old stale-buffer hacks.
+user_pref("widget.dmabuf.enabled", true);
+// Do not export the browser window/WebGL buffer directly to Anland. Only the
+// decoder's internal DRM_PRIME surface path is enabled; KWin owns presentation.
+user_pref("widget.dmabuf-export.force-enabled", false);
+user_pref("widget.dmabuf-feedback.enabled", false);
+user_pref("widget.dmabuf-webgl.enabled", false);
+user_pref("widget.wayland.vsync.enabled", true);
+user_pref("widget.wayland.opaque-region.enabled", true);
+// Clover's rotating BufferQueue has unreliable buffer-age preservation.
+// Firefox still uses hardware WebRender, but submits a complete EGL frame.
 user_pref("gfx.webrender.max-partial-present-rects", 0);
 user_pref("gfx.webrender.allow-partial-present-buffer-age", false);
 user_pref("gfx.webrender.force-partial-present", false);
 user_pref("gfx.webrender.compositor", false);
 user_pref("gfx.webrender.compositor.force-enabled", false);
-// Browser window DMABUF export is still unsafe.
-// KWin itself remains directly KGSL accelerated.
-user_pref("widget.dmabuf.enabled", false);
-user_pref("widget.dmabuf-feedback.enabled", false);
-user_pref("widget.dmabuf-export.force-enabled", false);
-user_pref("widget.dmabuf-webgl.enabled", false);
-user_pref("widget.wayland.vsync.enabled", true);
-user_pref("widget.wayland.opaque-region.enabled", true);
 // ---------- Audio ----------
 // Firefox -> PipeWire/Pulse protocol -> Anland audio bridge -> Android
-user_pref("media.cubeb.backend", "pulse");
 user_pref("media.cubeb.force_null_context", false);
 // ---------- Background collection ----------
 user_pref("toolkit.telemetry.enabled", false);

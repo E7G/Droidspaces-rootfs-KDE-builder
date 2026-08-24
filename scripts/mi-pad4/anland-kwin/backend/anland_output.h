@@ -76,6 +76,7 @@ public:
 
 private:
     void completeFrame();
+    void handOffWithoutFrame();
 
     Q_DISABLE_COPY(AnlandOutput);
 
@@ -84,6 +85,10 @@ private:
     std::shared_ptr<OutputFrame> m_frame;
     AnlandEglLayer *m_eglLayer = nullptr;
     bool m_awaitingPresent = false;
+    // Direct stale-slot copies bypass OutputFrame. Temporarily inhibit the
+    // RenderLoop until the consumer acknowledges that copy, otherwise queued
+    // client damage could overwrite the slot while Android is presenting it.
+    bool m_unframedPresentInhibited = false;
     // Tracks our RenderLoop::inhibit() so inhibit/uninhibit stay balanced
     // (uninhibit() asserts the count is > 0). See onConsumerLost()/resumeRendering().
     bool m_renderingInhibited = false;

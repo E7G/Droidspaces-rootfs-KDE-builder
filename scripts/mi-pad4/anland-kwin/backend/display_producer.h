@@ -28,14 +28,16 @@ void disconnect(display_ctx *ctx);
 
 int  get_screen_info(display_ctx *ctx, uint32_t *width, uint32_t *height, uint32_t *format, uint32_t *refresh);
 
-/* Stash the render-done fence (created in doEndFrame) for the current frame. The
- * next trigger_refresh hands it to the consumer on the dedicated fence channel, so
- * SurfaceFlinger waits on it GPU-side instead of the producer CPU-blocking.
+/* Stash the render-done fence (created in doEndFrame) for the current frame.
+ * trigger_refresh moves it to a sleeping compatibility worker. The worker waits
+ * for completion and then sends a bare refresh to old Android BufferQueue, which
+ * avoids both KWin main-thread blocking and Clover's unreliable fence import.
  * Takes ownership of fence_fd (-1 = none). */
 void set_render_fence(display_ctx *ctx, int fence_fd);
 
-/* Signal the consumer that the current frame is done by sending one message (with
- * the render fence, if any) on the dedicated fence channel. No-op in fallback. */
+/* Signal the consumer. Fenced frames are serialized through the asynchronous
+ * worker queue; idle/no-fence frames are acknowledged immediately. No-op in
+ * fallback. */
 int  trigger_refresh(display_ctx *ctx);
 
 /* Pull one pending input event. Returns 1 if an event was written, 0 if none was

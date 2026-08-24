@@ -2,12 +2,16 @@
 #include "display_producer.h"
 #include "socket_utils.h"
 
-#include <poll.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <pthread.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -15,6 +19,14 @@
 /* poll() timeout (ms) for the two reconnect handshake steps. Kept short so the
  * caller's reconnect loop stays responsive when no consumer is present yet. */
 #define HANDSHAKE_TIMEOUT_MS 100
+#define FENCE_WAIT_TIMEOUT_MS 4000
+#define FENCE_QUEUE_SIZE (MAX_BUFS * 4)
+
+struct fence_job {
+    int render_fence;
+    int notify_fd;
+    uint64_t generation;
+};
 
 struct display_ctx {
     int      ctrl_fd;
@@ -24,6 +36,18 @@ struct display_ctx {
     int      shm_fd;
     int      audio_fd;        /* local end of the bidirectional audio socketpair (hello slot 4) */
     int      pending_render_fence; /* render-done fence for the in-flight frame */
+    pthread_t fence_worker;
+    pthread_mutex_t fence_lock;
+    pthread_cond_t fence_idle;
+    int      fence_wake_efd;
+    struct fence_job fence_queue[FENCE_QUEUE_SIZE];
+    size_t   fence_queue_head;
+    size_t   fence_queue_tail;
+    size_t   fence_queue_count;
+    uint64_t fence_generation;
+    bool     fence_worker_started;
+    bool     fence_worker_stop;
+    bool     fence_worker_active;
     volatile uint32_t *shm_ptr;
     uint32_t screen_w, screen_h;
     uint32_t pixel_format;
@@ -38,6 +62,214 @@ struct display_ctx {
     void  *fallback_userdata;
 };
 
+static int send_refresh_ready(int fd)
+{
+    const char byte = 0;
+    ssize_t sent = send(fd, &byte, sizeof(byte), MSG_NOSIGNAL | MSG_DONTWAIT);
+
+    if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        struct pollfd pfd = { .fd = fd, .events = POLLOUT };
+        int ret;
+        do {
+            ret = poll(&pfd, 1, 100);
+        } while (ret < 0 && errno == EINTR);
+        if (ret > 0 && (pfd.revents & POLLOUT))
+            sent = send(fd, &byte, sizeof(byte), MSG_NOSIGNAL | MSG_DONTWAIT);
+    }
+
+    if (sent != (ssize_t)sizeof(byte)) {
+        fprintf(stderr, "anland: failed to send completed refresh: %s\n",
+                sent < 0 ? strerror(errno) : "short write");
+        return -1;
+    }
+    return 0;
+}
+
+/*
+ * Clover compatibility fence bridge
+ * ---------------------------------
+ * Android 4.4's KGSL/BufferQueue stack accepts a sync fd in queueBuffer(), but
+ * can recycle or display the slot before that imported fence is actually
+ * honoured. Passing KWin's EGL fence to the consumer therefore produces
+ * full-screen flicker and occasional mixed frames.
+ *
+ * Keep the wait outside KWin's render thread instead: a sleeping worker polls
+ * the Linux sync_file, then sends a bare refresh byte. The Android consumer can
+ * safely queue with fence=-1 because GPU rendering is already complete. The
+ * wake eventfd cancels an old-generation job immediately on disconnect/reconnect,
+ * so stale frames can never be submitted to a new BufferQueue.
+ */
+static void *fence_worker_main(void *userdata)
+{
+    display_ctx *ctx = userdata;
+    (void)pthread_setname_np(pthread_self(), "anland-fence");
+
+    for (;;) {
+        pthread_mutex_lock(&ctx->fence_lock);
+        if (ctx->fence_worker_stop) {
+            pthread_mutex_unlock(&ctx->fence_lock);
+            return NULL;
+        }
+
+        if (ctx->fence_queue_count == 0) {
+            pthread_mutex_unlock(&ctx->fence_lock);
+            uint64_t wake_count;
+            while (eventfd_read(ctx->fence_wake_efd, &wake_count) < 0) {
+                if (errno == EINTR)
+                    continue;
+                return NULL;
+            }
+            continue;
+        }
+
+        const struct fence_job job = ctx->fence_queue[ctx->fence_queue_head];
+        ctx->fence_queue_head = (ctx->fence_queue_head + 1) % FENCE_QUEUE_SIZE;
+        ctx->fence_queue_count--;
+        ctx->fence_worker_active = true;
+        pthread_cond_broadcast(&ctx->fence_idle);
+        pthread_mutex_unlock(&ctx->fence_lock);
+
+        bool completed = false;
+        bool cancelled = false;
+        for (;;) {
+            struct pollfd pfds[2] = {
+                { .fd = job.render_fence, .events = POLLIN | POLLERR | POLLHUP },
+                { .fd = ctx->fence_wake_efd, .events = POLLIN },
+            };
+            const int ret = poll(pfds, 2, FENCE_WAIT_TIMEOUT_MS);
+            if (ret < 0) {
+                if (errno == EINTR)
+                    continue;
+                break;
+            }
+            if (ret == 0) {
+                fprintf(stderr, "anland: render fence timed out after %d ms\n",
+                        FENCE_WAIT_TIMEOUT_MS);
+                break;
+            }
+
+            if (pfds[1].revents & POLLIN) {
+                uint64_t wake_count;
+                while (eventfd_read(ctx->fence_wake_efd, &wake_count) < 0
+                       && errno == EINTR) {
+                }
+                pthread_mutex_lock(&ctx->fence_lock);
+                cancelled = ctx->fence_worker_stop
+                    || job.generation != ctx->fence_generation;
+                pthread_mutex_unlock(&ctx->fence_lock);
+                if (cancelled)
+                    break;
+                // Harmless stale wake; re-check the current sync_file.
+                continue;
+            }
+
+            if (pfds[0].revents & POLLIN) {
+                completed = true;
+                break;
+            }
+            if (pfds[0].revents & (POLLERR | POLLHUP))
+                break;
+        }
+
+        pthread_mutex_lock(&ctx->fence_lock);
+        if (job.generation != ctx->fence_generation || ctx->fence_worker_stop)
+            cancelled = true;
+        pthread_mutex_unlock(&ctx->fence_lock);
+
+        if (completed && !cancelled)
+            (void)send_refresh_ready(job.notify_fd);
+
+        close(job.render_fence);
+        close(job.notify_fd);
+
+        pthread_mutex_lock(&ctx->fence_lock);
+        ctx->fence_worker_active = false;
+        pthread_cond_broadcast(&ctx->fence_idle);
+        pthread_mutex_unlock(&ctx->fence_lock);
+    }
+}
+
+static int start_fence_worker(display_ctx *ctx)
+{
+    ctx->fence_wake_efd = eventfd(0, EFD_CLOEXEC);
+    if (ctx->fence_wake_efd < 0)
+        return -1;
+    if (pthread_mutex_init(&ctx->fence_lock, NULL) != 0) {
+        close(ctx->fence_wake_efd);
+        ctx->fence_wake_efd = -1;
+        return -1;
+    }
+    if (pthread_cond_init(&ctx->fence_idle, NULL) != 0) {
+        pthread_mutex_destroy(&ctx->fence_lock);
+        close(ctx->fence_wake_efd);
+        ctx->fence_wake_efd = -1;
+        return -1;
+    }
+    if (pthread_create(&ctx->fence_worker, NULL, fence_worker_main, ctx) != 0) {
+        pthread_cond_destroy(&ctx->fence_idle);
+        pthread_mutex_destroy(&ctx->fence_lock);
+        close(ctx->fence_wake_efd);
+        ctx->fence_wake_efd = -1;
+        return -1;
+    }
+    ctx->fence_worker_started = true;
+    return 0;
+}
+
+static void cancel_fence_job(display_ctx *ctx)
+{
+    if (!ctx->fence_worker_started)
+        return;
+
+    pthread_mutex_lock(&ctx->fence_lock);
+    ctx->fence_generation++;
+    while (ctx->fence_queue_count > 0) {
+        struct fence_job *job = &ctx->fence_queue[ctx->fence_queue_head];
+        close(job->render_fence);
+        close(job->notify_fd);
+        ctx->fence_queue_head = (ctx->fence_queue_head + 1) % FENCE_QUEUE_SIZE;
+        ctx->fence_queue_count--;
+    }
+    ctx->fence_queue_tail = ctx->fence_queue_head;
+    pthread_cond_broadcast(&ctx->fence_idle);
+    pthread_mutex_unlock(&ctx->fence_lock);
+    (void)eventfd_write(ctx->fence_wake_efd, 1);
+
+    // Reconnect must not install a new BufferQueue while the worker still owns
+    // a duplicated socket/fence from the previous generation.
+    pthread_mutex_lock(&ctx->fence_lock);
+    while (ctx->fence_worker_active)
+        pthread_cond_wait(&ctx->fence_idle, &ctx->fence_lock);
+    pthread_mutex_unlock(&ctx->fence_lock);
+}
+
+static void stop_fence_worker(display_ctx *ctx)
+{
+    if (!ctx->fence_worker_started)
+        return;
+
+    pthread_mutex_lock(&ctx->fence_lock);
+    ctx->fence_worker_stop = true;
+    ctx->fence_generation++;
+    while (ctx->fence_queue_count > 0) {
+        struct fence_job *job = &ctx->fence_queue[ctx->fence_queue_head];
+        close(job->render_fence);
+        close(job->notify_fd);
+        ctx->fence_queue_head = (ctx->fence_queue_head + 1) % FENCE_QUEUE_SIZE;
+        ctx->fence_queue_count--;
+    }
+    pthread_cond_broadcast(&ctx->fence_idle);
+    pthread_mutex_unlock(&ctx->fence_lock);
+    (void)eventfd_write(ctx->fence_wake_efd, 1);
+    pthread_join(ctx->fence_worker, NULL);
+
+    pthread_cond_destroy(&ctx->fence_idle);
+    pthread_mutex_destroy(&ctx->fence_lock);
+    close(ctx->fence_wake_efd);
+    ctx->fence_wake_efd = -1;
+    ctx->fence_worker_started = false;
+}
+
 /*
  * Release every consumer-side resource (dmabuf fds, the four picked-up fds and the
  * shm mapping), leaving the context holding only the daemon ctrl_fd. Does NOT touch
@@ -45,6 +277,8 @@ struct display_ctx {
  */
 static void release_consumer_resources(display_ctx *ctx)
 {
+    cancel_fence_job(ctx);
+
     for (int i = 0; i < ctx->buf_count; i++) {
         if (ctx->dmabuf_fds[i] >= 0) {
             close(ctx->dmabuf_fds[i]);
@@ -182,10 +416,14 @@ int connect_to_deamon(display_ctx **out, const char *socket_path)
     ctx->shm_fd = -1;
     ctx->audio_fd = -1;
     ctx->pending_render_fence = -1;
+    ctx->fence_wake_efd = -1;
     ctx->shm_ptr = NULL;
     ctx->fallback = true; // stay in fallback until try_exit_fallback() succeeds
     for (int i = 0; i < MAX_BUFS; i++)
         ctx->dmabuf_fds[i] = -1;
+
+    if (start_fence_worker(ctx) < 0)
+        goto fail;
 
     ctx->ctrl_fd = connect_unix(socket_path);
     if (ctx->ctrl_fd < 0)
@@ -218,6 +456,7 @@ int connect_to_deamon(display_ctx **out, const char *socket_path)
     return 0;
 
 fail:
+    stop_fence_worker(ctx);
     if (ctx->ctrl_fd >= 0)
         close(ctx->ctrl_fd);
     free(ctx);
@@ -229,6 +468,7 @@ void disconnect(display_ctx *ctx)
     if (!ctx)
         return;
     release_consumer_resources(ctx);
+    stop_fence_worker(ctx);
     if (ctx->ctrl_fd >= 0)
         close(ctx->ctrl_fd);
     free(ctx);
@@ -244,7 +484,8 @@ int get_screen_info(display_ctx *ctx, uint32_t *width, uint32_t *height, uint32_
 }
 
 /* Stash the render-done fence for the in-flight frame (created in doEndFrame).
- * trigger_refresh sends it to the consumer. Closes any previous unconsumed stash. */
+ * trigger_refresh moves it to the compatibility worker. Closes any previous
+ * unconsumed stash. */
 void set_render_fence(display_ctx *ctx, int fence_fd)
 {
     if (ctx->pending_render_fence >= 0)
@@ -262,56 +503,49 @@ int trigger_refresh(display_ctx *ctx)
         return 0;
     }
 
-    /* Send exactly one render-done message per frame on the dedicated fence channel
-     * (producer->consumer). The message itself is the "frame rendered" signal -- no
-     * separate eventfd, no cross-channel ordering. The render fence rides as
-     * SCM_RIGHTS ancillary data when we have one; otherwise a bare byte is sent so
-     * the consumer's per-frame recv always has exactly one message (it then queues
-     * with -1). The consumer hands the fence to queueBuffer -> SurfaceFlinger waits
-     * GPU-side. NON-BLOCKING: this runs on kwin's main thread, which must never block
-     * on our socket. In lockstep the consumer always drains, so the one-message
-     * buffer never fills; a momentary miss self-heals via the consumer's 5s
-     * poll->fallback rather than freezing the compositor. data_fd's reverse direction
-     * is intentionally left unused (reserved for future extension). */
-    char b = 0;
-    struct iovec iov = { .iov_base = &b, .iov_len = 1 };
-    union {
-        char buf[CMSG_SPACE(sizeof(int))];
-        struct cmsghdr align;
-    } cmsg;
-    struct msghdr msg = {
-        .msg_iov = &iov,
-        .msg_iovlen = 1,
-    };
+    /* Native fence present: wait on the compatibility worker, then notify the
+     * old Android consumer without passing the sync fd. This keeps KWin's main
+     * thread asynchronous while avoiding broken queueBuffer fence import. */
     if (ctx->pending_render_fence >= 0) {
-        msg.msg_control = cmsg.buf;
-        msg.msg_controllen = sizeof(cmsg.buf);
-        struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
-        c->cmsg_level = SOL_SOCKET;
-        c->cmsg_type = SCM_RIGHTS;
-        c->cmsg_len = CMSG_LEN(sizeof(int));
-        memcpy(CMSG_DATA(c), &ctx->pending_render_fence, sizeof(int));
-    }
-    /* The Android consumer must receive exactly one refresh message for every
-     * ready buffer. A non-blocking send can return EAGAIN while Firefox is
-     * submitting video frames; dropping that byte leaves refresh_done() stuck,
-     * and the consumer reconnects after its safety timeout, visible as a flash.
-     * Wait briefly for the dedicated socket, then use the normal blocking send
-     * so a live consumer cannot lose frame synchronization. A disconnected
-     * socket fails immediately with EPIPE/ECONNRESET. */
-    ssize_t sent = sendmsg(ctx->fence_fd, &msg, MSG_NOSIGNAL | MSG_DONTWAIT);
-    if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-        struct pollfd pfd = { .fd = ctx->fence_fd, .events = POLLOUT };
-        (void)poll(&pfd, 1, 100);
-        sent = sendmsg(ctx->fence_fd, &msg, MSG_NOSIGNAL);
-    }
-    if (sent < 0)
-        fprintf(stderr, "anland: failed to send refresh fence: %s\n", strerror(errno));
-    if (ctx->pending_render_fence >= 0) {
-        close(ctx->pending_render_fence);
+        const int notify_fd = fcntl(ctx->fence_fd, F_DUPFD_CLOEXEC, 0);
+        if (notify_fd < 0) {
+            close(ctx->pending_render_fence);
+            ctx->pending_render_fence = -1;
+            return -1;
+        }
+
+        pthread_mutex_lock(&ctx->fence_lock);
+        const uint64_t generation = ctx->fence_generation;
+        while (ctx->fence_queue_count == FENCE_QUEUE_SIZE
+               && generation == ctx->fence_generation
+               && !ctx->fence_worker_stop) {
+            pthread_cond_wait(&ctx->fence_idle, &ctx->fence_lock);
+        }
+        if (generation != ctx->fence_generation || ctx->fence_worker_stop) {
+            pthread_mutex_unlock(&ctx->fence_lock);
+            close(notify_fd);
+            close(ctx->pending_render_fence);
+            ctx->pending_render_fence = -1;
+            return -1;
+        }
+
+        const bool wake_worker = ctx->fence_queue_count == 0
+            && !ctx->fence_worker_active;
+        struct fence_job *job = &ctx->fence_queue[ctx->fence_queue_tail];
+        job->render_fence = ctx->pending_render_fence;
+        job->notify_fd = notify_fd;
+        job->generation = generation;
+        ctx->fence_queue_tail = (ctx->fence_queue_tail + 1) % FENCE_QUEUE_SIZE;
+        ctx->fence_queue_count++;
         ctx->pending_render_fence = -1;
+        pthread_mutex_unlock(&ctx->fence_lock);
+        if (wake_worker)
+            (void)eventfd_write(ctx->fence_wake_efd, 1);
+        return 0;
     }
-    return 0;
+
+    // Clean/idle BufferQueue slot: no GPU work is pending, acknowledge it now.
+    return send_refresh_ready(ctx->fence_fd);
 }
 
 int poll_input_event(display_ctx *ctx, struct InputEvent *event, int timeout_ms)

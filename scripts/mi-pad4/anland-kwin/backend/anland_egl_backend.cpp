@@ -3,6 +3,8 @@
     This file is part of the KDE project.
 
     SPDX-License-Identifier: GPL-2.0-or-later
+
+    Clover Extreme v3: Persistent scene FBO + GPU full blit implementation
 */
 #include "anland_egl_backend.h"
 #include "anland_backend.h"
@@ -10,8 +12,8 @@
 #include "anland_output.h"
 
 // kwin
-#include "core/graphicsbuffer.h" // DmaBufAttributes
-#include "core/output.h" // OutputTransform
+#include "core/graphicsbuffer.h"
+#include "core/output.h"
 #include "opengl/egldisplay.h"
 #include "opengl/eglcontext.h"
 #include "opengl/eglnativefence.h"
@@ -28,12 +30,6 @@
 namespace KWin
 {
 
-/*
- * The daemon's screen_info.format / buf_info.format uses the consumer-side
- * pixel-format enum (see common/protocol.h). 1 == RGBA_8888 in Android memory
- * layout, which is ABGR8888 in DRM fourcc terms; everything else is treated as
- * XRGB8888. Mirrors protocol_format_to_drm() in weston's backend-anland.
- */
 static uint32_t protocol_format_to_drm(uint32_t fmt)
 {
     switch (fmt) {
@@ -50,17 +46,26 @@ AnlandEglLayer::AnlandEglLayer(AnlandOutput *output, AnlandEglBackend *backend)
     , m_output(output)
     , m_display(backend->display())
 {
-    // React to runtime orientation changes (System Settings / kscreen-doctor)
-    // through the output's transformChanged signal instead of polling the transform
-    // in the per-frame render path. Qt drops the connection automatically when this
-    // layer (a QObject via OutputLayer) or the output is destroyed.
+    // AnlandBackend drives reconnect/import through AnlandOutput::eglLayer().
+    // The map in AnlandEglBackend owns this layer, but the output still needs a
+    // non-owning pointer to it. Without this registration, reconnect succeeds
+    // and hands KWin the Android dmabufs, but no layer imports or paints them;
+    // the consumer then remains blocked in refresh_done() on a black frame.
+    m_output->setEglLayer(this);
+
+    // Usually the reconnect timer fires after the GL backend has created this
+    // layer. Cover the opposite ordering too: if consumer buffers are already
+    // present, import and arm the first full repaint immediately.
+    const int bufferCount = get_buf_count(m_display);
+    if (bufferCount > 0 && importBuffers(bufferCount)) {
+        addDeviceRepaint(Region::infinite());
+    }
+
     connect(m_output, &BackendOutput::transformChanged, this, &AnlandEglLayer::onOutputTransformChanged);
 }
 
 AnlandEglLayer::~AnlandEglLayer()
 {
-    // Avoid leaving a dangling pointer in the output when we're destroyed without a
-    // removeOutput() call (e.g. ~AnlandEglBackend clearing m_outputs).
     if (m_output && m_output->eglLayer() == this) {
         m_output->setEglLayer(nullptr);
     }
@@ -69,38 +74,84 @@ AnlandEglLayer::~AnlandEglLayer()
 
 void AnlandEglLayer::releaseBuffers()
 {
-    // Destroying the GL textures/framebuffers needs the context current. Callers
-    // (backend state machine on fallback, ~AnlandEglLayer) may run outside a frame.
     m_backend->openglContext()->makeCurrent();
 
     for (int i = 0; i < MAX_BUFS; i++) {
         m_fbos[i].reset();
         m_textures[i].reset();
-        m_renderTargets[i].reset();
-        m_accumDamage[i] = Region();
     }
-    m_damageFlags = 0;
-    m_damageMask = 0;
+    m_sceneTexture.reset();
+    m_sceneFbo.reset();
+    m_sceneInvalid = true;
+    m_dirtySlots = 0;
     m_bufCount = 0;
+}
+
+void AnlandEglLayer::markAllBuffersDirty()
+{
+    static_assert(MAX_BUFS <= 32, "dirty slot mask is too small");
+    m_dirtySlots = m_bufCount == 32
+        ? UINT32_MAX
+        : ((uint32_t(1) << m_bufCount) - 1);
+}
+
+void AnlandEglLayer::ensureSceneFbo()
+{
+    if (m_sceneFbo && m_sceneSize == m_output->modeSize()) {
+        return;
+    }
+
+    m_backend->openglContext()->makeCurrent();
+
+    const QSize size = m_output->modeSize();
+    m_sceneTexture = GLTexture::allocate(GL_RGBA8, size);
+    if (!m_sceneTexture) {
+        qCWarning(KWIN_ANLAND) << "failed to allocate scene texture";
+        return;
+    }
+    m_sceneTexture->setContentTransform(m_output->transform().combine(OutputTransform::FlipY));
+    m_sceneTexture->setFilter(GL_LINEAR);
+    m_sceneTexture->setWrapMode(GL_CLAMP_TO_EDGE);
+
+    m_sceneFbo = std::make_unique<GLFramebuffer>(m_sceneTexture.get());
+    if (!m_sceneFbo->valid()) {
+        qCWarning(KWIN_ANLAND) << "scene framebuffer is not complete";
+        m_sceneTexture.reset();
+        m_sceneFbo.reset();
+        return;
+    }
+
+    m_sceneSize = size;
+    m_sceneInvalid = true;
+    markAllBuffersDirty();
+
+    qCDebug(KWIN_ANLAND) << "created scene FBO" << size;
+}
+
+void AnlandEglLayer::blitSceneToDmabuf()
+{
+    if (!m_sceneFbo || !m_fbos[m_currentIndex]) {
+        return;
+    }
+
+    // blitFromFramebuffer() captures the current framebuffer as its read
+    // source before binding the destination. Explicitly push the persistent
+    // scene here; binding only the destination with GL_FRAMEBUFFER would bind
+    // it for both READ and DRAW and accidentally blit the Android slot onto
+    // itself.
+    GLFramebuffer::pushFramebuffer(m_sceneFbo.get());
+    // The scene RenderTarget carries FlipY, matching KWin's normal offscreen
+    // rendering path. Its raw pixels are already in BufferQueue orientation;
+    // preserve their positions during the full-slot copy.
+    m_fbos[m_currentIndex]->blitFromFramebuffer(Rect(), Rect(), GL_NEAREST);
+    GLFramebuffer::popFramebuffer();
 }
 
 bool AnlandEglLayer::importBuffers(int count)
 {
     m_backend->openglContext()->makeCurrent();
-
     releaseBuffers();
 
-    // The consumer reads this dmabuf top-down, while GL renders bottom-up, so the
-    // content transform always carries a vertical flip. On top of that we fold in
-    // the output's configured rotation, so the scene is rendered pre-rotated into
-    // the (fixed-size, landscape) dmabuf — that is what lets the very same buffer
-    // drive a portrait / 180° display. KWin's renderer (RenderTarget/RenderViewport)
-    // bakes this single transform into the root projection with no extra copy; it is
-    // the official 6.x replacement for the old GLFramebuffer::setYInverted() flag the
-    // 5.27 patch carried. Combining the output rotation with FlipY mirrors the DRM
-    // backend exactly (drmOutput()->transform().combine(OutputTransform::FlipY)).
-    // The tag is sticky on each texture; after import it is only ever updated
-    // reactively, in onOutputTransformChanged().
     const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
 
     for (int i = 0; i < count; i++) {
@@ -112,11 +163,6 @@ bool AnlandEglLayer::importBuffers(int count)
             return false;
         }
 
-        /* The per-buffer width/height come from the consumer's native resolution
-         * (buf_info, filled by collect_dmabufs). If it differs from the current
-         * OutputMode, resize the output to match — the consumer may have rotated or
-         * switched display modes. All buffers in a set share the same size, so we
-         * only need to check the first buffer. */
         if (i == 0) {
             const QSize bufSize(info.width, info.height);
             if (bufSize != m_output->modeSize() && bufSize.isValid()) {
@@ -131,26 +177,11 @@ bool AnlandEglLayer::importBuffers(int count)
         attrs.width = actual.width();
         attrs.height = actual.height();
         attrs.format = protocol_format_to_drm(info.format);
-        /* Android's ANativeWindow path reports modifier=0 for a linear buffer.
-         * In EGL dma-buf import, however, 0 means an explicit DRM_LINEAR
-         * modifier, while DRM_FORMAT_MOD_INVALID means implicit layout.  The
-         * 4.4 clover gralloc buffers are implicit-linear and Mesa's KGSL EGL
-         * rejects the explicit modifier with EGL_BAD_PARAMETER. */
         attrs.modifier = info.modifier == 0 ? DRM_FORMAT_MOD_INVALID : info.modifier;
-        // The producer owns the dmabuf fd; DmaBufAttributes (and the EGLImage we
-        // hand the fd to) must not close it, so dup() into the owning slot.
         attrs.fd[0] = FileDescriptor(dup(fd));
         attrs.offset[0] = static_cast<int>(info.offset);
         attrs.pitch[0] = static_cast<int>(info.stride);
 
-        // EglBackend::importDmaBufAsTexture() builds the EGLImage and wraps it in
-        // a GLTexture in one step (the 5.27-era manual EGLImageKHR +
-        // EGLImageTexture(...) dance is gone in 6.x).
-        /* Qualcomm's 4.4 gralloc and the KGSL EGL implementation disagree on
-         * whether the buffer is advertised as RGBA/XRGB and whether a linear
-         * modifier is explicit.  Keep the protocol value first, then retry
-         * the equivalent legacy combinations instead of turning the whole
-         * output black on EGL_BAD_PARAMETER. */
         const std::array<uint32_t, 5> formatCandidates = {
             attrs.format,
             DRM_FORMAT_XRGB8888,
@@ -158,12 +189,6 @@ bool AnlandEglLayer::importBuffers(int count)
             DRM_FORMAT_XBGR8888,
             DRM_FORMAT_ABGR8888,
         };
-        /* Keep the literal protocol value 0 as a separate retry.  Android 9's
-         * clover gralloc uses 0 for its legacy implicit layout, while Mesa's
-         * DRM path uses DRM_FORMAT_MOD_INVALID for the same EGL attribute
-         * omission and DRM_FORMAT_MOD_LINEAR (1) for an explicit linear
-         * modifier.  The old KGSL EGL driver accepts only one of these forms
-         * depending on the buffer allocation path. */
         const std::array<uint64_t, 3> modifierCandidates = {
             attrs.modifier,
             0,
@@ -174,10 +199,6 @@ bool AnlandEglLayer::importBuffers(int count)
         uint64_t importedModifier = attrs.modifier;
         for (const uint32_t candidateFormat : formatCandidates) {
             for (const uint64_t candidateModifier : modifierCandidates) {
-                if (candidateFormat == attrs.format && candidateModifier == attrs.modifier) {
-                    // This is the normal protocol path and was already tried
-                    // by the first import below.
-                }
                 attrs.format = candidateFormat;
                 attrs.modifier = candidateModifier;
                 texture = m_backend->importDmaBufAsTexture(attrs);
@@ -212,38 +233,86 @@ bool AnlandEglLayer::importBuffers(int count)
 
         m_textures[i] = std::move(texture);
         m_fbos[i] = std::move(fbo);
-        m_renderTargets[i].emplace(m_fbos[i].get());
-        // Freshly imported dmabuf has undefined contents: owe it a full repaint.
-        m_accumDamage[i] = Region::infinite();
     }
 
     m_bufCount = count;
-    // We repaint the selected BufferQueue slot completely on every submitted
-    // frame, so there is no need to pre-warm every buffer with extra frames.
-    // Keep this flag only as a one-shot forced repaint for reconnect/startup.
-    m_damageMask = 1;
-    m_damageFlags = 1;
+    ensureSceneFbo();
+    m_sceneInvalid = true;
+    markAllBuffersDirty();
     return true;
 }
 
 bool AnlandEglLayer::needsRepaint() const
 {
-    return m_damageFlags != 0;
+    if (m_sceneInvalid) {
+        return true;
+    }
+    const int index = get_selected_idx(m_display);
+    return index >= 0 && index < m_bufCount
+        && (m_dirtySlots & (uint32_t(1) << index));
+}
+
+void AnlandEglLayer::armRenderFence()
+{
+    // The producer-side compatibility worker waits on this native fence, then
+    // notifies Clover with fence=-1. KWin stays asynchronous without exposing
+    // Android 4.4 BufferQueue to the unreliable imported-fence path.
+    const bool nativeFence = !qEnvironmentVariableIsSet("ANLAND_NATIVE_FENCE")
+        || qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1;
+    if (nativeFence) {
+        EGLNativeFence fence{
+            m_backend->openglContext()->displayObject()
+        };
+        if (fence.isValid()) {
+            set_render_fence(m_display, fence.takeFileDescriptor().take());
+        } else {
+            // Some legacy KGSL EGL stacks advertise native fences but fail to
+            // export a sync fd. Never submit an unfinished slot in that case.
+            glFinish();
+            set_render_fence(m_display, -1);
+        }
+    } else {
+        glFinish();
+        set_render_fence(m_display, -1);
+    }
+}
+
+bool AnlandEglLayer::syncSelectedBuffer()
+{
+    if (m_sceneInvalid || !m_sceneFbo) {
+        return false;
+    }
+
+    m_backend->openglContext()->makeCurrent();
+    m_currentIndex = get_selected_idx(m_display);
+    if (m_currentIndex < 0 || m_currentIndex >= m_bufCount
+        || !(m_dirtySlots & (uint32_t(1) << m_currentIndex))
+        || !m_fbos[m_currentIndex]) {
+        return false;
+    }
+
+    // This is a slot synchronization, not a compositor frame: copy the already
+    // completed persistent scene and fence it directly. Avoiding a synthetic
+    // KWin repaint prevents device-repair damage from being confused with new
+    // client damage and keeps Firefox frames one-composition/one-submit.
+    blitSceneToDmabuf();
+    m_dirtySlots &= ~(uint32_t(1) << m_currentIndex);
+    armRenderFence();
+    return true;
 }
 
 void AnlandEglLayer::onOutputTransformChanged()
 {
-    const OutputTransform contentTransform =
-        m_output->transform().combine(OutputTransform::FlipY);
+    const OutputTransform contentTransform = m_output->transform().combine(OutputTransform::FlipY);
     for (int i = 0; i < m_bufCount; i++) {
         m_textures[i]->setContentTransform(contentTransform);
-        m_renderTargets[i].emplace(m_fbos[i].get());
-        m_accumDamage[i] = Region::infinite();
     }
-    // One forced full repaint is enough. doBeginFrame() always repaints
-    // the complete selected dmabuf anyway.
-    m_damageFlags = 1;
-    scheduleRepaint(nullptr);
+    if (m_sceneTexture) {
+        m_sceneTexture->setContentTransform(contentTransform);
+    }
+    m_sceneInvalid = true;
+    markAllBuffersDirty();
+    addDeviceRepaint(Region::infinite());
 }
 
 std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
@@ -252,53 +321,41 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
 
     m_currentIndex = get_selected_idx(m_display);
 
-    if (m_currentIndex < 0 || m_currentIndex >= m_bufCount || !m_renderTargets[m_currentIndex]) {
-        // A failed EGLImage import must not turn into std::optional::operator*
-        // aborts. Wait for the next consumer reconnect/frame instead.
+    if (m_currentIndex < 0 || m_currentIndex >= m_bufCount || !m_fbos[m_currentIndex]) {
         qCWarning(KWIN_ANLAND) << "no render target for consumer buffer" << m_currentIndex;
         return std::nullopt;
     }
 
+    ensureSceneFbo();
+
+    // Partial composition is safe in this KWin-owned persistent texture. The
+    // selected Android slot is never trusted for preservation and always gets a
+    // full blit in doEndFrame(). A reconnect/rotation still repairs the scene in
+    // full once.
     return OutputLayerBeginFrameInfo{
-        .renderTarget = *m_renderTargets[m_currentIndex],
-        // Android BufferQueue contents outside damage are not reliable on
-        // Clover. Always redraw the selected slot completely.
-        .repaint = Region::infinite(),
+        RenderTarget(m_sceneFbo.get()),
+        m_sceneInvalid ? Region::infinite() : Region()
     };
 }
 
 bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region &damagedDeviceRegion, OutputFrame *frame)
 {
-    glFlush();
-    /*
-     * doBeginFrame() already returns Region::infinite(), therefore the
-     * currently selected Android BufferQueue slot has just been completely
-     * redrawn.
-     *
-     * Do NOT propagate every client damage to every other slot. Video clients
-     * produce damage continuously and the old code turned every video frame
-     * into multiple full-screen KWin composites.
-     *
-     * m_damageFlags is retained only for initial buffer warm-up and output
-     * transform changes.
-     */
-    m_accumDamage[m_currentIndex] = Region();
-    m_damageFlags &=
-        ~(uint8_t)(1 << m_currentIndex);
-    if (m_damageFlags != 0)
-        scheduleRepaint(nullptr);
-    if (qEnvironmentVariableIntValue("ANLAND_NATIVE_FENCE") == 1) {
-        EGLNativeFence fence{
-            m_backend->openglContext()->displayObject()
-        };
-        set_render_fence(
-            m_display,
-            fence.takeFileDescriptor().take()
-        );
-    } else {
-        glFinish();
-        set_render_fence(m_display, -1);
+    // New client damage changes the persistent scene generation, making every
+    // rotating Android slot stale. Do not re-arm the mask for a sync-only frame:
+    // onConsumerReady() may request a frame solely to copy the unchanged scene
+    // into the selected stale slot.
+    if (m_sceneInvalid || !damagedDeviceRegion.isEmpty()) {
+        markAllBuffersDirty();
     }
+
+    blitSceneToDmabuf();
+
+    m_sceneInvalid = false;
+    if (m_currentIndex >= 0 && m_currentIndex < m_bufCount) {
+        m_dirtySlots &= ~(uint32_t(1) << m_currentIndex);
+    }
+
+    armRenderFence();
     return true;
 }
 
@@ -338,77 +395,80 @@ bool AnlandEglBackend::initializeEgl()
     if (!initClientExtensions()) {
         return false;
     }
-    if (!m_backend->renderDevice()) {
+
+    // The output backend owns the only EGL display. Using a second
+    // surfaceless display here leaves EglBackend::m_renderDevice unset and
+    // makes importDmaBufAsTexture() dereference a null RenderDevice on the
+    // first frame. It also creates two unrelated EGL contexts on old KGSL.
+    // Match KWin's DRM/virtual backends and share the backend RenderDevice.
+    if (!m_backend || !m_backend->renderDevice()
+        || !m_backend->renderDevice()->eglDisplay()) {
+        qCWarning(KWIN_ANLAND) << "Anland has no usable RenderDevice/EGL display";
         return false;
     }
+
     setRenderDevice(m_backend->renderDevice());
-    return true;
-}
-
-bool AnlandEglBackend::init()
-{
-    if (!initializeEgl()) {
-        qCWarning(KWIN_ANLAND) << "Could not initialize egl";
-        return false;
-    }
-    if (!initRenderingContext()) {
-        qCWarning(KWIN_ANLAND) << "Could not initialize rendering context";
-        return false;
-    }
-
-    if (checkGLError("Init")) {
-        qCWarning(KWIN_ANLAND) << "Error during init of AnlandEglBackend";
-        return false;
-    }
-
-    // EglBackend::initWayland() assumes a non-null DRM scanout device. Anland
-    // imports Android buffers directly, so skip DRM feedback on KGSL-only
-    // kernels and keep the surfaceless EGL path alive.
-    if (m_backend->drmDevice()) {
-        initWayland();
-    } else {
-        qCInfo(KWIN_ANLAND) << "skipping DRM Wayland feedback for surfaceless EGL";
-    }
-
-    const auto outputs = m_backend->outputs();
-    for (BackendOutput *output : outputs) {
-        addOutput(output);
-    }
-
-    connect(m_backend, &AnlandBackend::outputAdded, this, &AnlandEglBackend::addOutput);
-    connect(m_backend, &AnlandBackend::outputRemoved, this, &AnlandEglBackend::removeOutput);
     return true;
 }
 
 bool AnlandEglBackend::initRenderingContext()
 {
-    return createContext() && openglContext()->makeCurrent();
+    if (!initializeEgl()) {
+        return false;
+    }
+
+    const EGLint context_attribs[] = {
+        EGL_CONTEXT_CLIENT_VERSION, 3,
+        EGL_NONE
+    };
+
+    Q_UNUSED(context_attribs);
+    m_context = EglContext::create(eglDisplayObject(), EGL_NO_CONFIG_KHR, nullptr);
+    if (!m_context) {
+        return false;
+    }
+
+    if (!openglContext()->makeCurrent()) {
+        return false;
+    }
+
+    return true;
+}
+
+bool AnlandEglBackend::init()
+{
+    if (!initRenderingContext()) {
+        return false;
+    }
+
+    for (auto *output : m_backend->outputs()) {
+        addOutput(output);
+    }
+
+    connect(m_backend, &AnlandBackend::outputAdded, this, &AnlandEglBackend::addOutput);
+    connect(m_backend, &AnlandBackend::outputRemoved, this, &AnlandEglBackend::removeOutput);
+
+    return true;
 }
 
 void AnlandEglBackend::addOutput(BackendOutput *output)
 {
-    openglContext()->makeCurrent();
-    auto *anlandOutput = static_cast<AnlandOutput *>(output);
-    auto layer = std::make_unique<AnlandEglLayer>(anlandOutput, this);
-    // Let AnlandBackend reach this layer through its output (output->eglLayer()).
-    anlandOutput->setEglLayer(layer.get());
+    auto layer = std::make_unique<AnlandEglLayer>(static_cast<AnlandOutput *>(output), this);
     m_outputs[output] = std::move(layer);
 }
 
 void AnlandEglBackend::removeOutput(BackendOutput *output)
 {
-    openglContext()->makeCurrent();
-    static_cast<AnlandOutput *>(output)->setEglLayer(nullptr);
     m_outputs.erase(output);
 }
 
 QList<OutputLayer *> AnlandEglBackend::compatibleOutputLayers(BackendOutput *output)
 {
     auto it = m_outputs.find(output);
-    if (it == m_outputs.end()) {
-        return {};
+    if (it != m_outputs.end()) {
+        return {it->second.get()};
     }
-    return {it->second.get()};
+    return {};
 }
 
 } // namespace KWin

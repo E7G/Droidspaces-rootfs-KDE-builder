@@ -91,3 +91,16 @@
      }
  
      KWin::WaylandServer *server = KWin::WaylandServer::create();
+
+--- a/src/compositor.cpp	2026-05-12 10:26:46.000000000 +0000
++++ b/src/compositor.cpp	2026-06-24 16:07:19.571533593 +0000
+@@ -131,6 +131,8 @@
+     gpuInformation[QStringLiteral("api_type")] = QStringLiteral("OpenGL");
+     gpuInformation[QStringLiteral("name")] = QString::fromUtf8(glPlatform->glRendererString());
+-    if (const auto pciInfo = backend->drmDevice()->pciDeviceInfo()) {
++    if (DrmDevice *device = backend->drmDevice()) {
++        if (const auto pciInfo = device->pciDeviceInfo()) {
+         gpuInformation[QStringLiteral("id")] = QString::number(pciInfo->device_id, 16);
+         gpuInformation[QStringLiteral("vendor_id")] = QString::number(pciInfo->vendor_id, 16);
++        }
+     }
