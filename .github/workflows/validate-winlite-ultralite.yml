@@ -48,16 +48,17 @@ jobs:
         run: |
           set -euo pipefail
           script="$PWD/scripts/mi-pad4/winlite/wincontainer"
+          run_container() { bash "$script" "$@"; }
 
           export HOME="$(mktemp -d)"
-          [[ "$("$script" current)" == default ]]
-          "$script" create game
-          "$script" use game
-          [[ "$("$script" current)" == game ]]
-          [[ "$("$script" prefix game)" == "$HOME/.winlite/containers/game/.wine" ]]
+          [[ "$(run_container current)" == default ]]
+          run_container create game
+          run_container use game
+          [[ "$(run_container current)" == game ]]
+          [[ "$(run_container prefix game)" == "$HOME/.winlite/containers/game/.wine" ]]
           test -L "$HOME/.wine-winlite"
           [[ "$(readlink "$HOME/.wine-winlite")" == "$HOME/.winlite/containers/game/.wine" ]]
-          if "$script" delete game; then
+          if run_container delete game; then
             echo 'active container deletion unexpectedly succeeded' >&2
             exit 1
           fi
@@ -65,7 +66,7 @@ jobs:
           export HOME="$(mktemp -d)"
           mkdir -p "$HOME/.wine-winlite"
           touch "$HOME/.wine-winlite/migration-sentinel"
-          [[ "$("$script" current)" == default ]]
+          [[ "$(run_container current)" == default ]]
           test -f "$HOME/.winlite/containers/default/.wine/migration-sentinel"
           test -L "$HOME/.wine-winlite"
 
@@ -103,5 +104,5 @@ jobs:
           grep -Fq 'ui=winlator-style-wine-explorer-desktop' "$dockerfile"
           grep -Fq 'container-model=per-prefix-active-container' "$dockerfile"
           grep -Fq 'dbus=session-only' "$dockerfile"
-          grep -Fq "-name 'winewayland.drv.so'" "$dockerfile"
+          grep -Fq -- "-name 'winewayland.drv.so'" "$dockerfile"
           ! grep -Eq '^[[:space:]]+(gawk|iputils|unzip|pam)[[:space:]]*\\$' "$dockerfile"
