@@ -50,8 +50,8 @@ unset XMODIFIERS GTK_IM_MODULE QT_IM_MODULE SDL_IM_MODULE GLFW_IM_MODULE
 export MALLOC_ARENA_MAX=2
 
 # PipeWire is retained only because the AnLand backend itself exposes Android
-# playback/microphone as PipeWire nodes. The WirePlumber profile disables all
-# unrelated hardware probing, Bluetooth, MIDI, camera, logind and D-Bus hooks.
+# playback/microphone as PipeWire nodes. WirePlumber runs its built-in policy
+# profile: no ALSA/Bluetooth/MIDI/camera monitor is even loaded.
 export PIPEWIRE_LATENCY=2048/48000
 export PULSE_RUNTIME_PATH="$XDG_RUNTIME_DIR/pulse"
 export PULSE_SERVER="unix:$PULSE_RUNTIME_PATH/native"
@@ -106,7 +106,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Minimal audio graph. No Linux hardware discovery is performed.
+# Minimal audio graph. The policy profile only links already-existing software
+# nodes (AnLand sink/source + Wine Pulse streams); it does not enumerate Linux
+# hardware and therefore avoids udev/ALSA/BlueZ/libcamera background work.
 pipewire >/run/winlite/pipewire.log 2>&1 &
 pids+=("$!")
 for _ in $(seq 1 80); do
@@ -115,8 +117,14 @@ for _ in $(seq 1 80); do
 done
 [[ -S "$XDG_RUNTIME_DIR/pipewire-0" ]] || exit 1
 
-wireplumber >/run/winlite/wireplumber.log 2>&1 &
-pids+=("$!")
+wireplumber --profile=policy >/run/winlite/wireplumber.log 2>&1 &
+wireplumber_pid=$!
+pids+=("$wireplumber_pid")
+sleep 0.15
+kill -0 "$wireplumber_pid" 2>/dev/null || {
+    echo 'WirePlumber policy profile failed to start' >&2
+    exit 1
+}
 
 pipewire-pulse >/run/winlite/pipewire-pulse.log 2>&1 &
 pids+=("$!")
