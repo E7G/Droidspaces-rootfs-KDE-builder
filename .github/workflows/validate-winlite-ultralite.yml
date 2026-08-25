@@ -5,7 +5,9 @@ on:
     paths:
       - 'Arch-WinLite.Dockerfile'
       - 'scripts/mi-pad4/winlite/**'
+      - 'scripts/mi-pad4/anland-kwin/**'
       - 'scripts/mi-pad4/mi-pad4-kwin-wayland-wrapper'
+      - '.github/workflows/build-arch-mi-pad4-winlite.yml'
       - '.github/workflows/validate-winlite-ultralite.yml'
   workflow_dispatch:
 
@@ -37,6 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           bash -n scripts/mi-pad4/winlite/droidspaces-init
+          bash -n scripts/mi-pad4/winlite/build-kwin-bridge.sh
           bash -n scripts/mi-pad4/winlite/winlite-supervisor
           bash -n scripts/mi-pad4/winlite/winlite-session
           bash -n scripts/mi-pad4/winlite/winrun
@@ -79,6 +82,7 @@ jobs:
           launcher=scripts/mi-pad4/winlite/winrun
           registry=scripts/mi-pad4/winlite/wine-default.reg
           wp=scripts/mi-pad4/winlite/90-winlite-wireplumber.conf
+          full_workflow=.github/workflows/build-arch-mi-pad4-winlite.yml
 
           ! grep -Fq 'dbus-daemon --system' "$supervisor"
           grep -Fq 'dbus-run-session' "$supervisor"
@@ -93,6 +97,8 @@ jobs:
           grep -Fq 'monitor.bluez = disabled' "$wp"
           grep -Fq 'support.dbus = disabled' "$wp"
           grep -Fq 'support.logind = disabled' "$wp"
+          grep -Fq 'winlite/build-kwin-bridge.sh' "$full_workflow"
+          grep -Fq 'WINLITE-KWIN-PROFILE' "$full_workflow"
 
       - name: Validate RootFS build assertions
         shell: bash
@@ -106,3 +112,58 @@ jobs:
           grep -Fq 'dbus=session-only' "$dockerfile"
           grep -Fq -- "-name 'winewayland.drv.so'" "$dockerfile"
           ! grep -Eq '^[[:space:]]+(gawk|iputils|unzip|pam)[[:space:]]*\\$' "$dockerfile"
+
+  build-bridge-kwin:
+    needs: static-validation
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore bridge-only KWin validation cache
+        id: kwin-cache
+        uses: actions/cache@v4
+        with:
+          path: kwin-validation
+          key: validate-kwin-bridge-v1-${{ hashFiles('scripts/mi-pad4/anland-kwin/**', 'scripts/mi-pad4/winlite/build-kwin-bridge.sh') }}
+
+      - name: Build bridge-only KWin
+        if: steps.kwin-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf kwin-validation
+          mkdir -p kwin-validation
+          docker run --privileged --rm \
+            -v "$PWD:/repo" \
+            -v "$PWD/kwin-validation:/out" \
+            lfdevs/archlinuxarm:base-devel bash -lc '
+              set -euo pipefail
+              pacman -Syyu --noconfirm
+              cp -a /repo/scripts/mi-pad4 /tmp/mi-pad4
+              chmod +x /tmp/mi-pad4/winlite/build-kwin-bridge.sh
+              ANLAND_PACKAGE_OUTPUT_DIR=/out \
+                /tmp/mi-pad4/winlite/build-kwin-bridge.sh
+            '
+
+      - name: Validate bridge package
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(kwin-validation/kwin-[0-9]*.pkg.tar.*)
+          ((${#packages[@]} == 1))
+          test -s kwin-validation/WINLITE-KWIN-PROFILE
+          bsdtar -xOf "${packages[0]}" .PKGINFO > kwin-validation.PKGINFO
+          grep -Eq '^pkgname = kwin$' kwin-validation.PKGINFO
+          for dep in \
+            aurorae breeze iio-sensor-proxy kcmutils kdeclarative \
+            kglobalacceld kirigami kitemmodels knewstuff knotifications \
+            kquickcharts kscreenlocker kxmlgui libei libplasma \
+            libqaccessibilityclient-qt6 milou plasma-activities kio
+          do
+            ! grep -Eq "^depend = ${dep}([<>=].*)?$" kwin-validation.PKGINFO
+          done
+          bsdtar -tf "${packages[0]}" | grep -Eq '(^|/)usr/bin/kwin_wayland$'
+          cat kwin-validation/WINLITE-KWIN-PROFILE
