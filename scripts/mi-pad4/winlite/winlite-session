@@ -44,15 +44,9 @@ export GTK_USE_PORTAL=0
 export PLASMA_INTEGRATION_USE_PORTAL=0
 unset XMODIFIERS GTK_IM_MODULE QT_IM_MODULE SDL_IM_MODULE GLFW_IM_MODULE
 
-# Guest defaults aligned with Winlator's low-noise Wine launch environment.
-export MESA_DEBUG=silent
-export MESA_NO_ERROR=1
-export MESA_LOADER_DRIVER_OVERRIDE=kgsl
-export FD_FORCE_KGSL=1
-export FD_KGSL_ENABLE_DMABUF=1
-export mesa_glthread=true
-export vblank_mode=0
-export WINE_DO_NOT_CREATE_DXGI_DEVICE_MANAGER=1
+# Keep allocator fan-out small for all resident Linux-side processes. GPU/Wine
+# tuning is intentionally scoped inside kwin_wayland_wrapper and winrun so the
+# aggressive guest variables cannot leak into the compositor/audio graph.
 export MALLOC_ARENA_MAX=2
 
 # PipeWire is retained only because the AnLand backend itself exposes Android
