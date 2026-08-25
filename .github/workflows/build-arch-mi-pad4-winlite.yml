@@ -30,14 +30,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore patched KWin package
+      - name: Restore bridge-only KWin package
         id: kwin-cache
         uses: actions/cache@v4
         with:
           path: kwin-winlite
-          key: kwin-winlite-${{ hashFiles('scripts/mi-pad4/anland-kwin/**', 'scripts/mi-pad4/build-arch-anland-kwin.sh') }}
+          key: kwin-winlite-bridge-v1-${{ hashFiles('scripts/mi-pad4/anland-kwin/**', 'scripts/mi-pad4/winlite/build-kwin-bridge.sh') }}
 
-      - name: Build patched KWin
+      - name: Build bridge-only KWin
         if: steps.kwin-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
@@ -50,29 +50,44 @@ jobs:
             lfdevs/archlinuxarm:base-devel bash -lc '
               set -euo pipefail
               pacman -Syyu --noconfirm
-              pacman -S --needed --noconfirm sudo
-              useradd -m -s /bin/bash user
               cp -a /repo/scripts/mi-pad4 /tmp/mi-pad4
-              chmod +x /tmp/mi-pad4/build-arch-anland-kwin.sh
-              BUILD_KDE=min \
-              BUILD_KIO=true \
-              BUILD_KWIN=true \
-              BUILD_XWAYLAND=false \
-              BUILD_PLASMA_WORKSPACE=false \
-              SCREENLOCKER_MODE=disable \
+              chmod +x /tmp/mi-pad4/winlite/build-kwin-bridge.sh
               ANLAND_PACKAGE_OUTPUT_DIR=/out \
-                /tmp/mi-pad4/build-arch-anland-kwin.sh
+                /tmp/mi-pad4/winlite/build-kwin-bridge.sh
             '
           shopt -s nullglob
           packages=(kwin-winlite/kwin-[0-9]*.pkg.tar.*)
           ((${#packages[@]} == 1))
+          test -s kwin-winlite/WINLITE-KWIN-PROFILE
           for package in "${packages[@]}"; do
             safe_name="${package//:/_}"
             [[ "$safe_name" == "$package" ]] || mv -v "$package" "$safe_name"
           done
           sha256sum kwin-winlite/*.pkg.tar.* > kwin-winlite/SHA256SUMS
 
-      - name: Upload patched KWin
+      - name: Validate bridge-only KWin metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(kwin-winlite/kwin-[0-9]*.pkg.tar.*)
+          ((${#packages[@]} == 1))
+          bsdtar -xOf "${packages[0]}" .PKGINFO > kwin.PKGINFO
+          grep -Eq '^pkgname = kwin$' kwin.PKGINFO
+          for dep in \
+            aurorae breeze iio-sensor-proxy kcmutils kdeclarative \
+            kglobalacceld kirigami kitemmodels knewstuff knotifications \
+            kquickcharts kscreenlocker kxmlgui libei libplasma \
+            libqaccessibilityclient-qt6 milou plasma-activities
+          do
+            if grep -Eq "^depend = ${dep}([<>=].*)?$" kwin.PKGINFO; then
+              echo "Unexpected desktop dependency in bridge-only KWin: $dep" >&2
+              exit 1
+            fi
+          done
+          cat kwin-winlite/WINLITE-KWIN-PROFILE
+
+      - name: Upload bridge-only KWin
         uses: actions/upload-artifact@v4
         with:
           name: kwin-winlite
@@ -232,7 +247,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download patched KWin
+      - name: Download bridge-only KWin
         uses: actions/download-artifact@v4
         with:
           name: kwin-winlite
@@ -280,6 +295,9 @@ jobs:
           grep -aFq '/dev/ntsync' hangover-winlite/rootfs/usr/bin/wineserver
           grep -Fq 'ntsync=compiled-in-android-uapi' \
             hangover-winlite/rootfs/usr/share/hangover-winlite-version
+          bsdtar -xOf "${kwin[0]}" .PKGINFO > kwin-input.PKGINFO
+          ! grep -Eq '^depend = (libplasma|kio|kglobalacceld|kscreenlocker)([<>=].*)?$' \
+            kwin-input.PKGINFO
           sha256sum "${kwin[@]}" "${mesa[@]}"
 
       - name: Build WinLite rootfs
@@ -311,10 +329,12 @@ jobs:
 
           for path in \
             etc/fonts/conf.d/99-winlite-fonts.conf \
+            etc/wireplumber/wireplumber.conf.d/90-winlite.conf \
             usr/bin/droidspaces-init \
             usr/bin/droidspaces-tini \
             usr/bin/wine \
             usr/bin/wineserver \
+            usr/local/bin/wincontainer \
             usr/local/bin/winrun \
             usr/local/bin/winlite-session \
             usr/local/bin/winlite-supervisor \
@@ -344,7 +364,10 @@ jobs:
 
           for unwanted_pkg in \
             firefox plasma-workspace dolphin baloo xdg-desktop-portal \
-            lxqt-panel pcmanfm-qt kscreenlocker
+            lxqt-panel pcmanfm-qt kscreenlocker \
+            kio kglobalacceld kcmutils kdeclarative knewstuff knotifications \
+            plasma-activities libplasma milou aurorae breeze \
+            libei libqaccessibilityclient-qt6
           do
             if grep -Eq "^var/lib/pacman/local/${unwanted_pkg}-[0-9]" rootfs-files.txt; then
               echo "Unexpected heavyweight/broken package: $unwanted_pkg" >&2
@@ -364,9 +387,13 @@ jobs:
           profile_member="$(tar -tf "${archive[0]}" | grep -E '(^|^\./)usr/share/droidspaces/winlite-profile$' | head -n1)"
           [[ -n "$profile_member" ]]
           tar -xOf "${archive[0]}" "$profile_member" >winlite-profile.txt
+          grep -Fq 'ui=winlator-style-wine-explorer-desktop' winlite-profile.txt
+          grep -Fq 'container-model=per-prefix-active-container' winlite-profile.txt
           grep -Fq 'linux-panel=none' winlite-profile.txt
           grep -Fq 'linux-file-manager=none' winlite-profile.txt
+          grep -Fq 'dbus=session-only' winlite-profile.txt
           grep -Fq 'sync=ntsync-auto+esync-fallback' winlite-profile.txt
+          grep -Fq 'audio=pipewire-anland-minimal-policy' winlite-profile.txt
           grep -Fq 'fonts=liberation+wqy-zenhei' winlite-profile.txt
 
           printf 'archive-size-bytes='; stat -c %s "${archive[0]}"
