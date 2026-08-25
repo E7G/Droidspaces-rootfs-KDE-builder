@@ -336,15 +336,15 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
         return std::nullopt;
     }
 
-    ensureSceneFbo();
-
-    // Partial composition is safe in this KWin-owned persistent texture. The
-    // selected Android slot is never trusted for preservation and always gets a
-    // full blit in doEndFrame(). A reconnect/rotation still repairs the scene in
-    // full once.
+    // Clover's old KGSL EGL implementation does not reliably preserve a
+    // persistent off-screen FBO when it is copied into an imported Android
+    // BufferQueue slot. In practice the copy can succeed from GL's point of
+    // view while the consumer receives an all-black buffer. Render directly
+    // into the selected slot instead. The slot is never trusted for damage
+    // preservation, so the full scene is redrawn on every real KWin frame.
     return OutputLayerBeginFrameInfo{
-        RenderTarget(m_sceneFbo.get()),
-        m_sceneInvalid ? Region::infinite() : Region()
+        RenderTarget(m_fbos[m_currentIndex].get()),
+        Region::infinite()
     };
 }
 
@@ -364,8 +364,6 @@ bool AnlandEglLayer::doEndFrame(const Region &renderedDeviceRegion, const Region
     if (m_sceneInvalid || !damagedDeviceRegion.isEmpty()) {
         markAllBuffersDirty();
     }
-
-    blitSceneToDmabuf();
 
     m_sceneInvalid = false;
     if (m_currentIndex >= 0 && m_currentIndex < m_bufCount) {
