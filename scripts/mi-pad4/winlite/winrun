@@ -24,7 +24,7 @@ if [[ -z "${WINEPREFIX:-}" ]]; then
     export WINLITE_CONTAINER WINLITE_CONTAINER_ROOT
     export WINEPREFIX="$WINLITE_CONTAINER_ROOT/.wine"
 else
-    export WINLITE_CONTAINER_ROOT="${WINLITE_CONTAINER_ROOT:-$(dirname "$WINEPREFIX")}" 
+    export WINLITE_CONTAINER_ROOT="${WINLITE_CONTAINER_ROOT:-$(dirname "$WINEPREFIX")}"
 fi
 
 export WINEARCH=win64
@@ -108,6 +108,7 @@ init_prefix() {
     fi
 
     flock -u 9
+    exec 9>&-
 }
 
 usage() {
