@@ -51,7 +51,12 @@ bool AnlandOutput::testPresentation(const std::shared_ptr<OutputFrame> &frame)
 
 bool AnlandOutput::present(const QList<OutputLayer *> &layersToUpdate, const std::shared_ptr<OutputFrame> &frame)
 {
-    Q_UNUSED(layersToUpdate);
+    static int debugPresentCount = 0;
+    if (debugPresentCount++ < 12) {
+        qCWarning(KWIN_ANLAND) << "present" << debugPresentCount
+                               << "layers" << layersToUpdate.size()
+                               << "frameValid" << (frame != nullptr);
+    }
     // The scene has already been rendered into the daemon's dmabuf by the layer
     // (AnlandEglLayer::doEndFrame). Hand it to the consumer now.
     m_frame = frame;
@@ -140,6 +145,13 @@ void AnlandOutput::handOffWithoutFrame()
 
 void AnlandOutput::onConsumerReady()
 {
+    static int debugReadyCount = 0;
+    if (debugReadyCount++ < 12) {
+        qCWarning(KWIN_ANLAND) << "consumer ready" << debugReadyCount
+                               << "awaiting" << m_awaitingPresent
+                               << "unframed" << m_unframedPresentInhibited
+                               << "layer" << (m_eglLayer != nullptr);
+    }
     if (m_unframedPresentInhibited) {
         m_renderLoop->uninhibit();
         m_unframedPresentInhibited = false;

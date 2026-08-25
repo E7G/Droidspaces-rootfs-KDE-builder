@@ -20,10 +20,10 @@ export QT_QPA_PLATFORM=wayland
 export MOZ_ENABLE_WAYLAND=1
 export ANLAND=1
 export ANLAND_SOCKET=/run/display.sock
-# KWin exports an EGL native fence. The patched producer waits for it on a
-# sleeping worker and sends Android a completed buffer with fence=-1, removing
-# the glFinish stall without exposing Clover's broken imported-fence path.
-export ANLAND_NATIVE_FENCE=1
+# KWin exports an EGL native fence, but the patched producer waits on a sleeping
+# worker and sends Android a completed buffer with fence=-1. This avoids both
+# glFinish stalls and Clover's broken BufferQueue fence import.
+export ANLAND_NATIVE_FENCE=0
 # Mi Pad 4's KGSL node is not a DRM/GBM render node. The patched backend must
 # select its surfaceless EGL path instead of forcing RenderDevice::open().
 unset ANLAND_DRM_DEVICE
@@ -89,9 +89,7 @@ export KDE_APPLICATIONS_AS_SCOPE=0
 export XDG_MENU_PREFIX=plasma-
 export XDG_SESSION_TYPE=wayland
 export QT_WAYLAND_RECONNECT=1
-# Keep the release session quiet; diagnostic logging is enabled only in test
-# builds through a launcher override.
-unset QT_LOGGING_RULES
+export QT_LOGGING_RULES="kwin_backend_anland.debug=true;kwin_scene_opengl.debug=true"
 export _JAVA_AWT_WM_NONREPARENTING=1
 export KDE_USE_SYSTEMD=0
 # KIO's in-process file worker is faster but a worker fault terminates Dolphin.
@@ -256,9 +254,6 @@ start_plasmashell() {
   # instead; KWin and app windows remain on the separate KGSL path.
   unset QT_QUICK_BACKEND QT_OPENGL QSG_RHI_BACKEND
   export QSG_RENDER_LOOP=basic
-  if command -v taskset >/dev/null 2>&1 && taskset -c 0-3 true 2>/dev/null; then
-    exec taskset -c 0-3 /usr/bin/plasmashell -p org.kde.plasma.desktop
-  fi
   exec /usr/bin/plasmashell -p org.kde.plasma.desktop
 }
 

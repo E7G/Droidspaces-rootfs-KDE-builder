@@ -10,9 +10,9 @@ apply_sysctl() {
 }
 
 # Device-specific VM profile. The Android host and guest share 4 GiB, so the
-# goal is to keep interactive frames resident while still allowing Android's
-# shared-memory pressure to reclaim cold pages.
-apply_sysctl vm.swappiness 20
+# goal is to avoid the multi-process Firefox + KWin swap storm seen on Clover,
+# not to maximize a desktop benchmark score.
+apply_sysctl vm.swappiness 35
 apply_sysctl vm.vfs_cache_pressure 75
 apply_sysctl vm.dirty_bytes 16777216
 apply_sysctl vm.dirty_background_bytes 4194304
@@ -42,8 +42,8 @@ for policy in /sys/devices/system/cpu/cpufreq/policy* /sys/devices/system/cpu/cp
         printf '%s\n' schedutil >"$governor" 2>/dev/null || true
     fi
     for knob_value in \
-        "$policy/schedutil/up_rate_limit_us=500" \
-        "$policy/schedutil/down_rate_limit_us=20000"; do
+        "$policy/schedutil/up_rate_limit_us=1000" \
+        "$policy/schedutil/down_rate_limit_us=10000"; do
         knob="${knob_value%%=*}"
         value="${knob_value#*=}"
         [ -w "$knob" ] && printf '%s\n' "$value" >"$knob" 2>/dev/null || true
@@ -72,7 +72,7 @@ if [ -w "$thp_defrag" ] && grep -qw defer+madvise "$thp_defrag"; then
 fi
 
 mkdir -p /run/droidspaces 2>/dev/null || true
-printf '%s\n' 'profile=mi-pad4-sdm660-4gb' 'memory=swappiness20-page-cluster0' \
-    'cpu=schedutil-fast-up-low-idle' 'storage=kernel-selected' 'v4l2-m2m=kept' \
+printf '%s\n' 'profile=mi-pad4-sdm660-4gb' 'memory=swappiness35-page-cluster0' \
+    'cpu=schedutil-fast-response' 'storage=kernel-selected' 'v4l2-m2m=kept' \
     'kgsl=kept' > /run/droidspaces/mi-pad4-performance.applied 2>/dev/null || true
 log 'device-specific SDM660 profile applied'

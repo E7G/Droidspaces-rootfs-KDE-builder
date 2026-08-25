@@ -53,7 +53,7 @@ ulimit -n 8192
 
 # SDM660 has 4 efficiency + 4 performance cores.
 # Avoid Firefox creating a generic worker pool for all 8 CPUs.
-export MOZ_TASKCONTROLLER_THREADCOUNT="${MI_PAD4_FIREFOX_TASK_THREADS:-4}"
+export MOZ_TASKCONTROLLER_THREADCOUNT="${MI_PAD4_FIREFOX_TASK_THREADS:-3}"
 # Enabled by our Firefox source patch below.
 # Reuses Firefox Android's big.LITTLE policy for Stylo workers only.
 export MOZ_MI_PAD4_ANDROID_SCHED="${MI_PAD4_FIREFOX_ANDROID_SCHED:-1}"
