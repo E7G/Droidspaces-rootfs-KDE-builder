@@ -1,0 +1,107 @@
+name: Validate WinLite UltraLite
+
+on:
+  pull_request:
+    paths:
+      - 'Arch-WinLite.Dockerfile'
+      - 'scripts/mi-pad4/winlite/**'
+      - 'scripts/mi-pad4/mi-pad4-kwin-wayland-wrapper'
+      - '.github/workflows/validate-winlite-ultralite.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject whitespace errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ github.base_ref }}" ]]; then
+            git diff --check "origin/${{ github.base_ref }}...HEAD"
+          else
+            git diff --check HEAD~1..HEAD
+          fi
+
+      - name: Validate WinLite shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/mi-pad4/winlite/droidspaces-init
+          bash -n scripts/mi-pad4/winlite/winlite-supervisor
+          bash -n scripts/mi-pad4/winlite/winlite-session
+          bash -n scripts/mi-pad4/winlite/winrun
+          bash -n scripts/mi-pad4/winlite/wincontainer
+          bash -n scripts/mi-pad4/mi-pad4-kwin-wayland-wrapper
+
+      - name: Exercise Winlator-style container manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          script="$PWD/scripts/mi-pad4/winlite/wincontainer"
+
+          export HOME="$(mktemp -d)"
+          [[ "$("$script" current)" == default ]]
+          "$script" create game
+          "$script" use game
+          [[ "$("$script" current)" == game ]]
+          [[ "$("$script" prefix game)" == "$HOME/.winlite/containers/game/.wine" ]]
+          test -L "$HOME/.wine-winlite"
+          [[ "$(readlink "$HOME/.wine-winlite")" == "$HOME/.winlite/containers/game/.wine" ]]
+          if "$script" delete game; then
+            echo 'active container deletion unexpectedly succeeded' >&2
+            exit 1
+          fi
+
+          export HOME="$(mktemp -d)"
+          mkdir -p "$HOME/.wine-winlite"
+          touch "$HOME/.wine-winlite/migration-sentinel"
+          [[ "$("$script" current)" == default ]]
+          test -f "$HOME/.winlite/containers/default/.wine/migration-sentinel"
+          test -L "$HOME/.wine-winlite"
+
+      - name: Validate ultra-lite runtime invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          supervisor=scripts/mi-pad4/winlite/winlite-supervisor
+          session=scripts/mi-pad4/winlite/winlite-session
+          launcher=scripts/mi-pad4/winlite/winrun
+          registry=scripts/mi-pad4/winlite/wine-default.reg
+          wp=scripts/mi-pad4/winlite/90-winlite-wireplumber.conf
+
+          ! grep -Fq 'dbus-daemon --system' "$supervisor"
+          grep -Fq 'dbus-run-session' "$supervisor"
+          grep -Fq 'wincontainer current' "$session"
+          grep -Fq 'winrun --shell' "$session"
+          ! grep -Eq 'lxqt-panel|pcmanfm-qt' "$session" || grep -Fq 'pkill' "$session"
+          grep -Fq 'mode=desktop' "$launcher"
+          grep -Fq 'explorer.exe /desktop=shell' "$launcher"
+          grep -Fq '"Graphics"="x11"' "$registry"
+          ! grep -Fq '"Graphics"="wayland,x11"' "$registry"
+          grep -Fq 'monitor.alsa = disabled' "$wp"
+          grep -Fq 'monitor.bluez = disabled' "$wp"
+          grep -Fq 'support.dbus = disabled' "$wp"
+          grep -Fq 'support.logind = disabled' "$wp"
+
+      - name: Validate RootFS build assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          dockerfile=Arch-WinLite.Dockerfile
+          grep -Fq '/usr/local/bin/wincontainer' "$dockerfile"
+          grep -Fq '/etc/wireplumber/wireplumber.conf.d/90-winlite.conf' "$dockerfile"
+          grep -Fq 'ui=winlator-style-wine-explorer-desktop' "$dockerfile"
+          grep -Fq 'container-model=per-prefix-active-container' "$dockerfile"
+          grep -Fq 'dbus=session-only' "$dockerfile"
+          grep -Fq "-name 'winewayland.drv.so'" "$dockerfile"
+          ! grep -Eq '^[[:space:]]+(gawk|iputils|unzip|pam)[[:space:]]*\\$' "$dockerfile"
