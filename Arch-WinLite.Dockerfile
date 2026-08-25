@@ -40,8 +40,9 @@ RUN set -eux; \
     fi; \
     pacman -Sy --noconfirm --needed archlinux-keyring glibc; \
     pacman -Su --noconfirm; \
+    # Runtime-only package set. Build/debug helpers that WinLite never executes
+    # (gawk, iputils, unzip, PAM) are intentionally not installed explicitly.
     pacman -S --noconfirm --needed \
-        alsa-lib \
         bash \
         ca-certificates \
         coreutils \
@@ -50,12 +51,10 @@ RUN set -eux; \
         findutils \
         fontconfig \
         freetype2 \
-        gawk \
         glibc \
         gnutls \
         grep \
         iproute2 \
-        iputils \
         krb5 \
         libcap \
         libepoxy \
@@ -74,15 +73,12 @@ RUN set -eux; \
         libxrender \
         libxshmfence \
         libxxf86vm \
-        ncurses \
-        pam \
         pipewire \
         pipewire-pulse \
         procps-ng \
         sed \
         ttf-liberation \
         tzdata \
-        unzip \
         util-linux \
         wayland \
         wireplumber \
@@ -94,32 +90,32 @@ RUN set -eux; \
         /tmp/pacman-local.conf; \
     pacman --config /tmp/pacman-local.conf -U --noconfirm \
         /tmp/local-packages-winlite/mesa-[0-9]*.pkg.tar.*; \
-    # Install the custom KWin directly so pacman resolves its dependencies from
-    # our lock-screen-free package metadata instead of first pulling stock KWin
-    # (which hard-depends on kscreenlocker).
+    # KWin is retained only as the in-tree AnLand compositor/Android bridge.
+    # The package is built without the screen-locker integration and without a
+    # Plasma workspace; no Linux shell/panel/file manager is installed.
     pacman --config /tmp/pacman-local.conf -U --noconfirm \
         /tmp/local-packages-winlite/kwin-[0-9]*.pkg.tar.*; \
-    # Defensive cleanup: WinLite has no logind/ConsoleKit session manager, so a
-    # KScreenLocker payload would create an unrecoverable lock screen.
     if pacman -Q kscreenlocker >/dev/null 2>&1; then \
         pacman -Rdd --noconfirm kscreenlocker; \
     fi; \
     ! pacman -Q kscreenlocker >/dev/null 2>&1; \
     ! find /usr -type f \( -name 'kscreenlocker_greet' -o -name 'kcheckpass' \) -print -quit | grep -q .; \
-    # The user interface is Wine explorer itself. Do not ship a second Linux
-    # desktop/panel/file-manager stack in the WinLite image.
     ! pacman -Q lxqt-panel >/dev/null 2>&1; \
     ! pacman -Q pcmanfm-qt >/dev/null 2>&1; \
+    ! pacman -Q plasma-workspace >/dev/null 2>&1; \
     setcap -r /usr/bin/kwin_wayland; \
     rm -f /tmp/pacman-local.conf; \
     install -Dm755 /tmp/winlite/droidspaces-init /sbin/droidspaces-init; \
     install -Dm755 /tmp/winlite/winlite-supervisor /usr/local/bin/winlite-supervisor; \
     install -Dm755 /tmp/winlite/winlite-session /usr/local/bin/winlite-session; \
     install -Dm755 /tmp/winlite/winrun /usr/local/bin/winrun; \
+    install -Dm755 /tmp/winlite/wincontainer /usr/local/bin/wincontainer; \
     install -Dm755 /usr/local/libexec/mi-pad4-kwin-wayland-wrapper \
         /usr/sbin/kwin_wayland_wrapper; \
     install -Dm644 /tmp/winlite/wine-default.reg /usr/share/winlite/wine-default.reg; \
     install -Dm644 /tmp/winlite/99-winlite-fonts.conf /etc/fonts/conf.d/99-winlite-fonts.conf; \
+    install -Dm644 /tmp/winlite/90-winlite-wireplumber.conf \
+        /etc/wireplumber/wireplumber.conf.d/90-winlite.conf; \
     install -Dm644 /tmp/winlite/kwinrc /usr/share/winlite/kwinrc; \
     install -Dm644 /tmp/winlite/kwinoutputconfig.json /usr/share/winlite/kwinoutputconfig.json; \
     install -Dm644 /tmp/winlite/container.config /usr/share/winlite/container.config; \
@@ -148,16 +144,20 @@ RUN set -eux; \
     install -d /usr/share/droidspaces; \
     printf '%s\n' \
         'profile=winlite' \
-        'desktop=kwin-anland+wine-explorer-shell' \
+        'ui=winlator-style-wine-explorer-desktop' \
+        'container-model=per-prefix-active-container' \
+        'desktop=anland-kwin-bridge+xwayland+wine-explorer-shell' \
+        'linux-desktop=none' \
         'linux-panel=none' \
         'linux-file-manager=none' \
+        'dbus=session-only' \
         'pid1=droidspaces-tini' \
         'systemd=not-started' \
         'windows=hangover-11.9-winlite-ntsync+arm64ec-fex+wowbox64' \
         'sync=ntsync-auto+esync-fallback' \
         'proton-style=lean-runtime-tuning-without-steam-runtime' \
-        'graphics=wine-shell-x11+direct-wayland-opengl-kgsl' \
-        'audio=pipewire-anland' \
+        'graphics=wine-x11-shell+xwayland+anland-opengl-kgsl' \
+        'audio=pipewire-anland-minimal-policy' \
         'fonts=liberation+wqy-zenhei' \
         >/usr/share/droidspaces/winlite-profile; \
     printf '%s\n' \
@@ -167,21 +167,26 @@ RUN set -eux; \
         >/usr/share/droidspaces/mesa-kgsl; \
     printf '%s\n' \
         'backend=anland' \
+        'role=minimal-display-input-audio-bridge' \
         'sync=native-fence-worker' \
         'bufferqueue=clover-4.4-compatible' \
         >/usr/share/droidspaces/anland-kwin-package; \
     test -x /usr/bin/wine; \
     test -x /usr/bin/wineserver; \
+    test -x /usr/local/bin/wincontainer; \
     grep -aFq '/dev/ntsync' /usr/bin/wineserver; \
     grep -Fq 'ntsync=compiled-in-android-uapi' /usr/share/hangover-winlite-version; \
     grep -Fq 'ntsync-fallback=esync' /usr/share/hangover-winlite-version; \
+    grep -Fq 'monitor.alsa = disabled' /etc/wireplumber/wireplumber.conf.d/90-winlite.conf; \
+    grep -Fq 'support.dbus = disabled' /etc/wireplumber/wireplumber.conf.d/90-winlite.conf; \
+    grep -Fq '"Graphics"="x11"' /usr/share/winlite/wine-default.reg; \
     find /usr/lib -type f -name explorer.exe -print -quit | grep -q .; \
     test -e /usr/lib/wine/aarch64-windows/libarm64ecfex.dll \
         -o -e /usr/lib/aarch64-linux-gnu/wine/aarch64-windows/libarm64ecfex.dll; \
     test -e /usr/lib/wine/aarch64-windows/wowbox64.dll \
         -o -e /usr/lib/aarch64-linux-gnu/wine/aarch64-windows/wowbox64.dll; \
     : >/tmp/hangover-missing-libs; \
-    for name in wine wineserver ntdll.so win32u.so winewayland.drv.so winex11.drv.so winepulse.drv.so wined3d.so; do \
+    for name in wine wineserver ntdll.so win32u.so winex11.drv.so winepulse.drv.so wined3d.so; do \
         find /usr/bin /usr/lib /usr/libexec -type f -name "$name" -print 2>/dev/null || true; \
     done | sort -u | while IFS= read -r elf; do \
         file -Lb "$elf" | grep -q 'ELF' || continue; \
@@ -194,6 +199,11 @@ RUN set -eux; \
     fi; \
     wine --version; \
     kwin_wayland --version; \
+    # X11 is the only Winlator-style Wine display driver in this profile. The
+    # native Wine Wayland driver is dead payload here, so remove it if present.
+    find /usr/lib -type f \( -name 'winewayland.drv' -o -name 'winewayland.drv.so' \) -delete 2>/dev/null || true; \
+    # Generated zh_CN locale + font cache are retained; source locale databases,
+    # docs, headers and package caches are build-time payload only.
     rm -rf \
         /usr/include \
         /usr/lib/debug \
@@ -201,9 +211,14 @@ RUN set -eux; \
         /usr/share/gtk-doc \
         /usr/share/info \
         /usr/share/man \
+        /usr/share/i18n \
         /var/cache/pacman/pkg/* \
         /var/lib/pacman/sync/* \
         /tmp/*; \
+    if [[ -d /usr/share/locale ]]; then \
+        find /usr/share/locale -mindepth 1 -maxdepth 1 -type d \
+            ! -name 'zh_CN' ! -name 'zh' -exec rm -rf '{}' +; \
+    fi; \
     find /usr -type d -name __pycache__ -prune -exec rm -rf '{}' + 2>/dev/null || true; \
     find /usr -type f \( -name '*.a' -o -name '*.la' \) -delete
 
