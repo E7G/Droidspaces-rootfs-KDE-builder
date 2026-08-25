@@ -79,6 +79,7 @@ void AnlandEglLayer::releaseBuffers()
     for (int i = 0; i < MAX_BUFS; i++) {
         m_fbos[i].reset();
         m_textures[i].reset();
+        m_renderTargets[i].reset();
     }
     m_sceneTexture.reset();
     m_sceneFbo.reset();
@@ -233,10 +234,10 @@ bool AnlandEglLayer::importBuffers(int count)
 
         m_textures[i] = std::move(texture);
         m_fbos[i] = std::move(fbo);
+        m_renderTargets[i].emplace(m_fbos[i].get());
     }
 
     m_bufCount = count;
-    ensureSceneFbo();
     m_sceneInvalid = true;
     markAllBuffersDirty();
     return true;
@@ -331,7 +332,7 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
 
     m_currentIndex = get_selected_idx(m_display);
 
-    if (m_currentIndex < 0 || m_currentIndex >= m_bufCount || !m_fbos[m_currentIndex]) {
+    if (m_currentIndex < 0 || m_currentIndex >= m_bufCount || !m_renderTargets[m_currentIndex]) {
         qCWarning(KWIN_ANLAND) << "no render target for consumer buffer" << m_currentIndex;
         return std::nullopt;
     }
@@ -343,7 +344,7 @@ std::optional<OutputLayerBeginFrameInfo> AnlandEglLayer::doBeginFrame()
     // into the selected slot instead. The slot is never trusted for damage
     // preservation, so the full scene is redrawn on every real KWin frame.
     return OutputLayerBeginFrameInfo{
-        RenderTarget(m_fbos[m_currentIndex].get()),
+        *m_renderTargets[m_currentIndex],
         Region::infinite()
     };
 }

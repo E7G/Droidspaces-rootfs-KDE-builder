@@ -88,6 +88,7 @@ private:
     int m_currentIndex = 0;
     std::array<std::shared_ptr<GLTexture>, MAX_BUFS> m_textures;
     std::array<std::unique_ptr<GLFramebuffer>, MAX_BUFS> m_fbos;
+    std::array<std::optional<RenderTarget>, MAX_BUFS> m_renderTargets;
 
     // Persistent scene FBO (source for composition)
     std::unique_ptr<GLTexture> m_sceneTexture;
