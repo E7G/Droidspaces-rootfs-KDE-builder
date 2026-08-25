@@ -14,7 +14,7 @@ KWINKG="${KWINKG:-365ae0acc5f521f53a85fe6d9a030646687324f8}"
 trap 'rc=$?; echo "WinLite bridge-only KWin build failed: ${BASH_COMMAND} (exit ${rc})" >&2; exit "$rc"' ERR
 
 pacman -S --noconfirm --needed \
-    base-devel cmake ninja meson extra-cmake-modules \
+    base-devel cmake git ninja meson extra-cmake-modules \
     plasma-wayland-protocols python qt6-tools vulkan-headers wayland-protocols \
     xorgproto xtrans xorg-font-util xorg-xwayland libcap sudo
 
