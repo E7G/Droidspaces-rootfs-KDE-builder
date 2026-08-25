@@ -179,12 +179,12 @@ void AnlandOutput::onConsumerReady()
         return;
     }
 
-    // Idle scene: acknowledge the selected clean buffer without rendering. The
-    // old code returned after completing the previous OutputFrame and left this
-    // new request unanswered; the consumer hit its five-second safety timeout,
-    // tore down every dmabuf and reconnected, producing the periodic full-screen
-    // flash. A bare refresh message keeps BufferQueue alive while the GPU sleeps.
-    handOffWithoutFrame();
+    // Do not acknowledge an idle clean buffer here.  On Clover the consumer
+    // emits the next buffer-ready event immediately after every refresh reply;
+    // replying again for an unchanged scene therefore creates a free-running
+    // refresh/ack loop (KWin can consume all eight CPUs while nothing changes).
+    // Leave m_consumerReady set.  A real client/output damage will submit the
+    // next frame and notifyFramePresented() will then send exactly one reply.
 }
 
 void AnlandOutput::resize(const QSize &newSize)

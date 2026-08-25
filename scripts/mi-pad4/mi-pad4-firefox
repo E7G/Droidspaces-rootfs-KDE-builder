@@ -142,9 +142,13 @@ user_pref("browser.cache.disk.enable", false);
 user_pref("browser.cache.disk.capacity", 0);
 // Keep the browser's RAM footprint bounded; hardware video frames do not use
 // these caches. The disk cache remains disabled because HOME is Android-backed.
-user_pref("browser.cache.memory.capacity", 16384);
-user_pref("media.cache_size", 16384);
-user_pref("image.cache.size", 8388608);
+// Keep a small bounded cache instead of forcing Douyin to refetch playlist
+// segments and decoded image assets while scrolling.  32 MiB is enough for
+// the page shell; the 64 MiB media cache absorbs short network jitter without
+// turning the 4 GiB guest into a swap storm.
+user_pref("browser.cache.memory.capacity", 32768);
+user_pref("media.cache_size", 65536);
+user_pref("image.cache.size", 16777216);
 user_pref("image.mem.decode_bytes_at_a_time", 65536);
 user_pref("image.mem.shared.unmap.min_expiration_ms", 60000);
 // ---------- Session / daily usability ----------
