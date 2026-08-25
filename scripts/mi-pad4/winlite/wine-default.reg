@@ -1,7 +1,9 @@
 Windows Registry Editor Version 5.00
 
 [HKEY_CURRENT_USER\Software\Wine\Drivers]
-"Graphics"="wayland,x11"
+; Winlator uses the X11 Wine driver behind its embedded X server. WinLite does
+; the same behind KWin/Xwayland: do not probe/load Wine's second Wayland driver.
+"Graphics"="x11"
 "Audio"="pulse"
 
 [HKEY_CURRENT_USER\Software\Wine\Direct3D]
@@ -16,7 +18,7 @@ Windows Registry Editor Version 5.00
 "Decorated"="Y"
 
 ; The special desktop named "shell" keeps Wine's own lightweight taskbar,
-; Start menu and tray visible. This replaces LXQt Panel/PCManFM-Qt entirely.
+; Start menu and tray visible. This is the complete WinLite UI.
 [HKEY_CURRENT_USER\Software\Wine\Explorer\Desktops\shell]
 "EnableShell"=dword:00000001
 
@@ -31,6 +33,34 @@ Windows Registry Editor Version 5.00
 
 [HKEY_CURRENT_USER\Control Panel\Desktop\WindowMetrics]
 "MinAnimate"="0"
+
+; Extreme-lite startup profile. These are background-oriented services also
+; exposed by Winlator's startup-selection tuning. Keep RpcSs, PlugPlay, NDIS,
+; MSI Server and FontCache enabled for application/installer compatibility.
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\BITS]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\Eventlog]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\HTTP]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\LanmanServer]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\scardsvr]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\Schedule]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\Spooler]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\StiSvc]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\TermService]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\Winmgmt]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\wuauserv]
+"Start"=dword:00000004
+[HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\winebth]
+"Start"=dword:00000004
 
 ; Keep this REG file ASCII-only for maximum regedit compatibility. Chinese
 ; aliases are handled by Fontconfig plus the msyh.ttf/simsun.ttf links.
