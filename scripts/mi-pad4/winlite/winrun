@@ -3,28 +3,55 @@
 set -euo pipefail
 
 export HOME="${HOME:-/tmp/droidspaces-home}"
-export WINEPREFIX="${WINEPREFIX:-$HOME/.wine-winlite}"
+
+# Winlator-style container override for one command. The graphical session uses
+# the active container selected by wincontainer; this switch is mainly useful
+# for maintenance/testing without changing the next boot target.
+if [[ "${1:-}" == "--container" ]]; then
+    [[ -n "${2:-}" ]] || { echo '--container requires a name' >&2; exit 2; }
+    export WINLITE_CONTAINER="$2"
+    unset WINEPREFIX
+    shift 2
+fi
+
+if [[ -z "${WINEPREFIX:-}" ]]; then
+    if [[ -n "${WINLITE_CONTAINER:-}" ]]; then
+        WINLITE_CONTAINER_ROOT="$(/usr/local/bin/wincontainer path "$WINLITE_CONTAINER")"
+    else
+        WINLITE_CONTAINER_ROOT="$(/usr/local/bin/wincontainer path)"
+        WINLITE_CONTAINER="${WINLITE_CONTAINER_ROOT##*/}"
+    fi
+    export WINLITE_CONTAINER WINLITE_CONTAINER_ROOT
+    export WINEPREFIX="$WINLITE_CONTAINER_ROOT/.wine"
+else
+    export WINLITE_CONTAINER_ROOT="${WINLITE_CONTAINER_ROOT:-$(dirname "$WINEPREFIX")}" 
+fi
+
 export WINEARCH=win64
 export WINEDEBUG="${WINEDEBUG:--all}"
-# Keep two of Proton's broadly useful defaults without pulling its runtime:
-# disable Wine's menu builder (avoids background scans/wakeups) and winebth.sys
-# (Proton disables the Bluetooth driver too). Gecko/Mono prompts stay disabled.
+# Proton/Winlator-style low-noise defaults: suppress Gecko/Mono prompts, menu
+# scanning and Bluetooth driver startup. They save background work without
+# disabling core Windows services that installers and COM applications need.
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:-mscoree,mshtml=;winemenubuilder.exe=d;winebth.sys=d}"
 export HODLL64="${HODLL64:-libarm64ecfex.dll}"
 export HODLL="${HODLL:-wowbox64.dll}"
 export LD_LIBRARY_PATH="/usr/lib/wine/aarch64-unix${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# Match the useful low-overhead pieces of Winlator's guest environment while
+# keeping the Mi Pad 4 KGSL path native to Droidspaces/AnLand.
+export MESA_DEBUG=silent
+export MESA_NO_ERROR=1
 export MESA_LOADER_DRIVER_OVERRIDE=kgsl
 export FD_FORCE_KGSL=1
 export FD_KGSL_ENABLE_DMABUF=1
 export mesa_glthread=true
+export vblank_mode=0
+export WINE_DO_NOT_CREATE_DXGI_DEVICE_MANAGER=1
 export MALLOC_ARENA_MAX=2
 
 # The WinLite Hangover Wine is built with NTSync unconditionally. Wine 11.x
-# selects /dev/ntsync automatically when it is available. Do not force ESYNC or
-# FSYNC in that case; doing so can hide the lower-overhead in-process path.
-# Older/non-NTSync Droidspaces kernels fall back to ESYNC rather than expensive
-# server-only synchronization. FSYNC stays off because many Android 4.x kernels
-# do not provide the futex_waitv ABI it requires.
+# selects /dev/ntsync automatically when it is available. Older Droidspaces
+# kernels fall back to ESYNC; FSYNC is intentionally disabled on Clover 4.4.
 if [[ -e /dev/ntsync && -r /dev/ntsync ]]; then
     unset WINEESYNC WINEFSYNC
     export WINLITE_SYNC=ntsync
@@ -45,62 +72,64 @@ install_font_link() {
 
 init_prefix() {
     mkdir -p "$WINEPREFIX" "$HOME/Windows"
+
+    # Wine shell and application launches can race during session startup. A
+    # prefix-local lock avoids duplicate wineboot/regedit/font scans.
+    exec 9>"$WINEPREFIX/.winlite-init.lock"
+    flock 9
+
     if [[ ! -f "$WINEPREFIX/system.reg" ]]; then
         wineboot -u
     fi
 
-    # Apply WinLite defaults versioned rather than only on first wineboot so an
-    # existing prefix receives later font/performance fixes without recreation.
-    if [[ ! -e "$WINEPREFIX/.winlite-tuning-v3" ]]; then
+    # Versioned one-shot tuning. Expensive fontconfig probes and Desktop scans
+    # are deliberately kept out of every normal application launch.
+    if [[ ! -e "$WINEPREFIX/.winlite-tuning-v4" ]]; then
         regedit /S /usr/share/winlite/wine-default.reg || true
-        touch "$WINEPREFIX/.winlite-tuning-v3"
+
+        mkdir -p "$WINEPREFIX/dosdevices"
+        ln -snf "$HOME/Windows" "$WINEPREFIX/dosdevices/g:"
+
+        install_font_link arial.ttf 'Liberation Sans'
+        install_font_link segoeui.ttf 'Liberation Sans'
+        install_font_link tahoma.ttf 'Liberation Sans'
+        install_font_link times.ttf 'Liberation Serif'
+        install_font_link cour.ttf 'Liberation Mono'
+        install_font_link msyh.ttf 'WenQuanYi Zen Hei'
+        install_font_link simsun.ttf 'WenQuanYi Zen Hei'
+
+        if [[ -d "$WINEPREFIX/drive_c/users" ]]; then
+            while IFS= read -r desktop; do
+                ln -snf "$HOME/Windows" "$desktop/Windows" 2>/dev/null || true
+            done < <(find "$WINEPREFIX/drive_c/users" -mindepth 2 -maxdepth 2 -type d -name Desktop -print 2>/dev/null)
+        fi
+
+        touch "$WINEPREFIX/.winlite-tuning-v4"
     fi
 
-    # Proton exposes a dedicated game drive. Do the same with a symlink only:
-    # no daemon, no mount and no extra package. G: points at the persistent
-    # Windows payload directory used by WinLite.
-    mkdir -p "$WINEPREFIX/dosdevices"
-    ln -snf "$HOME/Windows" "$WINEPREFIX/dosdevices/g:"
-
-    # Fontconfig normally makes these fonts visible already, but a few Windows
-    # applications probe C:\Windows\Fonts by filename. Symlinks fix that class
-    # of application with effectively zero additional image/prefix size.
-    install_font_link arial.ttf 'Liberation Sans'
-    install_font_link segoeui.ttf 'Liberation Sans'
-    install_font_link tahoma.ttf 'Liberation Sans'
-    install_font_link times.ttf 'Liberation Serif'
-    install_font_link cour.ttf 'Liberation Mono'
-    install_font_link msyh.ttf 'WenQuanYi Zen Hei'
-    install_font_link simsun.ttf 'WenQuanYi Zen Hei'
-
-    # Wine's shell desktop is populated from the prefix Desktop folder. Expose
-    # the persistent Droidspaces Windows directory there without a resident
-    # Linux file manager or desktop shell.
-    if [[ -d "$WINEPREFIX/drive_c/users" ]]; then
-        while IFS= read -r desktop; do
-            ln -snf "$HOME/Windows" "$desktop/Windows" 2>/dev/null || true
-        done < <(find "$WINEPREFIX/drive_c/users" -mindepth 2 -maxdepth 2 -type d -name Desktop -print 2>/dev/null)
-    fi
+    flock -u 9
 }
 
 usage() {
     cat >&2 <<'EOF'
 用法:
-  winrun <程序.exe|程序.msi> [参数...]       # 最快：Wine Wayland 直出
-  winrun --desktop <程序.exe|程序.msi> [...] # 在 Wine 桌面/任务栏内运行
-  winrun --shell                             # 打开/恢复极简 Wine 桌面
+  winrun <程序.exe|程序.msi> [参数...]       # 默认：Winlator 风格 Wine 桌面内运行
+  winrun --direct <程序.exe|程序.msi> [...] # 直接 X11 窗口，跳过 Explorer 桌面包装
+  winrun --desktop <程序.exe|程序.msi> [...]# 同默认模式
+  winrun --shell                             # 打开/恢复 Wine Explorer 桌面
   winrun --winecfg                           # Wine 设置
   winrun --sync-info                         # 查看 NTSync/ESYNC 当前选择
+  winrun --container <名称> ...              # 临时指定一个 WinLite 容器
 EOF
 }
 
-mode=direct
+mode=desktop
 case "${1:-}" in
     --shell)
         init_prefix
-        # Wine 11.x 的 shell desktop 在 X11 驱动下最完整：自带开始菜单、
-        # 任务栏和托盘。它替代 LXQt Panel + PCManFM-Qt，两套 Qt 常驻进程
-        # 都不再需要。空尺寸让 Wine 跟随 Xwayland 当前输出尺寸。
+        # This is the same UI model used by Winlator: Wine Explorer owns the
+        # virtual desktop, taskbar, Start menu and tray. Linux has no panel or
+        # file-manager process in the session.
         exec wine explorer.exe /desktop=shell,,x11
         ;;
     --winecfg)
@@ -109,7 +138,8 @@ case "${1:-}" in
         exec wine winecfg "$@"
         ;;
     --sync-info)
-        printf 'sync=%s\n' "$WINLITE_SYNC"
+        printf 'container=%s\nprefix=%s\nsync=%s\n' \
+            "${WINLITE_CONTAINER:-default}" "$WINEPREFIX" "$WINLITE_SYNC"
         if [[ "$WINLITE_SYNC" == ntsync ]]; then
             ls -l /dev/ntsync 2>/dev/null || true
         fi
@@ -117,13 +147,13 @@ case "${1:-}" in
         exit 0
         ;;
     --desktop)
-        mode=desktop
         shift
         ;;
     --direct)
+        mode=direct
         shift
         ;;
-    -h|--help|"")
+    -h|--help|'')
         usage
         exit 0
         ;;
@@ -149,9 +179,9 @@ else
     fi
 fi
 
-# Only translated application launches are biased to SDM660's performance
-# cluster. The always-visible Wine shell is deliberately left unpinned so the
-# kernel can park big cores while idle.
+# Keep the resident shell schedulable on LITTLE cores while translated Windows
+# workloads prefer SDM660's performance cluster. This avoids pinning idle shell
+# housekeeping to the expensive cores.
 if command -v taskset >/dev/null 2>&1; then
     exec nice -n -4 taskset -c 4-7 "${command[@]}"
 fi
