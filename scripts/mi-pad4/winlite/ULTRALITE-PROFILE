@@ -1,0 +1,6 @@
+ui=wine-explorer
+containers=per-prefix
+kwin=bridge-only
+wireplumber=policy-only
+dbus=session-only
+linux-desktop=none
