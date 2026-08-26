@@ -12,7 +12,10 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_ROOT=/tmp/droidspaces-arch-anland-build
 PACKAGE_OUTPUT_DIR="${ANLAND_PACKAGE_OUTPUT_DIR:-}"
-KIOKG=8ca1426ad92c58c17d4ef610e57febd763717272
+# Keep the privately built KIO ABI in lockstep with the KF6/KWin packages
+# pulled by the current Arch base image.  The old 6.28.0 snapshot leaves
+# KF6KIOConfig.cmake behind while KWin is configured against 6.29.0.
+KIOKG=57609a3dc97383f3c9a5f7a6aa27b4d2fcac09fa
 KWINKG=365ae0acc5f521f53a85fe6d9a030646687324f8
 XWAYLANDKG=8f82d79d312192108bb6417187c6ea986cdfcb3c
 PLASMAWORKSPACEKG=864d8e5f78cb3665317efc5ca3f525e87a30f6dc
@@ -62,6 +65,12 @@ sha256sums+=('SKIP')
 
 prepare() {
   cd "$srcdir/kio-$pkgver"
+  # KIO 6.29 packaging carries this upstream service-menu fix.  The pinned
+  # 6.28 snapshot did not, so keep the build compatible with both package
+  # revisions without reapplying a patch that is absent from older sources.
+  if [[ -f "$srcdir/774defb9.patch" ]]; then
+    patch -Np1 -i "$srcdir/774defb9.patch"
+  fi
   patch -Np1 -i "$srcdir/kio-runtime-named-socket.patch"
 }
 EOF_KIO_PATCH
