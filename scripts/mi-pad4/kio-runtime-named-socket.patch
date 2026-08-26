@@ -1,7 +1,6 @@
-diff --git a/src/core/connectionbackend.cpp b/src/core/connectionbackend.cpp
-index a113389..7b812ce 100644
---- a/src/core/connectionbackend.cpp
-+++ b/src/core/connectionbackend.cpp
+diff --git a/src/core/socketconnectionbackend.cpp b/src/core/socketconnectionbackend.cpp
+--- a/src/core/socketconnectionbackend.cpp
++++ b/src/core/socketconnectionbackend.cpp
 @@ -17,7 +17,7 @@
  #include <QLocalSocket>
  #include <QPointer>
@@ -11,7 +10,7 @@ index a113389..7b812ce 100644
  #include <cerrno>
  
  #include "kiocoreconnectiondebug.h"
-@@ -106,20 +106,12 @@ ConnectionBackend::ConnectionResult ConnectionBackend::listenForRemote()
+@@ -112,20 +112,12 @@ SocketConnectionBackend::ConnectionResult SocketConnectionBackend::listenForRemote()
      Q_ASSERT(!localServer); // !tcpServer as well
  
      const QString prefix = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
@@ -36,7 +35,7 @@ index a113389..7b812ce 100644
  
      localServer = new QLocalServer(this);
      if (!localServer->listen(sockname)) {
-@@ -128,6 +120,9 @@ ConnectionBackend::ConnectionResult ConnectionBackend::listenForRemote()
+@@ -133,5 +123,8 @@ SocketConnectionBackend::ConnectionResult SocketConnectionBackend::listenForRemote()
          localServer = nullptr;
          return {false, errorString};
      }
@@ -44,5 +43,5 @@ index a113389..7b812ce 100644
 +    address.setScheme(QStringLiteral("local"));
 +    address.setPath(sockname);
  
-     connect(localServer, &QLocalServer::newConnection, this, &ConnectionBackend::newConnection);
+     connect(localServer, &QLocalServer::newConnection, this, &SocketConnectionBackend::newConnection);
  
