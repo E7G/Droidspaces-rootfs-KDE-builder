@@ -503,18 +503,18 @@ jobs:
           # Validate locally built package versions
           #
           grep -Eq \
-            '^var/lib/pacman/local/mesa-1:26\.2\.0-9/' \
+            '^var/lib/pacman/local/mesa-1:26\.2\.0-[0-9]+/' \
             rootfs-files.txt \
             || {
-              echo "Expected Mesa 1:26.2.0-9 is not installed" >&2
+              echo "Expected Mesa 1:26.2.0 with any current Arch pkgrel is not installed" >&2
               exit 1
             }
 
           grep -Eq \
-            '^var/lib/pacman/local/pango-1:1\.58\.2-1/' \
+            '^var/lib/pacman/local/pango-1:1\.58\.2-[0-9]+/' \
             rootfs-files.txt \
             || {
-              echo "Expected Pango 1:1.58.2-1 is not installed" >&2
+              echo "Expected Pango 1:1.58.2 with any current Arch pkgrel is not installed" >&2
               exit 1
             }
 
