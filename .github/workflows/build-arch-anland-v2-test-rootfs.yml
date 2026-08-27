@@ -37,7 +37,10 @@ jobs:
           fi
           grep -q 'kwin' < <(printf '%s\n' "${pkgs[@]}")
           grep -Eq 'xwayland|Xwayland' < <(printf '%s\n' "${pkgs[@]}")
-          sha256sum -c anland-build/Arch/SHA256SUMS
+          (
+            cd anland-build/Arch
+            sha256sum -c SHA256SUMS
+          )
 
       - name: Find latest successful Arch base RootFS
         id: base
