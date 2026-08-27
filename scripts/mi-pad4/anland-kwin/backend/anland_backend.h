@@ -12,12 +12,15 @@
 #pragma once
 
 #include "core/outputbackend.h"
-#include "core/renderdevice.h"
 
 #include <QByteArray>
+#include <QHash>
+#include <QPointer>
 #include <QPointF>
 #include <QVector>
+#include <cstdint>
 #include <memory>
+#include <sys/types.h>
 
 extern "C" {
 #include "display_producer.h"
@@ -30,14 +33,17 @@ class QTimer;
 namespace KWin
 {
 
+class Window;
+
 class AnlandOutput;
+class AnlandEglLayer;
 class AnlandInputDevice;
-class BackendOutput;
+class AbstractDataSource;
 class DrmDevice;
-class EglBackend;
 class EglDisplay;
-class InputBackend;
 class RenderDevice;
+class InputBackend;
+class OpenGLBackend;
 
 class KWIN_EXPORT AnlandBackend : public OutputBackend
 {
@@ -55,30 +61,45 @@ public:
     QList<BackendOutput *> outputs() const override;
 
     EglDisplay *sceneEglDisplayObject() const override;
-    RenderDevice *renderDevice() const;
 
     display_ctx *display() const
     {
         return m_display;
     }
-    DrmDevice *drmDevice() const
+    /**
+     * DRM render device backing GL/EGL. KWin dereferences this during OpenGL
+     * compositor setup (syncobj-timeline / dmabuf-feedback probing), so it must
+     * be non-null; AnlandEglBackend::drmDevice() forwards to it.
+     */
+    DrmDevice *drmDevice() const;
+    RenderDevice *renderDevice() const
     {
-        return m_renderDevice ? m_renderDevice->drmDevice() : nullptr;
+        return m_renderDevice.get();
     }
     AnlandInputDevice *inputDevice() const
     {
         return m_inputDevice.get();
     }
 
+    /**
+     * Called by AnlandEglBackend::present(): hand the freshly painted buffer to
+     * the consumer (signals the render-done fence channel). Returns true if the buffer was
+     * actually handed over (consumer was ready), false otherwise — the caller
+     * uses this to decide how to complete the RenderLoop frame.
+     */
     bool notifyFramePresented();
+
+    /** True while the consumer fds and dmabufs are available for rendering. */
+    bool isConsumerConnected() const;
+
+    /** Import the current consumer dmabufs into a newly attached EGL layer. */
+    bool importBuffers(AnlandEglLayer *layer);
 
     /** Re-run the Workspace output layout after an output changed its mode at
      *  runtime (AnlandOutput::resize). The backend mutates the mode directly via
-     *  setState() instead of going through OutputConfiguration, so — exactly like
-     *  DrmBackend/VirtualBackend do after altering their output set — it must emit
-     *  outputsQueried() itself. Otherwise Workspace::updateOutputs() never runs and
-     *  windows keep their old geometry (the mode-changed signal alone does not
-     *  trigger a relayout). */
+     *  setState() instead of going through OutputConfiguration, so it must emit
+     *  outputsQueried() itself; the mode-changed signal alone does not trigger a
+     *  relayout. */
     void notifyOutputsChanged()
     {
         Q_EMIT outputsQueried();
@@ -91,22 +112,29 @@ private:
     void onBufferReady();
     void processInputEvent(const InputEvent &ev);
     QPointF mapInputToLogical(const QPointF &devicePoint) const;
+    QPointF mapInputDeltaToLogical(const QPointF &deviceDelta) const;
     void onReconnectTimer();
     void enterFallback();
 
-    // Clipboard sync — bidirectional bridge between KWin selection / consumer
-    void onClipboardChanged();
+    void onClipboardChanged(bool force = false);
     void sendClipboardToConsumer(const QByteArray &text);
     void sendClipboardToKWin(const QByteArray &text);
-
-    // Inject UTF-8 text from the consumer's IME into the focused KWin client.
     void sendTextInputToKWin(const QByteArray &text);
 
-    // Direct Android IME bridge. Exact Wayland/internal text-input enable state is
-    // mirrored to the consumer and resent after every daemon reconnect.
-    void setupAndroidImeTracking();
-    void updateAndroidImeVar();
-    void sendConsumerVar(uint32_t var, uint32_t value);
+    void setupWindowBridge();
+    void trackWindow(Window *window);
+    void untrackWindow(Window *window);
+    void sendWindowEvent(Window *window, uint16_t action);
+    void sendWindowFocus(Window *window);
+    void resendWindowSnapshot();
+    void handleWindowCommand(uint32_t windowId, uint32_t command);
+
+    // Foreground scheduling: the compositor subtree is boosted once per
+    // connection; focus changes restore the previous client before boosting
+    // the next one with a self-contained event.
+    void setupSchedulingTracking();
+    void updateActiveScheduling(bool force = false);
+    void sendSchedulingEvent(pid_t pid, uint8_t flags);
 
     static void fallbackTrampoline(void *data);
 
@@ -123,13 +151,16 @@ private:
 
     bool m_consumerReady = false;
     bool m_inFallback = false;
-
-    // Last known clipboard text — used to de-duplicate (KWin changed -> we sent ->
-    // consumer sets the same text on Android -> consumer sends back to KWin).
-    // QByteArray is trivially sent over the data channel as UTF-8.
     QByteArray m_clipboardText;
-    bool m_androidImeTrackingReady = false;
-    bool m_androidImeActive = false;
+
+    bool m_windowBridgeEnabled = false;
+    uint32_t m_nextWindowId = 1;
+    uint32_t m_windowEventSerial = 1;
+    QHash<Window *, uint32_t> m_windowIds;
+    QHash<uint32_t, QPointer<Window>> m_windowsById;
+    std::unique_ptr<AbstractDataSource> m_clipboardSource;
+
+    pid_t m_activeSchedulingPid = -1;
 };
 
 } // namespace KWin
