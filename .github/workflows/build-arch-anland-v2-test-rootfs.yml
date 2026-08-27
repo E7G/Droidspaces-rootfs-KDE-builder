@@ -49,26 +49,46 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          run_id="$(
+          mapfile -t run_ids < <(
             gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/build-arch-mi-pad4.yml/runs?status=success&per_page=20" \
-              --jq 'first(.workflow_runs[] | select(.conclusion == "success") | .id) // empty'
-          )"
-          if [ -z "$run_id" ]; then
-            echo "No successful Build Arch Mi Pad 4 RootFS run found" >&2
+              --jq '.workflow_runs[] | select(.conclusion == "success") | .id'
+          )
+
+          run_id=""
+          artifact_name=""
+          for candidate in "${run_ids[@]}"; do
+            name="$(
+              gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${candidate}/artifacts?per_page=100" \
+                --jq 'first(.artifacts[] | select(.expired == false and (.name == "arch-mi-pad4-min" or .name == "rootfs-arch-mi-pad4-min")) | .name) // empty'
+            )"
+            if [ -n "$name" ]; then
+              run_id="$candidate"
+              artifact_name="$name"
+              break
+            fi
+          done
+
+          if [ -z "$run_id" ] || [ -z "$artifact_name" ]; then
+            echo "No successful Arch Mi Pad 4 min RootFS artifact found" >&2
             exit 1
           fi
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-          echo "Using base RootFS run $run_id"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+          echo "Using base RootFS run $run_id artifact $artifact_name"
 
       - name: Download base RootFS artifact
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           BASE_RUN_ID: ${{ steps.base.outputs.run_id }}
+          BASE_ARTIFACT_NAME: ${{ steps.base.outputs.artifact_name }}
         run: |
           set -euo pipefail
           mkdir -p base-rootfs
-          gh run download "$BASE_RUN_ID"             --repo "$GITHUB_REPOSITORY"             --name rootfs-arch-mi-pad4-min             --dir base-rootfs
+          gh run download "$BASE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$BASE_ARTIFACT_NAME" \
+            --dir base-rootfs
           find base-rootfs -maxdepth 2 -type f -print
 
       - name: Install latest Anland packages into test RootFS
