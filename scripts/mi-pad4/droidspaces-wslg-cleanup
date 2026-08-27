@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+
+marker=/run/droidspaces-wslg-v2.restore-desktop
+if [[ -e "$marker" ]]; then
+    rm -f "$marker"
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl start mi-pad4-desktop.service || true
+    fi
+fi

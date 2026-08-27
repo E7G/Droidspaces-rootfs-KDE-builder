@@ -1,0 +1,11 @@
+#!/bin/bash
+set -euo pipefail
+
+marker=/run/droidspaces-wslg-v2.restore-desktop
+rm -f "$marker"
+
+if command -v systemctl >/dev/null 2>&1 &&
+   systemctl is-active --quiet mi-pad4-desktop.service; then
+    : > "$marker"
+    systemctl stop mi-pad4-desktop.service
+fi

@@ -307,6 +307,8 @@ RUN if [ "$ENABLE_MI_PAD4_PROFILE_ARG" = "true" ]; then \
         install -Dm755 /tmp/mi-pad4/mi-pad4-start-wayland /usr/local/bin/mi-pad4-start-wayland && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland /usr/local/bin/mi-pad4-kwin-wayland && \
         install -Dm755 /tmp/mi-pad4/droidspaces-wslg-kwin /usr/local/bin/droidspaces-wslg-kwin && \
+        install -Dm755 /tmp/mi-pad4/droidspaces-wslg-prepare /usr/local/sbin/droidspaces-wslg-prepare && \
+        install -Dm755 /tmp/mi-pad4/droidspaces-wslg-cleanup /usr/local/sbin/droidspaces-wslg-cleanup && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland-wrapper /usr/local/libexec/mi-pad4-kwin-wayland-wrapper && \
         install -Dm755 /tmp/mi-pad4/mi-pad4-kwin-wayland-wrapper /usr/sbin/kwin_wayland_wrapper && \
         install -Dm644 /tmp/mi-pad4/mi-pad4-kwin-wrapper.hook /etc/pacman.d/hooks/mi-pad4-kwin-wrapper.hook && \
