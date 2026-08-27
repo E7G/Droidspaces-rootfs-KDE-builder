@@ -48,8 +48,8 @@ Release 同时提供 `mi-pad4-container.config`、设备 profile 和 `SHA256SUMS
 | `Ubuntu-26-KDE` | `ubuntu:26.04` | `min`、`conc`、`mobile`、`none` | 支持 | 支持 `nosnap`，推荐用于 Anland KDE。 |
 | `Fedora-43-KDE` | `fedora:43` | `min`、`conc`、`mobile`、`none` | 支持 | 某些设备需要启用硬件访问。 |
 | `Fedora-44-KDE` | `fedora:44` | `min`、`conc`、`mobile`、`none` | 支持 | 某些设备需要启用硬件访问。 |
-| `Arch-KDE` | `ogarcia/archlinux` | `min`、`conc`、`none` | 不支持 | 内核建议 5.10 或更新；当前不建议使用本项目的 QEMU/binfmt 跨架构方案。 |
-| Arch-Mi-Pad4 | ogarcia/archlinux | min | supported | Dedicated Clover/SDM660 Arch + Anland workflow; use the bundled Mi Pad 4 config. |
+| `Arch-KDE` | `ogarcia/archlinux` | `min`、`conc`、`none` | 通用 Arch 暂不作为 Anland 主路径 | 内核建议 5.10 或更新；当前不建议使用本项目的 QEMU/binfmt 跨架构方案。 |
+| `Arch-Mi-Pad4` | Arch Linux ARM | `min` | **支持 Anland / WSLg V2** | Clover/SDM660 专用；使用本仓库的 KGSL/Clover 特化 KWin、patched XWayland 和 Droidspaces V2 共享合成器。 |
 
 `all` 会构建全部 Dockerfile 模板。`all-wayland` 只构建支持 Wayland/Anland 的目标，也就是 `Debian-13-KDE`、`Ubuntu-26-KDE`、`Fedora-43-KDE` 和 `Fedora-44-KDE`，并强制启用 Wayland 支持。
 
@@ -242,16 +242,65 @@ startplasmamobile
 Wayland 支持依赖 [anland](https://github.com/superturtlee/anland) 以及本仓库内的 patched KWin/Xwayland 预编译包。建议使用 `Ubuntu-26-KDE`，也可以使用 `Debian-13-KDE`、`Fedora-43-KDE` 或 `Fedora-44-KDE`。Fedora 44 已稳定支持 Wayland/Anland；它使用 Fedora 43 的 Anland 构建脚本，但在 Fedora 44 容器内重新构建 RPM。
 
 
-### Arch / Mi Pad 4 with current Droidspaces-OSS
+### Arch / Mi Pad 4：WSLg V2 实机测试
 
-The dedicated Build Arch Mi Pad 4 RootFS workflow is the supported Arch Wayland/Anland path for Clover. It packages the patched native KWin, the KGSL Mesa profile, and /usr/share/droidspaces/mi-pad4-container.config. With current Droidspaces-OSS, set enable_anland=1; the runtime starts a per-container Anland daemon and bind-mounts its generated socket to /run/display.sock. Do not carry over the old display_daemon.sock bind mount.
+小米平板 4（Clover / SDM660）请使用专用 Arch 链路，不要把通用 Arch-KDE 当作当前 Anland 主测试目标。
+
+当前链路已经包含：
+
+- 本仓库维护的 Mi Pad 4 专用 Anland KWin backend，保留 Android 4.4、KGSL、Clover、legacy ION、native-fence 和 surfaceless EGL 兼容路径；
+- patched `kwin 6.7.3` 与 `xorg-xwayland 24.1.13` ARM64 包；
+- Droidspaces WSLg V2 共享 KWin 会话；
+- `ANLAND_MULTIWINDOW=1` 窗口元数据/焦点/激活/关闭 sideband；
+- `droidspaces-wslg-prepare` / `droidspaces-wslg-cleanup`；
+- `droidspaces-wslg-kwin` 专用启动器；
+- top-app 前台调度；
+- 中文、GPU、音频、剪贴板和输入链路继续沿用现有 Arch/Mi Pad 4 RootFS 配置。
+
+#### 方式一：直接测试 V2 RootFS
+
+Actions 中的 `Build Arch Anland V2 Test RootFS` 会把最新验证通过的 KWin/XWayland 包覆盖进最近一次成功的 Arch Mi Pad 4 `min` RootFS，并上传：
+
+`arch-anland-v2-mipad4-rootfs`
+
+该 artifact 内的 `Arch-min-Anland-V2-MiPad4-aarch64-*.tar.xz` 可以直接作为测试 RootFS 导入 Droidspaces。
+
+#### 方式二：升级已有 Arch RootFS
+
+如果已经有可用的 Arch / Arch Linux ARM 容器，可以在仓库根目录执行：
+
+```bash
+sudo ./anland-build/install.sh
+```
+
+脚本会从 `anland-build/Arch` 安装当前 patched KWin/XWayland，并自动锁定：
+
+```text
+IgnorePkg = kwin xorg-xwayland
+```
+
+避免后续 `pacman -Syu` 覆盖本项目的 patched 包。
+
+#### Droidspaces 侧
+
+使用当前 `E7G/Droidspaces-OSS:main`，容器开启 Anland 后无需再手工维护旧的 `display_daemon.sock` bind。V2 共享模式会为容器建立独立 Anland broker，并在 RootFS 提供专用 launcher 时自动优先使用：
+
+```text
+droidspaces-wslg-prepare
+droidspaces-wslg-kwin
+droidspaces-wslg-cleanup
+```
+
+RootFS 没有这些脚本时才回退到普通 `kwin_wayland`。
+
+在 Droidspaces 的 Linux Apps 卡片中打开 **“WSLg V2 共享合成器”** 后启动应用即可测试共享 KWin 会话；如果出现兼容问题，关闭该开关即可回退到已经验证过的一应用一会话 V1。
 
 ### 一键安装 anland-build 包
 
 `anland-build/install.sh` 会自动识别当前发行版，安装对应的 patched KWin/Xwayland 包，并防止系统更新将它们覆盖。如果系统仓库中的版本更新，脚本会允许将相关包降级到本仓库的 patched 版本；已经 hold 的相关包也会在更新后重新设置 hold。
 脚本会按 `LC_ALL`、`LC_MESSAGES`、`LANG` 的优先级读取系统语言：中文 locale 输出中文，其他 locale 输出英文。
 
-支持 Debian 13、Ubuntu 26.04、Fedora 43 和 Fedora 44，仅支持 ARM64/aarch64。Debian/Ubuntu 使用 `apt-mark hold`，Fedora 通过 `/etc/dnf/dnf.conf` 的 `exclude` 实现等效锁定。
+支持 Arch / Arch Linux ARM、Debian 13、Ubuntu 26.04、Fedora 43 和 Fedora 44，仅支持 ARM64/aarch64。Arch 使用 `pacman -U` 安装并写入 `IgnorePkg = kwin xorg-xwayland`；Debian/Ubuntu 使用 `apt-mark hold`；Fedora 通过 `/etc/dnf/dnf.conf` 的 `exclude` 实现等效锁定。
 
 在仓库根目录运行：
 
@@ -444,7 +493,7 @@ sudo download-firmware
 ## 已知限制
 
 - Wayland/Anland 当前只覆盖 Debian 13、Ubuntu 26 和 Fedora 43/44。
-- Ubuntu 24、Ubuntu 25 和 Arch 当前按 X11 路径使用。
+- Ubuntu 24、Ubuntu 25 和通用 `Arch-KDE` 当前仍按 X11/通用路径使用；`Arch-Mi-Pad4` 走独立的 Anland / WSLg V2 专用链路。
 - `mobile` 模式只允许 Debian 13、Ubuntu 26 和 Fedora 43/44。
 - 启用 Anland 后，工作流会关闭 PulseAudio 转发，因为 Anland App 自带音频路径。
 - Fedora 在部分设备上需要硬件访问，否则可能闪屏或崩溃。
@@ -457,5 +506,5 @@ sudo download-firmware
 - [Droidspaces-OSS](https://github.com/ravindu644/Droidspaces-OSS/)：本项目运行环境的基础。
 - [mesa-for-android-container](https://github.com/lfdevs/mesa-for-android-container)：高通 Snapdragon GPU 驱动支持。
 - [TMOE](https://github.com/2moe/tmoe)：容器内管理工具。
-- [anland](https://github.com/superturtlee/anland)：Wayland 显示后端和 patched KDE 相关工作。
+- [anland](https://github.com/E7G/anland)：本项目当前使用的 Anland fork；包含 WSLg V2 窗口桥和 top-app 调度修复。
 - [Droidspaces-USB-Manager](https://github.com/Yizhou147/Droidspaces-USB-Manager)：适用于Droidspaces 的 USB 存储和 ADB 设备管理工具。
