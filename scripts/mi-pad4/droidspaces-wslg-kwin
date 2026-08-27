@@ -27,9 +27,6 @@ kwin=/usr/bin/kwin_wayland
 # Prefer the performance cluster when taskset is available, but do not make
 # startup depend on a particular CPU topology.
 if command -v taskset >/dev/null 2>&1; then
-    if command -v nice >/dev/null 2>&1; then
-        exec nice -n -8 taskset -c 4-7 "$kwin" "$@"
-    fi
     exec taskset -c 4-7 "$kwin" "$@"
 fi
 exec "$kwin" "$@"
