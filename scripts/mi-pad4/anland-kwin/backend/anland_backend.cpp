@@ -27,6 +27,8 @@
 #include "wayland/textinput_v2.h"
 #include "wayland/textinput_v3.h"
 #include "wayland_server.h"
+#include "window.h"
+#include "workspace.h"
 
 #include <QFutureWatcher>
 #include <QScopeGuard>
@@ -37,6 +39,8 @@
 #include <xf86drm.h>
 #include <epoxy/egl.h>
 
+#include <cerrno>
+#include <cstring>
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/eventfd.h>
@@ -225,11 +229,17 @@ bool AnlandBackend::initialize()
         });
     }
 
-    // The backend initializes before ApplicationWayland creates InputMethod.
-    // workspaceCreated is emitted later, after both InputMethod and its text-input
-    // protocol objects exist.
-    connect(kwinApp(), &Application::workspaceCreated,
-            this, &AnlandBackend::setupAndroidImeTracking);
+    // Workspace/InputMethod are created after the backend on KWin 6.7.
+    auto setupWorkspaceBridges = [this]() {
+        setupAndroidImeTracking();
+        setupSchedulingTracking();
+        setupWindowBridge();
+    };
+    if (workspace()) {
+        setupWorkspaceBridges();
+    } else {
+        connect(kwinApp(), &Application::workspaceCreated, this, setupWorkspaceBridges);
+    }
 
     return true;
 }
@@ -442,6 +452,9 @@ void AnlandBackend::processInputEvent(const InputEvent &ev)
         }
         break;
     }
+    case INPUT_TYPE_WINDOW_COMMAND:
+        handleWindowCommand(ev.window_command.window_id, ev.window_command.command);
+        break;
     case INPUT_TYPE_RESOURCE_INVALID: {
         const uint32_t service = ev.resource.type;
         qCWarning(KWIN_ANLAND) << "consumer reported invalid resource for service" << service;
@@ -569,6 +582,70 @@ void AnlandBackend::onReconnectTimer()
     if (layer) {
         layer->addDeviceRepaint(Region::infinite());
     }
+
+    // Consumer restores all boosts on fallback; reassert them for this connection.
+    sendSchedulingEvent(getpid(), SCHEDULING_FLAG_SETTREE | SCHEDULING_FLAG_ON);
+    updateActiveScheduling(true);
+    if (m_windowBridgeEnabled) {
+        resendWindowSnapshot();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Foreground scheduling: compositor + focused client
+// ---------------------------------------------------------------------------
+
+void AnlandBackend::setupSchedulingTracking()
+{
+    if (auto *ws = workspace()) {
+        connect(ws, &Workspace::windowActivated, this, [this]() {
+            updateActiveScheduling();
+        });
+        if (!m_inFallback) {
+            sendSchedulingEvent(getpid(), SCHEDULING_FLAG_SETTREE | SCHEDULING_FLAG_ON);
+        }
+        updateActiveScheduling(true);
+    }
+}
+
+void AnlandBackend::updateActiveScheduling(bool force)
+{
+    pid_t pid = 0;
+    if (auto *ws = workspace()) {
+        if (Window *window = ws->activeWindow()) {
+            pid = window->pid();
+        }
+    }
+
+    if (!force && pid == m_activeSchedulingPid) {
+        return;
+    }
+    // The off carries SETTREE too: promotion moved the whole subtree in, so
+    // restoration must move the whole subtree back out, including children
+    // forked while the client was focused.
+    if (m_activeSchedulingPid > 0) {
+        sendSchedulingEvent(m_activeSchedulingPid, SCHEDULING_FLAG_SETTREE);
+    }
+    m_activeSchedulingPid = pid;
+    if (pid > 0) {
+        sendSchedulingEvent(pid, SCHEDULING_FLAG_SETTREE | SCHEDULING_FLAG_ON);
+    }
+}
+
+void AnlandBackend::sendSchedulingEvent(pid_t pid, uint8_t flags)
+{
+    if (m_inFallback) {
+        return;
+    }
+
+    const OutputEvent ev = {
+        .type = OUTPUT_TYPE_SCHEDULING,
+        .scheduling = {
+            .pid = pid > 0 ? pid : 0,
+            .flags = flags,
+        },
+    };
+    push_output_event(m_display, &ev);
 }
 
 // ---------------------------------------------------------------------------
@@ -854,6 +931,160 @@ void AnlandBackend::sendTextInputToKWin(const QByteArray &text)
 
     if (InputMethod *im = kwinApp()->inputMethod()) {
         im->commitText(str);
+    }
+}
+
+void AnlandBackend::setupWindowBridge()
+{
+    m_windowBridgeEnabled = qEnvironmentVariableIsSet("ANLAND_MULTIWINDOW")
+        && qEnvironmentVariableIntValue("ANLAND_MULTIWINDOW") != 0;
+    if (!m_windowBridgeEnabled || !workspace())
+        return;
+
+    Workspace *ws = workspace();
+    connect(ws, &Workspace::windowAdded, this, &AnlandBackend::trackWindow);
+    connect(ws, &Workspace::windowRemoved, this, &AnlandBackend::untrackWindow);
+    connect(ws, &Workspace::windowActivated, this, &AnlandBackend::sendWindowFocus);
+
+    for (Window *window : ws->windows())
+        trackWindow(window);
+
+    if (!m_inFallback)
+        resendWindowSnapshot();
+}
+
+void AnlandBackend::trackWindow(Window *window)
+{
+    if (!m_windowBridgeEnabled || !window || !window->isClient() || window->isInternal())
+        return;
+    if (m_windowIds.contains(window))
+        return;
+
+    uint32_t id = m_nextWindowId++;
+    if (id == 0)
+        id = m_nextWindowId++;
+    m_windowIds.insert(window, id);
+    m_windowsById.insert(id, QPointer<Window>(window));
+
+    connect(window, &Window::captionChanged, this, [this, window]() {
+        sendWindowEvent(window, WINDOW_EVENT_UPDATE);
+    });
+    connect(window, &Window::frameGeometryChanged, this, [this, window]() {
+        sendWindowEvent(window, WINDOW_EVENT_UPDATE);
+    });
+    connect(window, &Window::desktopFileNameChanged, this, [this, window]() {
+        sendWindowEvent(window, WINDOW_EVENT_UPDATE);
+    });
+
+    if (!m_inFallback)
+        sendWindowEvent(window, WINDOW_EVENT_CREATE);
+}
+
+void AnlandBackend::untrackWindow(Window *window)
+{
+    const auto it = m_windowIds.find(window);
+    if (it == m_windowIds.end())
+        return;
+    const uint32_t id = it.value();
+
+    if (!m_inFallback) {
+        OutputEvent ev{};
+        ev.type = OUTPUT_TYPE_WINDOW_EVENT;
+        ev.window.window_id = id;
+        ev.window.action = WINDOW_EVENT_DESTROY;
+        ev.window.serial = m_windowEventSerial++;
+        push_output_event(m_display, &ev);
+    }
+
+    m_windowIds.erase(it);
+    m_windowsById.remove(id);
+}
+
+void AnlandBackend::sendWindowEvent(Window *window, uint16_t action)
+{
+    if (!m_windowBridgeEnabled || m_inFallback || !window)
+        return;
+    const auto it = m_windowIds.constFind(window);
+    if (it == m_windowIds.constEnd())
+        return;
+
+    const QByteArray title = window->caption().toUtf8();
+    QString appIdString = window->desktopFileName();
+    if (appIdString.isEmpty())
+        appIdString = window->resourceClass();
+    const QByteArray appId = appIdString.toUtf8();
+    const RectF geometry = window->frameGeometry();
+
+    window_event_payload_v1 meta{};
+    meta.x = qRound(geometry.x());
+    meta.y = qRound(geometry.y());
+    meta.width = qRound(geometry.width());
+    meta.height = qRound(geometry.height());
+    meta.pid = static_cast<int32_t>(window->pid());
+    meta.title_size = static_cast<uint32_t>(title.size());
+    meta.app_id_size = static_cast<uint32_t>(appId.size());
+
+    QByteArray payload;
+    payload.resize(static_cast<int>(sizeof(meta)) + title.size() + appId.size());
+    std::memcpy(payload.data(), &meta, sizeof(meta));
+    std::memcpy(payload.data() + sizeof(meta), title.constData(), title.size());
+    std::memcpy(payload.data() + sizeof(meta) + title.size(), appId.constData(), appId.size());
+
+    OutputEvent ev{};
+    ev.type = OUTPUT_TYPE_WINDOW_EVENT;
+    ev.window.window_id = it.value();
+    ev.window.action = action;
+    ev.window.flags = (workspace() && workspace()->activeWindow() == window)
+        ? WINDOW_FLAG_ACTIVE : 0;
+    ev.window.size = static_cast<uint32_t>(payload.size());
+    ev.window.serial = m_windowEventSerial++;
+    push_output_event_with_length(m_display, &ev, payload.data(), payload.size());
+}
+
+void AnlandBackend::sendWindowFocus(Window *window)
+{
+    if (!m_windowBridgeEnabled || m_inFallback || !window)
+        return;
+    const auto it = m_windowIds.constFind(window);
+    if (it == m_windowIds.constEnd())
+        return;
+
+    OutputEvent ev{};
+    ev.type = OUTPUT_TYPE_WINDOW_EVENT;
+    ev.window.window_id = it.value();
+    ev.window.action = WINDOW_EVENT_FOCUS;
+    ev.window.flags = WINDOW_FLAG_ACTIVE;
+    ev.window.serial = m_windowEventSerial++;
+    push_output_event(m_display, &ev);
+}
+
+void AnlandBackend::resendWindowSnapshot()
+{
+    if (!m_windowBridgeEnabled || m_inFallback)
+        return;
+    for (auto it = m_windowIds.constBegin(); it != m_windowIds.constEnd(); ++it)
+        sendWindowEvent(it.key(), WINDOW_EVENT_CREATE);
+    if (workspace())
+        sendWindowFocus(workspace()->activeWindow());
+}
+
+void AnlandBackend::handleWindowCommand(uint32_t windowId, uint32_t command)
+{
+    if (!m_windowBridgeEnabled || !workspace())
+        return;
+    Window *window = m_windowsById.value(windowId).data();
+    if (!window)
+        return;
+
+    switch (command) {
+    case WINDOW_COMMAND_ACTIVATE:
+        workspace()->activateWindow(window, true);
+        break;
+    case WINDOW_COMMAND_CLOSE:
+        window->closeWindow();
+        break;
+    default:
+        break;
     }
 }
 
