@@ -4,7 +4,6 @@ on:
   push:
     branches: [ main ]
     paths:
-      - '.github/workflows/build-arch-mi-pad4-kwin-test.yml'
       - 'scripts/mi-pad4/build-arch-anland-kwin.sh'
       - 'scripts/mi-pad4/anland-kwin/**'
   workflow_dispatch:
