@@ -6,11 +6,11 @@ on:
     paths:
       - '.github/workflows/build-arch-mi-pad4-kwin-test.yml'
       - 'scripts/mi-pad4/build-arch-anland-kwin.sh'
-      - 'scripts/mi-pad4/anland-kwin/kwin.patch'
+      - 'scripts/mi-pad4/anland-kwin/**'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -45,7 +45,7 @@ jobs:
               BUILD_KDE=min \
               BUILD_KIO=false \
               BUILD_KWIN=true \
-              BUILD_XWAYLAND=false \
+              BUILD_XWAYLAND=true \
               BUILD_PLASMA_WORKSPACE=false \
               ANLAND_PACKAGE_OUTPUT_DIR=/out \
                 /tmp/mi-pad4/build-arch-anland-kwin.sh
@@ -62,6 +62,41 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v6
         with:
-          name: arch-anland-v2-kwin-test
+          name: arch-anland-v2-packages
           path: kwin-mi-pad4-test/
-          retention-days: 7
+          retention-days: 30
+
+
+      - name: Publish Arch packages
+        if: ${{ github.ref_name == 'main' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          dest=anland-build/Arch
+          mkdir -p "$dest"
+          find "$dest" -maxdepth 1 -type f \
+            \( -name '*.pkg.tar.*' -o -name 'SHA256SUMS' \) -delete
+
+          shopt -s nullglob
+          packages=(kwin-mi-pad4-test/*.pkg.tar.*)
+          if (("${#packages[@]}" == 0)); then
+            echo "No Arch KWin/XWayland packages were produced" >&2
+            exit 1
+          fi
+          cp -v "${packages[@]}" "$dest/"
+          (
+            cd "$dest"
+            sha256sum *.pkg.tar.* > SHA256SUMS
+          )
+
+          if [ -z "$(git status --porcelain -- "$dest")" ]; then
+            echo "Arch packages are unchanged"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A "$dest"
+          git commit -m "Update Arch Anland V2 KWin/XWayland packages"
+          git pull --rebase --autostash origin main
+          git push origin HEAD:main
