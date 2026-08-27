@@ -1,0 +1,99 @@
+name: Release Arch Anland V2 Mi Pad 4 RootFS
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/release-arch-anland-v2-mipad4.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download validated Arch V2 RootFS
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf release-assets
+          mkdir -p release-assets
+          gh run download 33106316148 \
+            --repo "$GITHUB_REPOSITORY" \
+            --name arch-anland-v2-mipad4-rootfs \
+            --dir release-assets
+          find release-assets -type f -maxdepth 2 -print
+
+      - name: Verify RootFS files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t roots < <(find release-assets -type f -name '*.tar.xz' -print)
+          if (("${#roots[@]}" != 1)); then
+            echo "Expected exactly one Arch V2 RootFS tar.xz, found ${#roots[@]}" >&2
+            exit 1
+          fi
+          if [ -f "${roots[0]}.sha256" ]; then
+            (
+              cd "$(dirname "${roots[0]}")"
+              sha256sum -c "$(basename "${roots[0]}.sha256")"
+            )
+          else
+            sha256sum "${roots[0]}" > "${roots[0]}.sha256"
+          fi
+          ls -lh "${roots[0]}" "${roots[0]}.sha256"
+
+      - name: Publish test RootFS release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="arch-anland-v2-mipad4-test-20260828"
+
+          cat > release-notes.md <<'EOF'
+          Arch / 小米平板 4（Clover / SDM660）Anland WSLg V2 实机测试 RootFS。
+
+          该 RootFS 来自已成功完成的 Actions run 33106316148。
+
+          已验证构建链：
+          - Mi Pad 4 repository-local KGSL/Clover 特化 Anland backend
+          - patched KWin 6.7.3
+          - patched XWayland 24.1.13
+          - Droidspaces WSLg V2 共享 KWin compositor
+          - ANLAND_MULTIWINDOW 窗口 sideband
+          - droidspaces-wslg-prepare / droidspaces-wslg-cleanup
+          - droidspaces-wslg-kwin 专用启动器
+          - pacman IgnorePkg 锁定 patched kwin / xorg-xwayland
+
+          配套 Droidspaces：
+          E7G/Droidspaces-OSS Release arch-wslg-v2-test-20260828
+
+          配套 Anland：
+          E7G/anland Release mi-pad4-optimized-v80
+
+          Droidspaces 中打开 Linux Apps 卡片的“WSLg V2 共享合成器”即可测试；如遇兼容问题可关闭开关回退 V1。
+          EOF
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          fi
+
+          mapfile -t assets < <(find release-assets -type f \( -name '*.tar.xz' -o -name '*.sha256' \) -print | sort)
+          (("${#assets[@]}" >= 2))
+
+          gh release create "$tag" "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "a391e6d3f86874e599b139f38040bcdeb15242fe" \
+            --title "Arch Anland WSLg V2 Mi Pad 4 Test RootFS 2026-08-28" \
+            --prerelease \
+            --notes-file release-notes.md
