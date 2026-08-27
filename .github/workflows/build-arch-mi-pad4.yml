@@ -525,6 +525,7 @@ jobs:
 
           for path in \
             usr/local/bin/mi-pad4-start-wayland \
+            usr/local/bin/droidspaces-wslg-kwin \
             etc/droidspaces-systemd257 \
             etc/systemd/system/mi-pad4-desktop.service \
             etc/systemd/system/multi-user.target.wants/mi-pad4-desktop.service \
