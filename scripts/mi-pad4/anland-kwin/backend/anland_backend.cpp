@@ -13,72 +13,45 @@
 #include "anland_output.h"
 
 #include "core/drmdevice.h"
-#include "core/renderdevice.h"
 #include "core/renderloop.h"
-#include "internalinputmethodcontext.h"
 #include "inputmethod.h"
 #include "main.h"
+#include "core/renderdevice.h"
 #include "opengl/egldisplay.h"
+
+#include <epoxy/egl.h>
+
+#ifndef EGL_PLATFORM_SURFACELESS_MESA
+#define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
+#endif
 #include "utils/filedescriptor.h"
-#include "utils/pipe.h"
 #include "wayland/abstract_data_source.h"
 #include "wayland/display.h"
 #include "wayland/seat.h"
-#include "wayland/textinput_v2.h"
-#include "wayland/textinput_v3.h"
 #include "wayland_server.h"
+#include "window.h"
+#include "workspace.h"
 
-#include <QFutureWatcher>
+#include <QMimeData>
 #include <QScopeGuard>
 #include <QSocketNotifier>
+#include <QThreadPool>
 #include <QTimer>
-#include <QtConcurrent>
 
 #include <xf86drm.h>
-#include <epoxy/egl.h>
 
+#include <errno.h>
+#include <cstring>
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
 
-#ifndef EGL_PLATFORM_SURFACELESS_MESA
-#define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
-#endif
-
 namespace KWin
 {
 
-// Droidspaces-OSS creates a per-container Anland daemon socket on the host
-// and bind-mounts it into the container at this stable path.
-static const QString s_defaultSocketPath = QStringLiteral("/run/display.sock");
+static const QString s_defaultSocketPath = QStringLiteral("/tmp/display_daemon.sock");
 static const int s_reconnectIntervalMs = 200;
-
-using EglGetPlatformDisplayExt = EGLDisplay (*)(EGLenum, void *, const EGLint *);
-
-// Do not call epoxy's eglGetPlatformDisplayEXT wrapper here. On the Clover
-// 4.4 userspace, libepoxy/libglvnd can resolve the EGL 1.5 core symbol while
-// failing to dispatch the EXT entry point. Resolving the advertised EXT
-// function explicitly is the reliable path on Mesa/KGSL.
-static EGLDisplay getSurfacelessEglDisplay()
-{
-    auto getPlatformDisplay = reinterpret_cast<EglGetPlatformDisplayExt>(
-        eglGetProcAddress("eglGetPlatformDisplayEXT"));
-    if (!getPlatformDisplay) {
-        qCWarning(KWIN_ANLAND) << "eglGetPlatformDisplayEXT is unavailable";
-        return EGL_NO_DISPLAY;
-    }
-
-    const EGLDisplay display = getPlatformDisplay(
-        EGL_PLATFORM_SURFACELESS_MESA,
-        EGL_DEFAULT_DISPLAY,
-        nullptr);
-    if (display == EGL_NO_DISPLAY) {
-        qCWarning(KWIN_ANLAND)
-            << "failed to create surfaceless EGL display, error" << Qt::hex << eglGetError();
-    }
-    return display;
-}
 
 /*
  * KWin needs a DRM render device for the GL/EGL path (syncobj timelines, dmabuf
@@ -88,11 +61,11 @@ static EGLDisplay getSurfacelessEglDisplay()
  * backend does), then the standard render node — which on the kgsl/turnip stack
  * is the msm node exposed at /dev/dri/renderD128.
  */
-static std::unique_ptr<RenderDevice> openRenderDevice()
+static std::unique_ptr<DrmDevice> openRenderDevice()
 {
     const QString override = qEnvironmentVariable("ANLAND_DRM_DEVICE");
     if (!override.isEmpty()) {
-        if (auto dev = RenderDevice::open(override)) {
+        if (auto dev = DrmDevice::open(override)) {
             return dev;
         }
         qCWarning(KWIN_ANLAND) << "ANLAND_DRM_DEVICE" << override << "could not be opened";
@@ -107,7 +80,7 @@ static std::unique_ptr<RenderDevice> openRenderDevice()
             });
             for (drmDevice *device : std::as_const(devices)) {
                 if (device->available_nodes & (1 << DRM_NODE_RENDER)) {
-                    if (auto dev = RenderDevice::open(QString::fromUtf8(device->nodes[DRM_NODE_RENDER]))) {
+                    if (auto dev = DrmDevice::open(QString::fromUtf8(device->nodes[DRM_NODE_RENDER]))) {
                         return dev;
                     }
                 }
@@ -115,20 +88,12 @@ static std::unique_ptr<RenderDevice> openRenderDevice()
         }
     }
 
-    if (auto dev = RenderDevice::open(QStringLiteral("/dev/dri/renderD128"))) {
-        return dev;
-    }
+    return DrmDevice::open(QStringLiteral("/dev/dri/renderD128"));
+}
 
-    // Mi Pad 4's 4.4 KGSL stack exposes /dev/kgsl-3d0, not a DRM render node.
-    // KWin 6.7's RenderDevice can still own a surfaceless EGL display; keeping
-    // the DRM pointer null disables only DRM feedback/syncobj paths.
-    const EGLDisplay eglDisplay = getSurfacelessEglDisplay();
-    auto display = EglDisplay::create(eglDisplay, nullptr);
-    if (display) {
-        qCInfo(KWIN_ANLAND) << "using surfaceless EGL without a DRM render node";
-        return std::make_unique<RenderDevice>(nullptr, std::move(display));
-    }
-    return nullptr;
+static void detachAudioBeforeConsumerRelease(void *)
+{
+    anland_audio_set_fd(-1);
 }
 
 AnlandBackend::AnlandBackend(const QString &socketPath, QObject *parent)
@@ -140,21 +105,26 @@ AnlandBackend::AnlandBackend(const QString &socketPath, QObject *parent)
 AnlandBackend::~AnlandBackend()
 {
     teardownNotifiers();
-    // Stop the audio engine before disconnect() closes the audio fd it borrows.
+    // Stop the audio engine before disconnect() releases the consumer audio fd.
     anland_audio_stop();
     // Stop the camera engine (it owns its own resource fds; closes them itself).
     anland_camera_stop();
     if (m_reconnectTimer) {
         m_reconnectTimer->stop();
     }
-    // m_outputs are QObject children of this backend; ~QObject deletes them.
+    // Drop EGL resources while the render device is still alive. The output
+    // objects remain QObject children and are deleted by ~QObject afterwards.
+    for (AnlandOutput *output : std::as_const(m_outputs)) {
+        output->setEglLayer(std::unique_ptr<AnlandEglLayer>{});
+    }
     m_outputs.clear();
     m_inputDevice.reset();
     if (m_display) {
         ::disconnect(m_display); // C producer API, not QObject::disconnect
         m_display = nullptr;
     }
-    // m_renderDevice owns the EGLDisplay and tears it down in its destructor.
+    // m_eglDisplay (EglDisplay) tears down the EGLDisplay in its destructor; the
+    // 5.27-era manual eglTerminate(sceneEglDisplay()) is no longer needed.
 }
 
 bool AnlandBackend::initialize()
@@ -164,6 +134,7 @@ bool AnlandBackend::initialize()
         return false;
     }
 
+    set_pre_release_callback(m_display, detachAudioBeforeConsumerRelease, nullptr);
     set_fallback_callback(m_display, &AnlandBackend::fallbackTrampoline, this);
 
     uint32_t w = 0, h = 0, fmt = 0, refresh = 0;
@@ -177,16 +148,28 @@ bool AnlandBackend::initialize()
     }
 
     // KWin dereferences renderBackend->drmDevice() during OpenGL compositor
-    // setup; without a real device it segfaults. Open one up front.
-    m_renderDevice = openRenderDevice();
-    if (!m_renderDevice) {
+    // setup; without a real device it segfaults. Open one up front, then wrap
+    // it together with a surfaceless EGL display (anland imports the daemon's
+    // dmabufs directly rather than allocating through the DRM device) into a
+    // RenderDevice, mirroring how VirtualBackend owns its RenderDevice.
+    auto drmDevice = openRenderDevice();
+    if (!drmDevice) {
         qCWarning(KWIN_ANLAND) << "no usable DRM render device; cannot bring up OpenGL compositing";
         return false;
     }
 
+    auto eglDisplay = EglDisplay::create(eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr), drmDevice.get());
+    if (!eglDisplay) {
+        qCWarning(KWIN_ANLAND) << "failed to create surfaceless EGL display";
+        return false;
+    }
+
+    m_renderDevice = std::make_unique<RenderDevice>(std::move(drmDevice), std::move(eglDisplay));
+
     m_inputDevice = std::make_unique<AnlandInputDevice>();
 
     auto *output = new AnlandOutput(this, QStringLiteral("anland-1"));
+    output->setParent(this); // AnlandOutput no longer inherits Qt-parent ctor; wire it up manually so ~QObject cleans it up.
     output->init(QSize(w, h), static_cast<int>(refresh), 1.0);
     m_outputs.append(output);
     Q_EMIT outputAdded(output);
@@ -200,10 +183,15 @@ bool AnlandBackend::initialize()
     // Bring up the audio engine up front: its PipeWire sink-monitor capture and
     // virtual mic Source live for the whole session, independent of the consumer,
     // so Linux apps never see the devices appear/disappear as the consumer comes and
-    // goes. The socket fd is attached later (onReconnectTimer) and detached in
-    // enterFallback(). Audio is non-critical, so a failure here is not fatal.
-    if (anland_audio_start() < 0) {
+    // goes. The socket fd is attached later (onReconnectTimer) and detached by
+    // the transport before it closes a consumer fd. Audio is non-critical, so a
+    // failure here is not fatal.
+    const bool disableAudio = qEnvironmentVariableIsSet("ANLAND_DISABLE_AUDIO")
+        && qEnvironmentVariableIntValue("ANLAND_DISABLE_AUDIO") != 0;
+    if (!disableAudio && anland_audio_start() < 0) {
         qCWarning(KWIN_ANLAND) << "failed to start audio engine; continuing without audio";
+    } else if (disableAudio) {
+        qCInfo(KWIN_ANLAND) << "anland audio engine disabled by ANLAND_DISABLE_AUDIO";
     }
 
     // The camera engine is NOT started here: its PipeWire thread-loop is brought up
@@ -217,19 +205,22 @@ bool AnlandBackend::initialize()
     // reconnect timer starts and discovers the consumer via try_exit_fallback().
     enterFallback();
 
-    // Connect to KWin's clipboard change signal once.  The handler is guarded
-    // by m_inFallback so it only fires when a consumer is connected.
     if (SeatInterface *seat = waylandServer()->seat()) {
         connect(seat, &SeatInterface::selectionChanged, this, [this](AbstractDataSource *) {
             onClipboardChanged();
         });
     }
 
-    // The backend initializes before ApplicationWayland creates InputMethod.
-    // workspaceCreated is emitted later, after both InputMethod and its text-input
-    // protocol objects exist.
-    connect(kwinApp(), &Application::workspaceCreated,
-            this, &AnlandBackend::setupAndroidImeTracking);
+    // Workspace is created after backend initialization on KWin 6.7.
+    if (workspace()) {
+        setupSchedulingTracking();
+        setupWindowBridge();
+    } else {
+        connect(kwinApp(), &Application::workspaceCreated, this, [this]() {
+            setupSchedulingTracking();
+            setupWindowBridge();
+        });
+    }
 
     return true;
 }
@@ -264,18 +255,51 @@ EglDisplay *AnlandBackend::sceneEglDisplayObject() const
     return m_renderDevice ? m_renderDevice->eglDisplay() : nullptr;
 }
 
-RenderDevice *AnlandBackend::renderDevice() const
+DrmDevice *AnlandBackend::drmDevice() const
 {
-    return m_renderDevice.get();
+    return m_renderDevice ? m_renderDevice->drmDevice() : nullptr;
 }
 
 bool AnlandBackend::notifyFramePresented()
 {
-    if (m_consumerReady) {
-        trigger_refresh(m_display);
+    if (m_consumerReady && m_display) {
         m_consumerReady = false;
+        if (trigger_refresh(m_display) < 0) {
+            return false;
+        }
         return true;
     }
+    return false;
+}
+
+bool AnlandBackend::isConsumerConnected() const
+{
+    return m_display && !m_inFallback && !is_fallback(m_display);
+}
+
+bool AnlandBackend::importBuffers(AnlandEglLayer *layer)
+{
+    if (!layer) {
+        return true;
+    }
+    if (!isConsumerConnected()) {
+        return false;
+    }
+
+    const int count = get_buf_count(m_display);
+    if (count <= 0 || count > MAX_BUFS) {
+        qCWarning(KWIN_ANLAND) << "consumer reported invalid dmabuf count" << count;
+    } else if (layer->importBuffers(count)) {
+        return true;
+    } else {
+        qCWarning(KWIN_ANLAND) << "failed to import the consumer dmabuf set";
+    }
+
+    // Keep the C protocol state and KWin's fallback state in sync. Without
+    // this, the reconnect timer would stop while the stale fds stayed live.
+    force_fallback(m_display);
+    m_inFallback = false;
+    enterFallback();
     return false;
 }
 
@@ -336,6 +360,15 @@ QPointF AnlandBackend::mapInputToLogical(const QPointF &devicePoint) const
     return logical / output->scale();
 }
 
+QPointF AnlandBackend::mapInputDeltaToLogical(const QPointF &deviceDelta) const
+{
+    AnlandOutput *output = m_outputs[0];
+    const OutputTransform transform = output->transform().inverted();
+    const QSizeF bounds = QSizeF(output->modeSize());
+    const QPointF mappedDelta = transform.map(deviceDelta, bounds) - transform.map(QPointF(0, 0), bounds);
+    return mappedDelta / output->scale();
+}
+
 void AnlandBackend::processInputEvent(const InputEvent &ev)
 {
     if (!m_inputDevice) {
@@ -344,12 +377,8 @@ void AnlandBackend::processInputEvent(const InputEvent &ev)
 
     switch (ev.type) {
     case INPUT_TYPE_POINTER_MOTION: {
-        // Both absolute position (x, y) and relative delta (dx, dy) come from the
-        // consumer. Use the same mapInputToLogical for both so that dx/dy delivered
-        // via wl_pointer.relative_motion match the cursor's position space, giving
-        // Wayland clients correct velocity for momentum/kinetic scrolling.
         const QPointF pos = mapInputToLogical(QPointF(ev.pointer_motion.x, ev.pointer_motion.y));
-        const QPointF delta = mapInputToLogical(QPointF(ev.pointer_motion.dx, ev.pointer_motion.dy));
+        const QPointF delta = mapInputDeltaToLogical(QPointF(ev.pointer_motion.dx, ev.pointer_motion.dy));
         m_inputDevice->pointerMotion(pos, delta, delta);
         break;
     }
@@ -388,28 +417,24 @@ void AnlandBackend::processInputEvent(const InputEvent &ev)
         break;
     case INPUT_TYPE_DISPLAY_REFRESH:
         // Not an input event: the consumer reports its live display refresh rate
-        // (mHz) so we can repace the RenderLoop. m_outputs[0] is valid here (used
-        // for scale above).
-        m_outputs[0]->setRefreshRate(static_cast<int>(ev.display.refresh_mhz));
+        // (mHz) so we can repace the RenderLoop.
+        if (!m_outputs.isEmpty()) {
+            m_outputs[0]->setRefreshRate(static_cast<int>(ev.display.refresh_mhz));
+        }
         break;
     case INPUT_TYPE_CLIPBOARD: {
-        // The clipboard event carries the raw text data as inline payload after the
-        // InputEvent header.  ev.clipboard.size tells us how many bytes follow.
         const uint32_t size = ev.clipboard.size;
-        if (size == 0)
-            break;
         QByteArray text(static_cast<int>(size), Qt::Uninitialized);
-        if (poll_input_event_extend_data(m_display, text.data(), size, 5000) == 1) {
+        if (size == 0 || poll_input_event_extend_data(m_display, text.data(), size, 5000) == 1) {
             sendClipboardToKWin(text);
         }
         break;
     }
     case INPUT_TYPE_TEXT_INPUT: {
-        // The text input event carries the raw text data as inline payload after
-        // the InputEvent header.  ev.text_input.size tells us how many bytes follow.
         const uint32_t size = ev.text_input.size;
-        if (size == 0)
+        if (size == 0) {
             break;
+        }
         QByteArray text(static_cast<int>(size), Qt::Uninitialized);
         if (poll_input_event_extend_data(m_display, text.data(), size, 5000) == 1) {
             sendTextInputToKWin(text);
@@ -419,37 +444,35 @@ void AnlandBackend::processInputEvent(const InputEvent &ev)
     case INPUT_TYPE_RESOURCE: {
         // The consumer is handing back the fds for a service we requested. The fdnum
         // fds follow as a separate DATA_MSG_INPUT_EXTEND_FDS message; receive them now
-        // (synchronously, before the next poll_input_event) and route to the engine.
+        // before the next poll_input_event() and route them to the owning engine.
         const uint32_t service = ev.resource.type;
         const uint32_t fdnum = ev.resource.fdnum;
         constexpr int kMaxFds = 1 + 8; // ctrl + up to MAX_CAMERAS streams
-        if (fdnum == 0 || fdnum > kMaxFds)
+        if (fdnum == 0 || fdnum > kMaxFds) {
             break;
+        }
         int fds[kMaxFds];
         int got = 0;
         if (poll_input_event_extend_fds(m_display, fds, static_cast<int>(fdnum), &got, 5000) != 1
             || got < static_cast<int>(fdnum)) {
-            for (int i = 0; i < got; i++)
+            for (int i = 0; i < got; i++) {
                 ::close(fds[i]);
+            }
             break;
         }
         if (service == SERVICE_TYPE_CAMERA) {
             // fds[0] = shared control socket, fds[1..] = per-camera stream sockets.
             anland_camera_set_resources(fds[0], &fds[1], got - 1);
         } else {
-            for (int i = 0; i < got; i++)
+            for (int i = 0; i < got; i++) {
                 ::close(fds[i]);
+            }
         }
         break;
     }
-    case INPUT_TYPE_RESOURCE_INVALID: {
-        const uint32_t service = ev.resource.type;
-        qCWarning(KWIN_ANLAND) << "consumer reported invalid resource for service" << service;
-        if (service == SERVICE_TYPE_CAMERA) {
-            anland_camera_clear();
-        }
+    case INPUT_TYPE_WINDOW_COMMAND:
+        handleWindowCommand(ev.window_command.window_id, ev.window_command.command);
         break;
-    }
     default:
         break;
     }
@@ -457,7 +480,7 @@ void AnlandBackend::processInputEvent(const InputEvent &ev)
 
 void AnlandBackend::onBufferReady()
 {
-    if (m_inFallback) {
+    if (m_inFallback || m_outputs.isEmpty()) {
         return;
     }
 
@@ -475,7 +498,9 @@ void AnlandBackend::onBufferReady()
     // Buffer-ready is our frame-completion signal: complete the in-flight frame
     // (if any) and schedule the next one, keeping the render cycle paced by the
     // consumer rather than a timer.
-    m_outputs[0]->onConsumerReady();
+    if (!m_outputs.isEmpty()) {
+        m_outputs[0]->onConsumerReady();
+    }
 }
 
 void AnlandBackend::fallbackTrampoline(void *data)
@@ -496,25 +521,28 @@ void AnlandBackend::enterFallback()
 
     // A frame may be in flight awaiting a buffer-ready that will never come now;
     // fail it so the RenderLoop's frame accounting does not stall.
-    m_outputs[0]->stopRendering();
+    if (!m_outputs.isEmpty()) {
+        m_outputs[0]->stopRendering();
+    }
 
     teardownNotifiers();
 
     // Renderer is stopped: drop the imported dmabuf set now that the producer's fds
     // are gone. The layer is null at startup (no GL backend attached yet).
-    if (AnlandEglLayer *layer = m_outputs[0]->eglLayer()) {
-        layer->releaseBuffers();
+    if (!m_outputs.isEmpty()) {
+        if (AnlandEglLayer *layer = m_outputs[0]->eglLayer()) {
+            layer->releaseBuffers();
+        }
     }
 
     m_consumerReady = false;
     m_inFallback = true;
 
-    // Detach the audio socket: the streams keep running (capture drops its PCM, the
-    // mic Source feeds silence) so PipeWire never perceives the disconnect.
-    anland_audio_set_fd(-1);
+    // The transport detaches audio before closing its borrowed consumer fd. At
+    // startup no consumer fd exists yet, so nothing needs to be detached here.
 
-    // The consumer's camera fds are now dead: stop recording, destroy the virtual
-    // camera nodes and close the fds. New ones arrive on the next reconnect.
+    // The consumer's camera fds are now dead: stop recording, detach from the
+    // resource fds and let the virtual camera nodes emit blank frames.
     anland_camera_clear();
 
     if (m_reconnectTimer) {
@@ -535,23 +563,19 @@ void AnlandBackend::onReconnectTimer()
 
     qCInfo(KWIN_ANLAND) << "consumer reconnected";
     m_inFallback = false;
-    // The consumer has just handed over a selected BufferQueue slot.  It is
-    // already ready for the first rendered frame; waiting for a
-    // buffer-ready event here deadlocks the initial handshake because that
-    // event is emitted only after the consumer receives our first refresh.
-    m_consumerReady = true;
+    m_consumerReady = false;
     m_reconnectTimer->stop();
 
     // try_exit_fallback() already received a fresh dmabuf set. Import it into the
     // layer (which arms an infinite/full-output repaint on every rotation buffer),
-    // resume the RenderLoop (uninhibit, balancing the inhibit from onConsumerLost),
-    // and mark the full output dirty. addDeviceRepaint() guarantees the first
-    // composite paints into the new dmabufs even on an idle
+    // resume the RenderLoop (uninhibit, balancing the inhibit from stopRendering),
+    // and mark the layer dirty. addRepaint() keeps the layer's needsRepaint()
+    // true so the next composite() paints into the new dmabufs even on an idle
     // desktop. resumeRendering() runs unconditionally to keep inhibit/uninhibit
     // balanced regardless of whether the GL layer is attached yet.
-    AnlandEglLayer *layer = m_outputs[0]->eglLayer();
-    if (layer) {
-        layer->importBuffers(get_buf_count(m_display));
+    AnlandEglLayer *layer = m_outputs.isEmpty() ? nullptr : m_outputs[0]->eglLayer();
+    if (layer && !importBuffers(layer)) {
+        return;
     }
     setupNotifiers();
     // Attach the fresh audio socket (a new socketpair was installed by pickup_fds).
@@ -561,88 +585,90 @@ void AnlandBackend::onReconnectTimer()
     // event whose fds onInputReadable() hands to the camera engine. If the consumer
     // has the camera disabled it simply never registers the service and never replies,
     // so this is a harmless no-op in that case.
-    push_resources_request(m_display, SERVICE_TYPE_CAMERA, nullptr);
-    // Consumer vars are connection-local state. Restore the current text focus
-    // immediately after every reconnect, even if it did not change meanwhile.
-    sendConsumerVar(CONSUMER_VAR_ANDROID_IME, m_androidImeActive ? 1 : 0);
-    m_outputs[0]->resumeRendering();
+    if (push_resources_request(m_display, SERVICE_TYPE_CAMERA, nullptr) < 0 || m_inFallback) {
+        return;
+    }
+    // Selection changes may have happened while the consumer was away. Force a
+    // fresh read even when the current source is the remote source we created.
+    onClipboardChanged(true);
+    if (m_inFallback) {
+        return;
+    }
+    if (!m_outputs.isEmpty()) {
+        m_outputs[0]->resumeRendering();
+    }
     if (layer) {
         layer->addDeviceRepaint(Region::infinite());
     }
+
+    // Re-assert the compositor's permanent subtree boost, then the focused
+    // client's (the consumer regresses every boost on its own fallback).
+    sendSchedulingEvent(getpid(), SCHEDULING_FLAG_SETTREE | SCHEDULING_FLAG_ON);
+    updateActiveScheduling(true);
+    if (m_windowBridgeEnabled) {
+        resendWindowSnapshot();
+    }
+
 }
 
 // ---------------------------------------------------------------------------
-// Android system IME direct wake
+// Foreground scheduling: compositor + focused client
 // ---------------------------------------------------------------------------
 
-void AnlandBackend::setupAndroidImeTracking()
+void AnlandBackend::setupSchedulingTracking()
 {
-    if (m_androidImeTrackingReady)
-        return;
-
-    SeatInterface *seat = waylandServer()->seat();
-    InputMethod *inputMethod = kwinApp()->inputMethod();
-    if (!seat || !inputMethod)
-        return;
-
-    TextInputV2Interface *textInputV2 = seat->textInputV2();
-    TextInputV3Interface *textInputV3 = seat->textInputV3();
-    InternalInputMethodContext *internal = inputMethod->internalContext();
-    if (!textInputV2 || !textInputV3 || !internal)
-        return;
-
-    connect(textInputV2, &TextInputV2Interface::enabledChanged,
-            this, &AnlandBackend::updateAndroidImeVar);
-    connect(textInputV3, &TextInputV3Interface::enabledChanged,
-            this, &AnlandBackend::updateAndroidImeVar);
-    connect(internal, &InternalInputMethodContext::enabledChanged,
-            this, &AnlandBackend::updateAndroidImeVar);
-    m_androidImeTrackingReady = true;
-    updateAndroidImeVar();
+    if (auto *ws = workspace()) {
+        connect(ws, &Workspace::windowActivated, this, [this]() {
+            updateActiveScheduling();
+        });
+        if (!m_inFallback) {
+            sendSchedulingEvent(getpid(), SCHEDULING_FLAG_SETTREE | SCHEDULING_FLAG_ON);
+        }
+        updateActiveScheduling(true);
+    }
 }
 
-void AnlandBackend::updateAndroidImeVar()
+void AnlandBackend::updateActiveScheduling(bool force)
 {
-    SeatInterface *seat = waylandServer()->seat();
-    InputMethod *inputMethod = kwinApp()->inputMethod();
-    if (!seat || !inputMethod)
-        return;
+    pid_t pid = 0;
+    if (auto *ws = workspace()) {
+        if (Window *window = ws->activeWindow()) {
+            pid = window->pid();
+        }
+    }
 
-    TextInputV2Interface *textInputV2 = seat->textInputV2();
-    TextInputV3Interface *textInputV3 = seat->textInputV3();
-    InternalInputMethodContext *internal = inputMethod->internalContext();
-    const bool active = (textInputV2 && textInputV2->isEnabled())
-        || (textInputV3 && textInputV3->isEnabled())
-        || (internal && internal->isEnabled());
-    if (active == m_androidImeActive)
+    if (!force && pid == m_activeSchedulingPid) {
         return;
-
-    m_androidImeActive = active;
-    sendConsumerVar(CONSUMER_VAR_ANDROID_IME, active ? 1 : 0);
+    }
+    // The off carries SETTREE too: promotion moved the whole subtree in, so
+    // restoration must move the whole subtree back out, including children
+    // forked while the client was focused.
+    if (m_activeSchedulingPid > 0) {
+        sendSchedulingEvent(m_activeSchedulingPid, SCHEDULING_FLAG_SETTREE);
+    }
+    m_activeSchedulingPid = pid;
+    if (pid > 0) {
+        sendSchedulingEvent(pid, SCHEDULING_FLAG_SETTREE | SCHEDULING_FLAG_ON);
+    }
 }
 
-void AnlandBackend::sendConsumerVar(uint32_t var, uint32_t value)
+void AnlandBackend::sendSchedulingEvent(pid_t pid, uint8_t flags)
 {
-    if (m_inFallback)
+    if (m_inFallback) {
         return;
+    }
 
     const OutputEvent ev = {
-        .type = OUTPUT_TYPE_SET_CONSUMER_VAR,
-        .set_consumer_var = { .var = var, .value = value },
+        .type = OUTPUT_TYPE_SCHEDULING,
+        .scheduling = {
+            .pid = pid > 0 ? pid : 0,
+            .flags = flags,
+        },
     };
     push_output_event(m_display, &ev);
 }
 
-// ---------------------------------------------------------------------------
-// Clipboard sync
-// ---------------------------------------------------------------------------
-
-/*
- * Pipe-based helper: poll() the read-end of a pipe with a timeout, accumulating
- * data until EOF (the remote side closes its write-end).  Returns the collected
- * bytes or an empty QByteArray on error / timeout.
- */
-static QByteArray readDataFromFd(FileDescriptor &fd)
+static QByteArray readDataFromFd(FileDescriptor fd)
 {
     QByteArray buffer;
     pollfd pfd{};
@@ -652,209 +678,353 @@ static QByteArray readDataFromFd(FileDescriptor &fd)
     while (true) {
         const int ready = poll(&pfd, 1, 1000);
         if (ready < 0) {
-            if (errno != EINTR)
+            if (errno != EINTR) {
                 return QByteArray();
+            }
         } else if (ready == 0) {
-            return QByteArray(); // timeout
+            return QByteArray();
         } else {
             char chunk[4096];
             const ssize_t n = read(fd.get(), chunk, sizeof(chunk));
-            if (n < 0)
+            if (n < 0) {
                 return QByteArray();
-            if (n == 0)
+            } else if (n == 0) {
                 return buffer;
-            buffer.append(chunk, n);
+            } else {
+                buffer.append(chunk, n);
+            }
         }
     }
 }
 
-/*
- * Ask a Wayland AbstractDataSource (the clipboard selection) to serve its
- * text/plain content into a pipe.  Picks text/plain;charset=utf-8 preferentially,
- * falls back to text/plain.  Returns the pipe's read endpoint that the caller
- * should drain with readDataFromFd(), or nullopt if nothing useful is available.
- *
- * This touches the Wayland server (requestData/flush) and so must run on the
- * compositor's main thread; the blocking drain of the returned fd can then be
- * handed off to a worker thread.
- */
-static std::optional<FileDescriptor> requestClipboardData(AbstractDataSource *source)
+static void writeDataToFd(qint32 rawFd, const QByteArray &buffer)
 {
-    if (!source)
-        return std::nullopt;
+    FileDescriptor fd(rawFd);
+    size_t remaining = buffer.size();
+    pollfd pfd{};
+    pfd.fd = fd.get();
+    pfd.events = POLLOUT;
 
-    const QStringList types = source->mimeTypes();
-    QString mimeType;
-    if (types.contains(QStringLiteral("text/plain;charset=utf-8")))
-        mimeType = QStringLiteral("text/plain;charset=utf-8");
-    else if (types.contains(QStringLiteral("text/plain")))
-        mimeType = QStringLiteral("text/plain");
-    else
-        return std::nullopt; // no text type available
-
-    std::optional<Pipe> pipe = Pipe::create(O_CLOEXEC);
-    if (!pipe)
-        return std::nullopt;
-
-    source->requestData(mimeType, std::move(pipe->writeEndpoint));
-    waylandServer()->display()->flush();
-    return std::move(pipe->readEndpoint);
-}
-
-/*
- * Called whenever KWin's SeatInterface::selectionChanged fires.
- * Reads the new clipboard content and pushes it to the consumer.
- * De-duplicates: if the text is identical to the last known value, the
- * send is skipped (avoids the consumer re-posting the same text back to KWin).
- */
-void AnlandBackend::onClipboardChanged()
-{
-    if (m_inFallback)
-        return;
-
-    AbstractDataSource *source = waylandServer()->seat()->selection();
-    std::optional<FileDescriptor> readFd = requestClipboardData(source);
-    if (!readFd)
-        return;
-    // Draining the pipe can block for up to a second waiting for the owning
-    // client to serve the data. Do it on a worker thread so the compositor's
-    // main loop never stalls, then deliver the result back here.
-    auto *watcher = new QFutureWatcher<QByteArray>(this);
-    connect(watcher, &QFutureWatcher<QByteArray>::finished, this, [this, watcher]() {
-        watcher->deleteLater();
-        if (m_inFallback)
+    while (remaining > 0) {
+        const int ready = poll(&pfd, 1, 5000);
+        if (ready < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
             return;
+        }
+        if (ready == 0 || !(pfd.revents & POLLOUT)) {
+            return;
+        }
 
-        const QByteArray text = watcher->result();
-        if (text == m_clipboardText)
-            return; // already in sync
-
-        m_clipboardText = text;
-        sendClipboardToConsumer(text);
-    });
-    watcher->setFuture(QtConcurrent::run([fd = std::move(*readFd)]() mutable {
-        return readDataFromFd(fd);
-    }));
+        const char *chunk = buffer.constData() + (buffer.size() - remaining);
+        const ssize_t n = write(fd.get(), chunk, remaining);
+        if (n <= 0) {
+            return;
+        }
+        remaining -= n;
+    }
 }
 
-/*
- * Push clipboard text to the Android consumer via the data channel.
- * Uses the variable-length INPUT_TYPE_CLIPBOARD event (header + raw UTF-8).
- * An empty text clears the remote clipboard.
- */
+static QByteArray requestClipboardText(AbstractDataSource *source)
+{
+    if (!source) {
+        return QByteArray();
+    }
+
+    const QStringList mimeTypes = source->mimeTypes();
+    QString mimeType;
+    if (mimeTypes.contains(QStringLiteral("text/plain;charset=utf-8"))) {
+        mimeType = QStringLiteral("text/plain;charset=utf-8");
+    } else if (mimeTypes.contains(QStringLiteral("text/plain"))) {
+        mimeType = QStringLiteral("text/plain");
+    } else {
+        return QByteArray();
+    }
+
+    int pipeFds[2];
+    if (pipe2(pipeFds, O_CLOEXEC) != 0) {
+        return QByteArray();
+    }
+
+    source->requestData(mimeType, FileDescriptor(pipeFds[1]));
+    waylandServer()->display()->flush();
+    return readDataFromFd(FileDescriptor(pipeFds[0]));
+}
+
+void AnlandBackend::onClipboardChanged(bool force)
+{
+    if (m_inFallback) {
+        return;
+    }
+
+    SeatInterface *seat = waylandServer() ? waylandServer()->seat() : nullptr;
+    if (!seat) {
+        return;
+    }
+
+    AbstractDataSource *source = seat->selection();
+    if (!force && source == m_clipboardSource.get()) {
+        return;
+    }
+
+    const QByteArray text = requestClipboardText(source);
+    if (!force && text == m_clipboardText) {
+        return;
+    }
+
+    m_clipboardText = text;
+    sendClipboardToConsumer(text);
+}
+
 void AnlandBackend::sendClipboardToConsumer(const QByteArray &text)
 {
-    if (m_inFallback)
+    if (m_inFallback) {
         return;
+    }
 
     const uint32_t len = static_cast<uint32_t>(text.size());
     const OutputEvent ev = {
         .type = OUTPUT_TYPE_CLIPBOARD,
         .clipboard = { .size = len },
     };
-    push_output_event_with_length(m_display, &ev,
-                                  const_cast<char *>(text.constData()), len);
+    push_output_event_with_length(m_display, &ev, const_cast<char *>(text.constData()), len);
 }
 
-/*
- * Called from processInputEvent() when the consumer pushes clipboard data to us.
- * Reads the trailing payload, then sets the KWin Wayland selection to that text
- * so all Wayland clients see the change.
- * De-duplicates: if the incoming text matches our m_clipboardText, we skip the
- * setSelection() call to avoid a feedback loop.
- */
 void AnlandBackend::sendClipboardToKWin(const QByteArray &text)
 {
-    if (text == m_clipboardText)
-        return; // already in sync — skip to break the loop
+    if (text == m_clipboardText) {
+        return;
+    }
 
     m_clipboardText = text;
 
-    if (!waylandServer())
+    if (!waylandServer()) {
         return;
+    }
 
     SeatInterface *seat = waylandServer()->seat();
-    if (!seat)
+    if (!seat) {
         return;
+    }
 
-    // Build a minimal QMimeData + AbstractDataSource to feed setSelection().
-    // The source wraps the data; setSelection() tells all wl_data_device listeners
-    // about the new clipboard content.
-    auto *mimeData = new QMimeData();
-    mimeData->setData(QStringLiteral("text/plain;charset=utf-8"), text);
+    if (text.isEmpty()) {
+        seat->setSelection(nullptr, waylandServer()->display()->nextSerial());
+        m_clipboardSource.reset();
+        return;
+    }
 
-    // ClipboardDataSource lives in the QPA plugin namespace; re-create the same
-    // pattern inline since it is a trivial AbstractDataSource subclass.
-    class AnlandClipboardSource : public AbstractDataSource {
+    class AnlandClipboardSource : public AbstractDataSource
+    {
     public:
-        explicit AnlandClipboardSource(QMimeData *data, QObject *parent = nullptr)
-            : AbstractDataSource(parent), m_data(data) {}
+        explicit AnlandClipboardSource(std::unique_ptr<QMimeData> data, QObject *parent = nullptr)
+            : AbstractDataSource(parent)
+            , m_data(std::move(data))
+        {
+        }
+
         void requestData(const QString &mimeType, FileDescriptor fd) override
         {
-            const QByteArray buf = m_data->data(mimeType);
-            // Write asynchronously — the read side is blocked until EOF.
-            QtConcurrent::run([buf, fd = std::move(fd)]() mutable {
-                size_t remaining = buf.size();
-                const char *ptr = buf.constData();
-                pollfd pfd{};
-                pfd.fd = fd.get();
-                pfd.events = POLLOUT;
-                while (remaining > 0) {
-                    if (poll(&pfd, 1, 5000) <= 0)
-                        break;
-                    if (!(pfd.revents & POLLOUT))
-                        break;
-                    ssize_t n = write(fd.get(), ptr, remaining);
-                    if (n <= 0)
-                        break;
-                    ptr += n;
-                    remaining -= n;
-                }
+            const QByteArray data = m_data->data(mimeType);
+            const int rawFd = fd.take();
+            QThreadPool::globalInstance()->start([data, rawFd]() {
+                writeDataToFd(rawFd, data);
             });
         }
-        void cancel() override {}
-        QStringList mimeTypes() const override { return m_data->formats(); }
+
+        void cancel() override
+        {
+        }
+
+        QStringList mimeTypes() const override
+        {
+            return m_data->formats();
+        }
+
     private:
-        QMimeData *m_data;
+        std::unique_ptr<QMimeData> m_data;
     };
 
-    auto *source = new AnlandClipboardSource(mimeData, mimeData);
-    seat->setSelection(source, waylandServer()->display()->nextSerial());
-    // seat->setSelection() takes a raw pointer; it is released when the next
-    // selection replaces it, or when the seat is torn down.  We parent the source
-    // to mimeData so it is freed when mimeData goes away — but since setSelection()
-    // holds a raw pointer, keep both alive for the lifetime of the seat's selection.
-    // Parent the source to the seat to ensure it outlives the selection reference.
-    source->setParent(seat);
+    auto mimeData = std::make_unique<QMimeData>();
+    mimeData->setData(QStringLiteral("text/plain;charset=utf-8"), text);
+    mimeData->setData(QStringLiteral("text/plain"), text);
+
+    auto oldSource = std::move(m_clipboardSource);
+    m_clipboardSource = std::make_unique<AnlandClipboardSource>(std::move(mimeData));
+    seat->setSelection(m_clipboardSource.get(), waylandServer()->display()->nextSerial());
+    oldSource.reset();
 }
 
-// ---------------------------------------------------------------------------
-// Text input
-// ---------------------------------------------------------------------------
-
-/*
- * Inject UTF-8 text the consumer's IME committed into the focused KWin client.
- *
- * The pipeline is IME -> compositor -> app. The consumer's Android keyboard is
- * the IME; this hands the committed text to KWin's InputMethod at exactly the
- * point a zwp_input_method_v1 commit_string arrives (InputMethod::commitText ->
- * commitString). KWin then owns delivery: to the focused text-input client
- * (text-input v1/v2/v3, carrying CJK / emoji) or as synthesized key events when
- * the client has no text-input interface. We deliberately do not write to the
- * client's text-input ourselves — this code is not the compositor's IME router.
- */
 void AnlandBackend::sendTextInputToKWin(const QByteArray &text)
 {
-    if (m_inFallback)
+    if (m_inFallback) {
+        return;
+    }
+
+    const QString string = QString::fromUtf8(text);
+    if (string.isEmpty()) {
+        return;
+    }
+
+    if (InputMethod *inputMethod = kwinApp()->inputMethod()) {
+        inputMethod->commitText(string);
+    }
+}
+
+void AnlandBackend::setupWindowBridge()
+{
+    m_windowBridgeEnabled = qEnvironmentVariableIsSet("ANLAND_MULTIWINDOW")
+        && qEnvironmentVariableIntValue("ANLAND_MULTIWINDOW") != 0;
+    if (!m_windowBridgeEnabled || !workspace())
         return;
 
-    const QString str = QString::fromUtf8(text);
-    if (str.isEmpty())
+    Workspace *ws = workspace();
+    connect(ws, &Workspace::windowAdded, this, &AnlandBackend::trackWindow);
+    connect(ws, &Workspace::windowRemoved, this, &AnlandBackend::untrackWindow);
+    connect(ws, &Workspace::windowActivated, this, &AnlandBackend::sendWindowFocus);
+
+    for (Window *window : ws->windows())
+        trackWindow(window);
+
+    if (!m_inFallback)
+        resendWindowSnapshot();
+}
+
+void AnlandBackend::trackWindow(Window *window)
+{
+    if (!m_windowBridgeEnabled || !window || !window->isClient() || window->isInternal())
+        return;
+    if (m_windowIds.contains(window))
         return;
 
-    if (InputMethod *im = kwinApp()->inputMethod()) {
-        im->commitText(str);
+    uint32_t id = m_nextWindowId++;
+    if (id == 0)
+        id = m_nextWindowId++;
+    m_windowIds.insert(window, id);
+    m_windowsById.insert(id, QPointer<Window>(window));
+
+    connect(window, &Window::captionChanged, this, [this, window]() {
+        sendWindowEvent(window, WINDOW_EVENT_UPDATE);
+    });
+    connect(window, &Window::frameGeometryChanged, this, [this, window]() {
+        sendWindowEvent(window, WINDOW_EVENT_UPDATE);
+    });
+    connect(window, &Window::desktopFileNameChanged, this, [this, window]() {
+        sendWindowEvent(window, WINDOW_EVENT_UPDATE);
+    });
+
+    if (!m_inFallback)
+        sendWindowEvent(window, WINDOW_EVENT_CREATE);
+}
+
+void AnlandBackend::untrackWindow(Window *window)
+{
+    const auto it = m_windowIds.find(window);
+    if (it == m_windowIds.end())
+        return;
+    const uint32_t id = it.value();
+
+    if (!m_inFallback) {
+        OutputEvent ev{};
+        ev.type = OUTPUT_TYPE_WINDOW_EVENT;
+        ev.window.window_id = id;
+        ev.window.action = WINDOW_EVENT_DESTROY;
+        ev.window.serial = m_windowEventSerial++;
+        push_output_event(m_display, &ev);
+    }
+
+    m_windowIds.erase(it);
+    m_windowsById.remove(id);
+}
+
+void AnlandBackend::sendWindowEvent(Window *window, uint16_t action)
+{
+    if (!m_windowBridgeEnabled || m_inFallback || !window)
+        return;
+    const auto it = m_windowIds.constFind(window);
+    if (it == m_windowIds.constEnd())
+        return;
+
+    const QByteArray title = window->caption().toUtf8();
+    QString appIdString = window->desktopFileName();
+    if (appIdString.isEmpty())
+        appIdString = window->resourceClass();
+    const QByteArray appId = appIdString.toUtf8();
+    const RectF geometry = window->frameGeometry();
+
+    window_event_payload_v1 meta{};
+    meta.x = qRound(geometry.x());
+    meta.y = qRound(geometry.y());
+    meta.width = qRound(geometry.width());
+    meta.height = qRound(geometry.height());
+    meta.pid = static_cast<int32_t>(window->pid());
+    meta.title_size = static_cast<uint32_t>(title.size());
+    meta.app_id_size = static_cast<uint32_t>(appId.size());
+
+    QByteArray payload;
+    payload.resize(static_cast<int>(sizeof(meta)) + title.size() + appId.size());
+    std::memcpy(payload.data(), &meta, sizeof(meta));
+    std::memcpy(payload.data() + sizeof(meta), title.constData(), title.size());
+    std::memcpy(payload.data() + sizeof(meta) + title.size(), appId.constData(), appId.size());
+
+    OutputEvent ev{};
+    ev.type = OUTPUT_TYPE_WINDOW_EVENT;
+    ev.window.window_id = it.value();
+    ev.window.action = action;
+    ev.window.flags = (workspace() && workspace()->activeWindow() == window)
+        ? WINDOW_FLAG_ACTIVE : 0;
+    ev.window.size = static_cast<uint32_t>(payload.size());
+    ev.window.serial = m_windowEventSerial++;
+    push_output_event_with_length(m_display, &ev, payload.data(), payload.size());
+}
+
+void AnlandBackend::sendWindowFocus(Window *window)
+{
+    if (!m_windowBridgeEnabled || m_inFallback || !window)
+        return;
+    const auto it = m_windowIds.constFind(window);
+    if (it == m_windowIds.constEnd())
+        return;
+
+    OutputEvent ev{};
+    ev.type = OUTPUT_TYPE_WINDOW_EVENT;
+    ev.window.window_id = it.value();
+    ev.window.action = WINDOW_EVENT_FOCUS;
+    ev.window.flags = WINDOW_FLAG_ACTIVE;
+    ev.window.serial = m_windowEventSerial++;
+    push_output_event(m_display, &ev);
+}
+
+void AnlandBackend::resendWindowSnapshot()
+{
+    if (!m_windowBridgeEnabled || m_inFallback)
+        return;
+    for (auto it = m_windowIds.constBegin(); it != m_windowIds.constEnd(); ++it)
+        sendWindowEvent(it.key(), WINDOW_EVENT_CREATE);
+    if (workspace())
+        sendWindowFocus(workspace()->activeWindow());
+}
+
+void AnlandBackend::handleWindowCommand(uint32_t windowId, uint32_t command)
+{
+    if (!m_windowBridgeEnabled || !workspace())
+        return;
+    Window *window = m_windowsById.value(windowId).data();
+    if (!window)
+        return;
+
+    switch (command) {
+    case WINDOW_COMMAND_ACTIVATE:
+        workspace()->activateWindow(window, true);
+        break;
+    case WINDOW_COMMAND_CLOSE:
+        window->closeWindow();
+        break;
+    default:
+        break;
     }
 }
 
 } // namespace KWin
+
+#include "moc_anland_backend.cpp"
