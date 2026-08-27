@@ -1,0 +1,136 @@
+name: Build Arch Anland V2 Test RootFS
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'anland-build/Arch/**'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: arch-anland-v2-test-rootfs
+  cancel-in-progress: true
+
+jobs:
+  repack:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate Arch package channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pkgs=(anland-build/Arch/*.pkg.tar.*)
+          if (("${#pkgs[@]}" < 2)); then
+            echo "Expected patched KWin and XWayland packages in anland-build/Arch" >&2
+            printf 'found: %s\n' "${pkgs[@]:-none}" >&2
+            exit 1
+          fi
+          grep -q 'kwin' < <(printf '%s\n' "${pkgs[@]}")
+          grep -Eq 'xwayland|Xwayland' < <(printf '%s\n' "${pkgs[@]}")
+          sha256sum -c anland-build/Arch/SHA256SUMS
+
+      - name: Find latest successful Arch base RootFS
+        id: base
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id="$(
+            gh api               "/repos/${GITHUB_REPOSITORY}/actions/workflows/build-arch-mi-pad4.yml/runs?status=success&per_page=20"               --jq '.workflow_runs[] | select(.conclusion == "success") | .id'               | head -n1
+          )"
+          if [ -z "$run_id" ]; then
+            echo "No successful Build Arch Mi Pad 4 RootFS run found" >&2
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "Using base RootFS run $run_id"
+
+      - name: Download base RootFS artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_RUN_ID: ${{ steps.base.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p base-rootfs
+          gh run download "$BASE_RUN_ID"             --repo "$GITHUB_REPOSITORY"             --name rootfs-arch-mi-pad4-min             --dir base-rootfs
+          find base-rootfs -maxdepth 2 -type f -print
+
+      - name: Install latest Anland packages into test RootFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t archives < <(find base-rootfs -type f -name '*.tar.xz' -print)
+          if (("${#archives[@]}" != 1)); then
+            echo "Expected exactly one base rootfs tar.xz; found ${#archives[@]}" >&2
+            printf '%s\n' "${archives[@]}" >&2
+            exit 1
+          fi
+
+          rm -rf rootfs
+          mkdir rootfs
+          sudo tar -xJpf "${archives[0]}" -C rootfs
+
+          docker run --privileged --rm             -v "$PWD/rootfs:/rootfs"             -v "$PWD/anland-build/Arch:/packages:ro"             lfdevs/archlinuxarm:base-devel bash -lc '
+              set -euo pipefail
+              cp /rootfs/etc/pacman.conf /tmp/pacman-rootfs.conf
+              if grep -Eq "^[[:space:]]*LocalFileSigLevel[[:space:]]*=" /tmp/pacman-rootfs.conf; then
+                sed -i "s/^[[:space:]]*LocalFileSigLevel[[:space:]]*=.*/LocalFileSigLevel = Never/" /tmp/pacman-rootfs.conf
+              else
+                sed -i "/^\[options\]/a LocalFileSigLevel = Never" /tmp/pacman-rootfs.conf
+              fi
+              pacman --root /rootfs --config /tmp/pacman-rootfs.conf                 -U --noconfirm --needed /packages/*.pkg.tar.*
+            '
+
+          sudo mkdir -p rootfs/usr/share/droidspaces
+          printf '%s\n'             'profile=arch-mi-pad4-anland-v2-test'             "packages-commit=${GITHUB_SHA}"             'wslg=v2-shared-compositor'             'anland-multiwindow=enabled-on-demand'             | sudo tee rootfs/usr/share/droidspaces/anland-v2-test-rootfs >/dev/null
+
+          sudo touch rootfs/etc/pacman.conf
+          current_ignore="$(
+            sudo sed -n 's/^[[:space:]]*IgnorePkg[[:space:]]*=[[:space:]]*//p'               rootfs/etc/pacman.conf | head -n1
+          )"
+          for package in kwin xorg-xwayland; do
+            case " $current_ignore " in
+              *" $package "*) ;;
+              *) current_ignore="${current_ignore:+$current_ignore }$package" ;;
+            esac
+          done
+          if sudo grep -q '^[[:space:]]*IgnorePkg[[:space:]]*=' rootfs/etc/pacman.conf; then
+            sudo sed -i               "0,/^[[:space:]]*IgnorePkg[[:space:]]*=/{s|^[[:space:]]*IgnorePkg[[:space:]]*=.*|IgnorePkg = $current_ignore|}"               rootfs/etc/pacman.conf
+          else
+            sudo sed -i "/^\[options\]/a IgnorePkg = $current_ignore" rootfs/etc/pacman.conf
+          fi
+
+      - name: Validate and pack test RootFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x rootfs/usr/bin/kwin_wayland
+          test -x rootfs/usr/bin/Xwayland
+          grep -q 'wslg=v2-shared-compositor'             rootfs/usr/share/droidspaces/anland-v2-test-rootfs
+          grep -q 'IgnorePkg = .*kwin' rootfs/etc/pacman.conf
+
+          mkdir -p release_assets
+          out="release_assets/Arch-min-Anland-V2-MiPad4-aarch64-v${GITHUB_RUN_NUMBER}.tar.xz"
+          sudo tar --numeric-owner -C rootfs -cJf "$out" .
+          sudo chown "$(id -u):$(id -g)" "$out"
+          sha256sum "$out" > "$out.sha256"
+          ls -lh "$out" "$out.sha256"
+
+      - name: Upload Arch V2 test RootFS
+        uses: actions/upload-artifact@v6
+        with:
+          name: arch-anland-v2-mipad4-rootfs
+          path: release_assets/
+          if-no-files-found: error
+          retention-days: 30
