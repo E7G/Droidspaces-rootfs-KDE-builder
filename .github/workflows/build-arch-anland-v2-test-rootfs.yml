@@ -50,7 +50,8 @@ jobs:
         run: |
           set -euo pipefail
           run_id="$(
-            gh api               "/repos/${GITHUB_REPOSITORY}/actions/workflows/build-arch-mi-pad4.yml/runs?status=success&per_page=20"               --jq '.workflow_runs[] | select(.conclusion == "success") | .id'               | head -n1
+            gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/build-arch-mi-pad4.yml/runs?status=success&per_page=20" \
+              --jq 'first(.workflow_runs[] | select(.conclusion == "success") | .id) // empty'
           )"
           if [ -z "$run_id" ]; then
             echo "No successful Build Arch Mi Pad 4 RootFS run found" >&2
