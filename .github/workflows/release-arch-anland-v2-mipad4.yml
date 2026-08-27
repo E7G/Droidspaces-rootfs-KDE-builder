@@ -11,6 +11,10 @@ permissions:
   actions: read
   contents: write
 
+concurrency:
+  group: release-arch-anland-v2-mipad4
+  cancel-in-progress: true
+
 jobs:
   release:
     runs-on: ubuntu-24.04
@@ -43,10 +47,8 @@ jobs:
             exit 1
           fi
           if [ -f "${roots[0]}.sha256" ]; then
-            (
-              cd "$(dirname "${roots[0]}")"
-              sha256sum -c "$(basename "${roots[0]}.sha256")"
-            )
+            expected="$(awk 'NR==1 {print $1}' "${roots[0]}.sha256")"
+            printf '%s  %s\n' "$expected" "${roots[0]}" | sha256sum -c -
           else
             sha256sum "${roots[0]}" > "${roots[0]}.sha256"
           fi
