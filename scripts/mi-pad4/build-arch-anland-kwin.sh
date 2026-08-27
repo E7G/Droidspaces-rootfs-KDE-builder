@@ -18,6 +18,10 @@ XWAYLANDKG=8f82d79d312192108bb6417187c6ea986cdfcb3c
 PLASMAWORKSPACEKG=864d8e5f78cb3665317efc5ca3f525e87a30f6dc
 ANLAND_ARCH_REPO="${ANLAND_ARCH_REPO:-https://github.com/E7G/anland.git}"
 ANLAND_ARCH_REF="${ANLAND_ARCH_REF:-main}"
+# Mi Pad 4 defaults to the repository-local backend because it contains the
+# Android 4.4 KGSL/Clover surfaceless-EGL compatibility path. Set
+# ANLAND_ARCH_SOURCE=remote to validate the generic E7G/anland Arch backend.
+ANLAND_ARCH_SOURCE="${ANLAND_ARCH_SOURCE:-local}"
 
 # Normal RootFS keeps the complete Plasma screen-locker stack. The dedicated
 # WinLite package builder intentionally disables it because WinLite has no
@@ -52,18 +56,34 @@ chmod 0440 /etc/sudoers.d/droidspaces-user
 rm -rf "$BUILD_ROOT"
 mkdir -p "$BUILD_ROOT"
 
-# Arch is the primary validation target. Pull the backend directly from the
-# E7G/anland source of truth so the rootfs builder cannot silently ship an old
-# protocol/backend snapshot after Anland evolves.
-ANLAND_SOURCE="$BUILD_ROOT/anland-source"
-git clone --filter=blob:none --no-checkout "$ANLAND_ARCH_REPO" "$ANLAND_SOURCE"
-git -C "$ANLAND_SOURCE" fetch --depth=1 origin "$ANLAND_ARCH_REF"
-git -C "$ANLAND_SOURCE" checkout --detach FETCH_HEAD
-ANLAND_ARCH_BACKEND_DIR="$ANLAND_SOURCE/producers/kde/anland_backend_Arch_v5/src/backends/anland"
-test -f "$ANLAND_ARCH_BACKEND_DIR/anland_backend.cpp"
-test -f "$ANLAND_ARCH_BACKEND_DIR/protocol.h"
-ANLAND_ARCH_BACKEND_REV="$(git -C "$ANLAND_SOURCE" rev-parse HEAD)"
-echo "Using Arch Anland backend $ANLAND_ARCH_BACKEND_REV from $ANLAND_ARCH_REPO@$ANLAND_ARCH_REF"
+# Select the backend source explicitly. The Mi Pad 4 local copy carries
+# device-specific EGL/KGSL compatibility that the generic upstream backend
+# intentionally does not. Remote mode remains useful for upstream validation.
+case "$ANLAND_ARCH_SOURCE" in
+    local)
+        ANLAND_ARCH_BACKEND_DIR="$SCRIPT_DIR/anland-kwin/backend"
+        test -f "$ANLAND_ARCH_BACKEND_DIR/anland_backend.cpp"
+        test -f "$ANLAND_ARCH_BACKEND_DIR/protocol.h"
+        ANLAND_ARCH_BACKEND_REV="local-$(sha256sum "$ANLAND_ARCH_BACKEND_DIR/anland_backend.cpp" "$ANLAND_ARCH_BACKEND_DIR/protocol.h" | sha256sum | cut -c1-16)"
+        ANLAND_ARCH_SOURCE_DESC="repository-local-mi-pad4"
+        ;;
+    remote)
+        ANLAND_SOURCE="$BUILD_ROOT/anland-source"
+        git clone --filter=blob:none --no-checkout "$ANLAND_ARCH_REPO" "$ANLAND_SOURCE"
+        git -C "$ANLAND_SOURCE" fetch --depth=1 origin "$ANLAND_ARCH_REF"
+        git -C "$ANLAND_SOURCE" checkout --detach FETCH_HEAD
+        ANLAND_ARCH_BACKEND_DIR="$ANLAND_SOURCE/producers/kde/anland_backend_Arch_v5/src/backends/anland"
+        test -f "$ANLAND_ARCH_BACKEND_DIR/anland_backend.cpp"
+        test -f "$ANLAND_ARCH_BACKEND_DIR/protocol.h"
+        ANLAND_ARCH_BACKEND_REV="$(git -C "$ANLAND_SOURCE" rev-parse HEAD)"
+        ANLAND_ARCH_SOURCE_DESC="$ANLAND_ARCH_REPO@$ANLAND_ARCH_REF"
+        ;;
+    *)
+        echo "Invalid ANLAND_ARCH_SOURCE=$ANLAND_ARCH_SOURCE (expected local or remote)" >&2
+        exit 1
+        ;;
+esac
+echo "Using Arch Anland backend $ANLAND_ARCH_BACKEND_REV from $ANLAND_ARCH_SOURCE_DESC"
 
 # Arch's current pacman defaults require signatures for local files. Packages
 # produced by this CI build are intentionally unsigned; relax checking only in
@@ -324,7 +344,7 @@ fi
 printf '%s\n' \
   'patched-kwin=arch-native-6.7.3-anland' \
   "anland-arch-backend=${ANLAND_ARCH_BACKEND_REV}" \
-  "anland-source=${ANLAND_ARCH_REPO}@${ANLAND_ARCH_REF}" \
+  "anland-source=${ANLAND_ARCH_SOURCE_DESC}" \
   'droidspaces-mode=wslg-v2-compatible' \
   "screenlocker=${screenlocker_status}" \
   'socket=/run/display.sock' \
