@@ -92,6 +92,13 @@ jobs:
               pacman --root /rootfs --config /tmp/pacman-rootfs.conf                 -U --noconfirm --needed /packages/*.pkg.tar.*
             '
 
+          echo "Installing latest Mi Pad 4 WSLg runtime launchers"
+          sudo install -Dm755 scripts/mi-pad4/droidspaces-wslg-kwin rootfs/usr/local/bin/droidspaces-wslg-kwin
+          sudo install -Dm755 scripts/mi-pad4/droidspaces-wslg-prepare rootfs/usr/local/sbin/droidspaces-wslg-prepare
+          sudo install -Dm755 scripts/mi-pad4/droidspaces-wslg-cleanup rootfs/usr/local/sbin/droidspaces-wslg-cleanup
+          sudo install -Dm755 scripts/mi-pad4/mi-pad4-kwin-wayland-wrapper rootfs/usr/local/libexec/mi-pad4-kwin-wayland-wrapper
+          sudo install -Dm755 scripts/mi-pad4/mi-pad4-kwin-wayland-wrapper rootfs/usr/sbin/kwin_wayland_wrapper
+
           sudo mkdir -p rootfs/usr/share/droidspaces
           printf '%s\n'             'profile=arch-mi-pad4-anland-v2-test'             "packages-commit=${GITHUB_SHA}"             'wslg=v2-shared-compositor'             'anland-multiwindow=enabled-on-demand'             | sudo tee rootfs/usr/share/droidspaces/anland-v2-test-rootfs >/dev/null
 
@@ -117,6 +124,9 @@ jobs:
           set -euo pipefail
           test -x rootfs/usr/bin/kwin_wayland
           test -x rootfs/usr/bin/Xwayland
+          test -x rootfs/usr/local/bin/droidspaces-wslg-kwin
+          test -x rootfs/usr/local/sbin/droidspaces-wslg-prepare
+          test -x rootfs/usr/local/sbin/droidspaces-wslg-cleanup
           grep -q 'wslg=v2-shared-compositor'             rootfs/usr/share/droidspaces/anland-v2-test-rootfs
           grep -q 'IgnorePkg = .*kwin' rootfs/etc/pacman.conf
 
