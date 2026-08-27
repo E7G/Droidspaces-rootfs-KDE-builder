@@ -3,6 +3,7 @@
 #include "protocol.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -50,7 +51,7 @@ struct anland_audio {
      * 0 = let PipeWire choose the graph quantum. Applied as node.latency. */
     uint32_t               play_quantum, cap_quantum;
 
-    int                    audio_fd;  /* borrowed; -1 when detached */
+    int                    audio_fd;  /* owned duplicate; -1 when detached */
     struct spa_source     *io;        /* loop io source watching audio_fd for reads */
 
     /* Mic ring buffer. Only ever touched from the loop thread (the io read callback
@@ -109,7 +110,19 @@ static size_t ring_read(struct anland_audio *a, uint8_t *p, size_t n)
     return got;
 }
 
-/* ---- stream process callbacks (run on the loop thread, RT context) ---- */
+/* The caller holds the thread-loop lock, or is executing on that loop. The io
+ * source owns audio_fd, so destroying it also closes the duplicated descriptor. */
+static void detach_audio_fd_locked(struct anland_audio *a)
+{
+    struct spa_source *io = a->io;
+    a->io = NULL;
+    a->audio_fd = -1;
+    ring_reset(a);
+    if (io)
+        pw_loop_destroy_source(pw_thread_loop_get_loop(a->loop), io);
+}
+
+/* ---- stream process callbacks (run on the PipeWire thread loop) ---- */
 
 /* Desktop audio captured from the default sink's monitor -> push to the socket so
  * the consumer plays it. Dropped (still drained) while detached. */
@@ -226,26 +239,16 @@ static void apply_format(struct anland_audio *a, const struct audio_format *f)
         /* Latency-only tweak: node.latency in place, nothing renegotiates. */
         set_latency(stream, f->quantum, rate);
     }
-
-}
-
-/* Stop polling a disconnected borrowed fd. EPOLLHUP is level-triggered, so leaving
- * the source armed makes the PipeWire thread loop wake continuously until reconnect. */
-static void disable_audio_io(struct anland_audio *a)
-{
-    if (a->io) {
-        pw_loop_update_io(pw_thread_loop_get_loop(a->loop), a->io, 0);
-    }
-    a->audio_fd = -1;
-    ring_reset(a);
 }
 
 /* Mic PCM / format announcements arriving from the consumer. Runs on the loop thread. */
 static void on_audio_readable(void *data, int fd, uint32_t mask)
 {
     struct anland_audio *a = data;
+    if (fd != a->audio_fd)
+        return;
     if (mask & (SPA_IO_ERR | SPA_IO_HUP)) {
-        disable_audio_io(a);
+        detach_audio_fd_locked(a);
         return;
     }
     if (!(mask & SPA_IO_IN))
@@ -254,14 +257,14 @@ static void on_audio_readable(void *data, int fd, uint32_t mask)
     for (;;) {
         ssize_t n = recv(fd, a->rx, sizeof(a->rx), MSG_DONTWAIT);
         if (n == 0) {
-            disable_audio_io(a);
+            detach_audio_fd_locked(a);
             break;
         }
         if (n < 0) {
             if (errno == EINTR)
                 continue;
             if (errno != EAGAIN && errno != EWOULDBLOCK)
-                disable_audio_io(a);
+                detach_audio_fd_locked(a);
             break;
         }
         if ((size_t)n < sizeof(struct audio_msg))
@@ -358,8 +361,7 @@ static int connect_stream(struct pw_stream *stream, enum spa_direction direction
     const struct spa_pod *params[1] = { build_format(&bld, rate, channels) };
 
     return pw_stream_connect(stream, direction, PW_ID_ANY,
-                             PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS |
-                                 PW_STREAM_FLAG_RT_PROCESS,
+                             PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS,
                              params, 1);
 }
 
@@ -392,21 +394,16 @@ static int build_pw(struct anland_audio *a)
         return -1;
     pw_core_add_listener(a->core, &a->core_listener, &core_events, a);
 
-    /* Own a sink so the container has a real output device instead of only
+    /* Own a virtual sink so the container has a real output device instead of only
      * the auto-null "Dummy Output": apps play into this Audio/Sink, WirePlumber makes
      * it the default (high priority beats auto_null), and on_capture_process receives
-     * the mixed PCM directly -- no monitor capture, nothing bound to the dummy.
-     *
-     * Do not mark this user-facing endpoint as virtual. Plasma PA hides virtual
-     * devices by default, which made both Anland endpoints look missing even though
-     * PipeWire and pactl could already use them. */
+     * the mixed PCM directly -- no monitor capture, nothing bound to the dummy. */
     a->capture = pw_stream_new(a->core, "anland-speaker",
         pw_properties_new(
             PW_KEY_MEDIA_TYPE, "Audio",
             PW_KEY_MEDIA_CLASS, "Audio/Sink",
             PW_KEY_NODE_NAME, "anland-speaker",
             PW_KEY_NODE_DESCRIPTION, "Anland remote speaker",
-            PW_KEY_NODE_VIRTUAL, "false",
             PW_KEY_PRIORITY_SESSION, "1010",   /* outrank the auto-null dummy sink */
             PW_KEY_PRIORITY_DRIVER, "1010",
             NULL));
@@ -421,7 +418,6 @@ static int build_pw(struct anland_audio *a)
             PW_KEY_MEDIA_CLASS, "Audio/Source",
             PW_KEY_NODE_NAME, "anland-mic",
             PW_KEY_NODE_DESCRIPTION, "Anland remote microphone",
-            PW_KEY_NODE_VIRTUAL, "false",
             PW_KEY_PRIORITY_SESSION, "1010",   /* outrank the auto-null dummy source */
             PW_KEY_PRIORITY_DRIVER, "1010",
             NULL));
@@ -465,20 +461,24 @@ void anland_audio_set_fd(int audio_fd)
 
     pw_thread_loop_lock(a->loop);
 
-    struct pw_loop *loop = pw_thread_loop_get_loop(a->loop);
-    if (a->io) {
-        pw_loop_destroy_source(loop, a->io);
-        a->io = NULL;
-    }
-    a->audio_fd = audio_fd;
-    ring_reset(a);   /* drop stale mic audio across a reconnect */
+    detach_audio_fd_locked(a);
 
     if (audio_fd >= 0) {
-        /* close=false: the fd is borrowed from display_producer, never closed here.
-         * The consumer announces both device formats (AUDIO_MSG_FORMAT) right after
+        /* display_producer retains the input fd. Keep an owned duplicate so source
+         * teardown cannot race with producer fd reuse during fallback. The consumer
+         * announces both device formats (AUDIO_MSG_FORMAT) right after
          * this socket comes up; on_audio_readable applies them and reconfigures the
          * PipeWire streams, so we don't dictate any format here. */
-        a->io = pw_loop_add_io(loop, audio_fd, SPA_IO_IN, false, on_audio_readable, a);
+        int owned_fd = fcntl(audio_fd, F_DUPFD_CLOEXEC, 3);
+        if (owned_fd >= 0) {
+            a->io = pw_loop_add_io(pw_thread_loop_get_loop(a->loop), owned_fd,
+                                   SPA_IO_IN, true, on_audio_readable, a);
+            if (a->io) {
+                a->audio_fd = owned_fd;
+            } else {
+                close(owned_fd);
+            }
+        }
     }
 
     pw_thread_loop_unlock(a->loop);
@@ -516,6 +516,7 @@ int anland_audio_start(void)
                                            on_reconnect_timer, a);
     if (!a->reconnect_timer)
         goto fail;
+
     if (pw_thread_loop_start(a->loop) < 0)
         goto fail;
 
@@ -535,10 +536,12 @@ int anland_audio_start(void)
     return 0;
 
 fail:
-    if (a->loop)
-        pw_thread_loop_destroy(a->loop);
+    if (a->reconnect_timer)
+        pw_loop_destroy_source(pw_thread_loop_get_loop(a->loop), a->reconnect_timer);
     if (a->context)
         pw_context_destroy(a->context);
+    if (a->loop)
+        pw_thread_loop_destroy(a->loop);
     free(a->ring);
     free(a);
     pw_deinit();
@@ -556,7 +559,7 @@ void anland_audio_stop(void)
         pw_thread_loop_stop(a->loop);
     teardown_pw(a);
     if (a->io)
-        pw_loop_destroy_source(pw_thread_loop_get_loop(a->loop), a->io);
+        detach_audio_fd_locked(a);
     if (a->reconnect_timer)
         pw_loop_destroy_source(pw_thread_loop_get_loop(a->loop), a->reconnect_timer);
     if (a->context)
