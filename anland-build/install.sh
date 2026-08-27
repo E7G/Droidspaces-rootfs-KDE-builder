@@ -60,21 +60,37 @@ detect_target() {
     # shellcheck disable=SC1091
     source /etc/os-release
     [[ -n "${ID:-}" ]] || die "/etc/os-release 缺少 ID。" "/etc/os-release does not contain ID."
-    [[ -n "${VERSION_ID:-}" ]] || die "/etc/os-release 缺少 VERSION_ID。" "/etc/os-release does not contain VERSION_ID."
 
-    case "${ID}:${VERSION_ID}" in
-        debian:13*) TARGET="Debian13"; PACKAGE_TYPE="deb" ;;
-        ubuntu:26.04*) TARGET="ubuntu2604"; PACKAGE_TYPE="deb" ;;
-        fedora:43*) TARGET="Fedora43"; PACKAGE_TYPE="rpm" ;;
-        fedora:44*) TARGET="Fedora44"; PACKAGE_TYPE="rpm" ;;
+    case "${ID}" in
+        arch|archarm)
+            TARGET="Arch"
+            PACKAGE_TYPE="pkg"
+            ;;
+        debian)
+            [[ "${VERSION_ID:-}" == 13* ]] || die "仅支持 Debian 13。" "Only Debian 13 is supported."
+            TARGET="Debian13"
+            PACKAGE_TYPE="deb"
+            ;;
+        ubuntu)
+            [[ "${VERSION_ID:-}" == 26.04* ]] || die "仅支持 Ubuntu 26.04。" "Only Ubuntu 26.04 is supported."
+            TARGET="ubuntu2604"
+            PACKAGE_TYPE="deb"
+            ;;
+        fedora)
+            case "${VERSION_ID:-}" in
+                43*) TARGET="Fedora43"; PACKAGE_TYPE="rpm" ;;
+                44*) TARGET="Fedora44"; PACKAGE_TYPE="rpm" ;;
+                *) die "仅支持 Fedora 43/44。" "Only Fedora 43/44 is supported." ;;
+            esac
+            ;;
         *)
-            die "不支持当前系统 ${PRETTY_NAME:-${ID} ${VERSION_ID}}。仅支持 Debian 13、Ubuntu 26.04、Fedora 43/44。" \
-                "Unsupported system: ${PRETTY_NAME:-${ID} ${VERSION_ID}}. Supported systems are Debian 13, Ubuntu 26.04, and Fedora 43/44."
+            die "不支持当前系统 ${PRETTY_NAME:-${ID} ${VERSION_ID:-}}。支持 Arch/Arch Linux ARM、Debian 13、Ubuntu 26.04、Fedora 43/44。" \
+                "Unsupported system: ${PRETTY_NAME:-${ID} ${VERSION_ID:-}}. Supported systems are Arch/Arch Linux ARM, Debian 13, Ubuntu 26.04, and Fedora 43/44."
             ;;
     esac
 
-    log "已识别系统: ${PRETTY_NAME:-${ID} ${VERSION_ID}} -> ${TARGET}" \
-        "Detected system: ${PRETTY_NAME:-${ID} ${VERSION_ID}} -> ${TARGET}"
+    log "已识别系统: ${PRETTY_NAME:-${ID} ${VERSION_ID:-}} -> ${TARGET}" \
+        "Detected system: ${PRETTY_NAME:-${ID} ${VERSION_ID:-}} -> ${TARGET}"
 }
 
 check_architecture() {
@@ -89,7 +105,10 @@ check_architecture() {
 
 has_packages() {
     local base="$1"
-    compgen -G "$base/*.${PACKAGE_TYPE}" >/dev/null
+    case "$PACKAGE_TYPE" in
+        pkg) compgen -G "$base/*.pkg.tar.*" >/dev/null ;;
+        *)   compgen -G "$base/*.${PACKAGE_TYPE}" >/dev/null ;;
+    esac
 }
 
 download_packages() {
@@ -147,6 +166,44 @@ install_deb_packages() {
     printf '  hold: %s\n' "${packages[@]}"
 }
 
+install_pacman_packages() {
+    local -a files packages
+    local file package current_ignore
+
+    command -v pacman >/dev/null 2>&1 || die "未找到 pacman。" "pacman was not found."
+    mapfile -t files < <(find "$PACKAGE_DIR" -maxdepth 1 -type f -name '*.pkg.tar.*' -print | sort)
+    (("${#files[@]}" > 0)) || die "没有可安装的 Arch 包。" "No installable Arch packages were found."
+
+    log "正在安装 ${#files[@]} 个 Arch KWin/XWayland 包..." \
+        "Installing ${#files[@]} Arch KWin/XWayland packages..."
+    pacman -U --noconfirm --needed "${files[@]}"
+
+    for file in "${files[@]}"; do
+        package="$(pacman -Qp --print-format '%n' "$file" 2>/dev/null || true)"
+        [[ -n "$package" ]] && packages+=("$package")
+    done
+    if (("${#packages[@]}" > 0)); then
+        mapfile -t packages < <(printf '%s\n' "${packages[@]}" | sort -u)
+    fi
+
+    # Keep pacman from replacing the patched compositor/display server.
+    touch /etc/pacman.conf
+    current_ignore="$(sed -n 's/^[[:space:]]*IgnorePkg[[:space:]]*=[[:space:]]*//p' /etc/pacman.conf | head -n1)"
+    for package in kwin xorg-xwayland; do
+        case " $current_ignore " in
+            *" $package "*) ;;
+            *) current_ignore="${current_ignore:+$current_ignore }$package" ;;
+        esac
+    done
+    if grep -q '^[[:space:]]*IgnorePkg[[:space:]]*=' /etc/pacman.conf; then
+        sed -i "0,/^[[:space:]]*IgnorePkg[[:space:]]*=/{s|^[[:space:]]*IgnorePkg[[:space:]]*=.*|IgnorePkg = $current_ignore|}" /etc/pacman.conf
+    else
+        sed -i "/^\[options\]/a IgnorePkg = $current_ignore" /etc/pacman.conf
+    fi
+
+    printf '  hold: %s\n' "${packages[@]:-kwin xorg-xwayland}"
+}
+
 install_rpm_packages() {
     local -a files packages
     local -a exclude_patterns=("kwin*" "xorg-x11-server-Xwayland*")
@@ -200,9 +257,10 @@ main() {
     case "$PACKAGE_TYPE" in
         deb) install_deb_packages ;;
         rpm) install_rpm_packages ;;
+        pkg) install_pacman_packages ;;
     esac
 
-    log "安装完成，patched KWin/Xwayland 已锁定。" "Installation complete; patched KWin/Xwayland packages are now locked."
+    log "安装完成，patched KWin/Xwayland 已安装并锁定。" "Installation complete; patched KWin/Xwayland packages are installed and locked."
 }
 
 main "$@"
