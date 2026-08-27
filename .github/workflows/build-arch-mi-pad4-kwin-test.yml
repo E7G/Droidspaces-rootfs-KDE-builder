@@ -20,6 +20,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Validate Arch installer syntax
+        shell: bash
+        run: bash -n anland-build/install.sh
+
       - name: Build patched KWin package
         shell: bash
         run: |
