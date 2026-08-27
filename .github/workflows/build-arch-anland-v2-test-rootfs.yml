@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'anland-build/Arch/**'
+      - '.github/workflows/build-arch-anland-v2-test-rootfs.yml'
   workflow_dispatch:
 
 permissions:
