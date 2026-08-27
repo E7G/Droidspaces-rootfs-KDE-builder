@@ -104,18 +104,30 @@ jobs:
             exit 0
           fi
 
-          dest=anland-build/Arch
-          mkdir -p "$dest"
-          find "$dest" -maxdepth 1 -type f \
-            \( -name '*.pkg.tar.*' -o -name 'SHA256SUMS' \) -delete
-
           shopt -s nullglob
           packages=(kwin-mi-pad4-test/*.pkg.tar.*)
           if (("${#packages[@]}" == 0)); then
             echo "No Arch KWin/XWayland packages were produced" >&2
             exit 1
           fi
-          cp -v "${packages[@]}" "$dest/"
+
+          # Preserve this run's binaries outside the working tree, then publish
+          # them on top of the newest main. Binary package files cannot be
+          # meaningfully rebased, and older concurrent runs may have published
+          # files with the same names while this long native build was running.
+          publish_src="$RUNNER_TEMP/arch-anland-v2-packages"
+          rm -rf "$publish_src"
+          mkdir -p "$publish_src"
+          cp -v "${packages[@]}" "$publish_src/"
+
+          git fetch --quiet origin main
+          git reset --hard origin/main
+
+          dest=anland-build/Arch
+          mkdir -p "$dest"
+          find "$dest" -maxdepth 1 -type f \
+            \( -name '*.pkg.tar.*' -o -name 'SHA256SUMS' \) -delete
+          cp -v "$publish_src"/*.pkg.tar.* "$dest/"
           (
             cd "$dest"
             sha256sum *.pkg.tar.* > SHA256SUMS
@@ -130,5 +142,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A "$dest"
           git commit -m "Update Arch Anland V2 KWin/XWayland packages"
-          git pull --rebase --autostash origin main
           git push origin HEAD:main
