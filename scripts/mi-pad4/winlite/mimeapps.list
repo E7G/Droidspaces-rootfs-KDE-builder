@@ -1,0 +1,11 @@
+[Default Applications]
+application/x-ms-dos-executable=winrun.desktop
+application/x-msdownload=winrun.desktop
+application/vnd.microsoft.portable-executable=winrun.desktop
+application/x-msi=winrun.desktop
+
+[Added Associations]
+application/x-ms-dos-executable=winrun.desktop;
+application/x-msdownload=winrun.desktop;
+application/vnd.microsoft.portable-executable=winrun.desktop;
+application/x-msi=winrun.desktop;

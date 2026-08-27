@@ -1,0 +1,18 @@
+#!/usr/bin/bash
+set -u
+
+# MIME/file-manager entry point.  Do not keep the caller blocked on Wine:
+# PCManFM/Android-backed file browsers otherwise report that the click failed.
+for target in "$@"; do
+    [[ -n "$target" ]] || continue
+    if [[ "$target" == file://* ]]; then
+        target="${target#file://}"
+        target="${target//%20/ }"
+        target="${target//%5B/[}"
+        target="${target//%5D/]}"
+    fi
+    mkdir -p /run/winlite 2>/dev/null || true
+    setsid -f /usr/local/bin/winrun --direct "$target" \
+        >>/run/winlite/file-association.log 2>&1
+done
+exit 0

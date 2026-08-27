@@ -16,6 +16,12 @@ export LD_LIBRARY_PATH="/usr/lib/wine/aarch64-unix${LD_LIBRARY_PATH:+:$LD_LIBRAR
 export MESA_LOADER_DRIVER_OVERRIDE=kgsl
 export FD_FORCE_KGSL=1
 export FD_KGSL_ENABLE_DMABUF=1
+# Clover's old KGSL/Mesa stack reports a conservative OpenGL/GLSL version.
+# WineD3D then rejects every D3D11 feature level even though the hardware
+# context is usable.  Match the compatibility profile used by the legacy
+# WinLite launcher so Unity D3D11 initialization reaches the KGSL context.
+export MESA_GL_VERSION_OVERRIDE="${MESA_GL_VERSION_OVERRIDE:-4.6COMPAT}"
+export MESA_GLSL_VERSION_OVERRIDE="${MESA_GLSL_VERSION_OVERRIDE:-460}"
 export mesa_glthread=true
 export MALLOC_ARENA_MAX=2
 
@@ -52,7 +58,13 @@ init_prefix() {
     # Apply WinLite defaults versioned rather than only on first wineboot so an
     # existing prefix receives later font/performance fixes without recreation.
     if [[ ! -e "$WINEPREFIX/.winlite-tuning-v3" ]]; then
-        regedit /S /usr/share/winlite/wine-default.reg || true
+        if command -v regedit >/dev/null 2>&1; then
+            regedit /S /usr/share/winlite/wine-default.reg || true
+        else
+            # Hangover images may not ship a Linux regedit wrapper, but Wine's
+            # builtin regedit.exe is always available after wineboot.
+            wine regedit /S /usr/share/winlite/wine-default.reg || true
+        fi
         touch "$WINEPREFIX/.winlite-tuning-v3"
     fi
 
@@ -135,18 +147,42 @@ init_prefix
 target="$1"
 shift
 
+# File-manager launches arrive as Linux paths (or file:// URIs). Wine's
+# Hangover launcher is more reliable when the working directory is the
+# executable's directory and the command contains only its basename; this
+# also preserves Unity's sibling *_Data lookup.
+if [[ "$target" == file://* ]]; then
+    target="${target#file://}"
+    target="${target//%20/ }"
+    target="${target//%5B/[}"
+    target="${target//%5D/]}"
+fi
+target="$(realpath -e -- "$target" 2>/dev/null || printf '%s' "$target")"
+target_dir="$(dirname -- "$target")"
+target_name="$(basename -- "$target")"
+cd -- "$target_dir"
+
 if [[ "$mode" == desktop ]]; then
     if [[ "${target,,}" == *.msi ]]; then
-        command=(wine explorer.exe /desktop=shell,,x11 msiexec.exe /i "$target" "$@")
+        command=(wine explorer.exe /desktop=shell,,x11 msiexec.exe /i "$target_name" "$@")
     else
-        command=(wine explorer.exe /desktop=shell,,x11 "$target" "$@")
+        command=(wine explorer.exe /desktop=shell,,x11 "$target_name" "$@")
     fi
 else
     if [[ "${target,,}" == *.msi ]]; then
-        command=(wine msiexec /i "$target" "$@")
+        command=(wine msiexec /i "$target_name" "$@")
     else
-        command=(wine "$target" "$@")
+        command=(wine "$target_name" "$@")
     fi
+fi
+
+# Unity players otherwise choose a small window on the first Wine launch.
+# KWin presents the 1920x1200 panel at the restored 1.5 desktop scale, so
+# Wayland clients see a 1280x800 logical output.  Render at that logical mode;
+# KWin/Anland scales the completed buffer to the physical panel without the
+# 1920x1200 oversize-surface/clipping bug.
+if [[ "${target_name,,}" == *.exe ]] && compgen -G "*_Data" >/dev/null 2>&1; then
+    command+=( -force-d3d11 -screen-fullscreen 1 -screen-width 1280 -screen-height 800 )
 fi
 
 # Only translated application launches are biased to SDM660's performance
