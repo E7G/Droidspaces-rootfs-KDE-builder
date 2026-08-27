@@ -11,7 +11,13 @@ export LANG=zh_CN.UTF-8
 export LANGUAGE=zh_CN:zh
 export LC_ALL=zh_CN.UTF-8
 export LD_LIBRARY_PATH="/usr/lib/wine/aarch64-unix${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export WINEPREFIX="$HOME/.wine-winlite"
+
+# Winlator-style container model: an active container owns one persistent Wine
+# prefix. The Linux rootfs stays immutable/minimal and only supplies the runtime.
+export WINLITE_CONTAINER="$(/usr/local/bin/wincontainer current)"
+export WINLITE_CONTAINER_ROOT="$(/usr/local/bin/wincontainer path "$WINLITE_CONTAINER")"
+export WINEPREFIX="$WINLITE_CONTAINER_ROOT/.wine"
+export WINEDEBUG=-all
 
 export ANLAND=1
 export ANLAND_SOCKET=/run/display.sock
@@ -38,10 +44,14 @@ export GTK_USE_PORTAL=0
 export PLASMA_INTEGRATION_USE_PORTAL=0
 unset XMODIFIERS GTK_IM_MODULE QT_IM_MODULE SDL_IM_MODULE GLFW_IM_MODULE
 
-export MESA_LOADER_DRIVER_OVERRIDE=kgsl
-export FD_FORCE_KGSL=1
-export FD_KGSL_ENABLE_DMABUF=1
+# Keep allocator fan-out small for all resident Linux-side processes. GPU/Wine
+# tuning is intentionally scoped inside kwin_wayland_wrapper and winrun so the
+# aggressive guest variables cannot leak into the compositor/audio graph.
 export MALLOC_ARENA_MAX=2
+
+# PipeWire is retained only because the AnLand backend itself exposes Android
+# playback/microphone as PipeWire nodes. WirePlumber runs its built-in policy
+# profile: no ALSA/Bluetooth/MIDI/camera monitor is even loaded.
 export PIPEWIRE_LATENCY=2048/48000
 export PULSE_RUNTIME_PATH="$XDG_RUNTIME_DIR/pulse"
 export PULSE_SERVER="unix:$PULSE_RUNTIME_PATH/native"
@@ -50,7 +60,7 @@ export PIPEWIRE_REMOTE="$XDG_RUNTIME_DIR/pipewire-0"
 unset INVOCATION_ID NOTIFY_SOCKET WATCHDOG_PID WATCHDOG_USEC SYSTEMD_EXEC_PID
 
 mkdir -p \
-    "$HOME/Windows" "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME" \
+    "$HOME/Windows" "$WINLITE_CONTAINER_ROOT" "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME" \
     "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$PULSE_RUNTIME_PATH" \
     /tmp/.X11-unix /tmp/.ICE-unix
 chmod 700 "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
@@ -59,9 +69,8 @@ chmod 1777 /tmp/.X11-unix /tmp/.ICE-unix
 cp -f /usr/share/winlite/kwinrc "$XDG_CONFIG_HOME/kwinrc"
 cp -f /usr/share/winlite/kwinoutputconfig.json "$XDG_CONFIG_HOME/kwinoutputconfig.json"
 
-# WinLite intentionally has no systemd-logind or ConsoleKit. KScreenLocker
-# cannot safely unlock in this environment, so disable every automatic/manual
-# lock path as a runtime safeguard even if the package is accidentally present.
+# WinLite intentionally has no logind/ConsoleKit. KScreenLocker cannot safely
+# unlock in this environment, so keep every lock path disabled defensively.
 cat >"$XDG_CONFIG_HOME/kscreenlockerrc" <<'EOF_KSCREENLOCKER'
 [Daemon]
 Autolock=false
@@ -89,7 +98,7 @@ cleanup() {
         kill -TERM "$pid" 2>/dev/null || true
     done
     wineserver -k 2>/dev/null || true
-    sleep 0.2
+    sleep 0.15
     for pid in "${pids[@]}"; do
         kill -KILL "$pid" 2>/dev/null || true
         wait "$pid" 2>/dev/null || true
@@ -97,41 +106,50 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Audio is the only resident service group besides the compositor and Wine
-# shell. Large buffering cuts wakeups on the SDM660 while keeping app audio
-# compatible with the Anland sink.
+# Minimal audio graph. The policy profile only links already-existing software
+# nodes (AnLand sink/source + Wine Pulse streams); it does not enumerate Linux
+# hardware and therefore avoids udev/ALSA/BlueZ/libcamera background work.
 pipewire >/run/winlite/pipewire.log 2>&1 &
 pids+=("$!")
-for _ in $(seq 1 100); do
+for _ in $(seq 1 80); do
     [[ -S "$XDG_RUNTIME_DIR/pipewire-0" ]] && break
     sleep 0.1
 done
+[[ -S "$XDG_RUNTIME_DIR/pipewire-0" ]] || exit 1
+
+wireplumber --profile=policy >/run/winlite/wireplumber.log 2>&1 &
+wireplumber_pid=$!
+pids+=("$wireplumber_pid")
+sleep 0.15
+kill -0 "$wireplumber_pid" 2>/dev/null || {
+    echo 'WirePlumber policy profile failed to start' >&2
+    exit 1
+}
 
 pipewire-pulse >/run/winlite/pipewire-pulse.log 2>&1 &
 pids+=("$!")
-for _ in $(seq 1 100); do
-    pactl info >/dev/null 2>&1 && break
+for _ in $(seq 1 80); do
+    [[ -S "$PULSE_RUNTIME_PATH/native" ]] && break
     sleep 0.1
 done
+[[ -S "$PULSE_RUNTIME_PATH/native" ]] || exit 1
 
-wireplumber >/run/winlite/wireplumber.log 2>&1 &
-pids+=("$!")
-
+# KWin is not a desktop here. It is the smallest currently available AnLand
+# bridge in this tree: Android display/input/audio -> Wayland/Xwayland.
 /usr/sbin/kwin_wayland_wrapper --xwayland >/run/winlite/kwin.log 2>&1 &
 kwin_pid=$!
 pids+=("$kwin_pid")
-for _ in $(seq 1 120); do
+for _ in $(seq 1 100); do
     [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]] && break
     kill -0 "$kwin_pid" 2>/dev/null || exit 1
     sleep 0.1
 done
 [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]] || exit 1
 
-# Wine's special shell desktop is currently more complete on X11 than on the
-# native Wine Wayland driver. KWin already owns Xwayland for compatibility, so
-# detect its display instead of hard-coding :0/:1.
+# Wine Explorer is more complete through X11 than Wine's native Wayland driver
+# and matches Winlator's shell model. Detect KWin's Xwayland display dynamically.
 x_socket=""
-for _ in $(seq 1 120); do
+for _ in $(seq 1 100); do
     x_socket="$(find /tmp/.X11-unix -maxdepth 1 -type s -name 'X*' -print -quit 2>/dev/null || true)"
     [[ -n "$x_socket" ]] && break
     kill -0 "$kwin_pid" 2>/dev/null || exit 1
@@ -144,23 +162,9 @@ else
     exit 1
 fi
 
-# Replace LXQt Panel + PCManFM-Qt with Wine's own explorer shell. It supplies
-# Start menu, taskbar, tray and desktop icons from the same Wine process family,
-# avoiding two resident Qt applications and their plugin stacks.
+# This process family is the complete visible UI: desktop, taskbar, Start menu,
+# tray and file browsing. There is no Linux panel/file manager/Plasma shell.
 /usr/local/bin/winrun --shell >/run/winlite/wine-shell.log 2>&1 &
-pids+=("$!")
-
-# The Anland sink is created asynchronously by the compositor backend.
-(
-    for _ in $(seq 1 200); do
-        if pactl list short sinks 2>/dev/null | grep -q '[[:space:]]anland-speaker[[:space:]]'; then
-            pactl set-default-sink anland-speaker 2>/dev/null || true
-            pactl set-sink-mute anland-speaker 0 2>/dev/null || true
-            exit 0
-        fi
-        sleep 0.1
-    done
-) &
 pids+=("$!")
 
 wait "$kwin_pid"

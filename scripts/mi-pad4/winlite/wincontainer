@@ -1,0 +1,167 @@
+#!/usr/bin/bash
+
+set -euo pipefail
+
+export HOME="${HOME:-/tmp/droidspaces-home}"
+
+CONTAINER_BASE="${WINLITE_CONTAINER_BASE:-$HOME/.winlite/containers}"
+ACTIVE_FILE="${WINLITE_ACTIVE_FILE:-$HOME/.winlite/active-container}"
+WINDOWS_DIR="${WINLITE_WINDOWS_DIR:-$HOME/Windows}"
+LEGACY_PREFIX="$HOME/.wine-winlite"
+
+valid_name() {
+    [[ "${1:-}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] \
+        && [[ "$1" != "." && "$1" != ".." ]]
+}
+
+update_legacy_link() {
+    local active="$1"
+    # After migration, keep the old path as a compatibility pointer to the
+    # active container. Never overwrite a real leftover legacy directory.
+    if [[ ! -e "$LEGACY_PREFIX" || -L "$LEGACY_PREFIX" ]]; then
+        ln -snf "$CONTAINER_BASE/$active/.wine" "$LEGACY_PREFIX"
+    fi
+}
+
+bootstrap() {
+    mkdir -p "$CONTAINER_BASE" "$(dirname "$ACTIVE_FILE")" "$WINDOWS_DIR"
+
+    # One-time migration from the original single-prefix WinLite layout.
+    if [[ -d "$LEGACY_PREFIX" && ! -L "$LEGACY_PREFIX" \
+          && ! -e "$CONTAINER_BASE/default/.wine" ]]; then
+        mkdir -p "$CONTAINER_BASE/default"
+        mv "$LEGACY_PREFIX" "$CONTAINER_BASE/default/.wine"
+    fi
+
+    if [[ ! -s "$ACTIVE_FILE" ]]; then
+        printf '%s\n' default >"$ACTIVE_FILE"
+    fi
+
+    local active
+    active="$(head -n1 "$ACTIVE_FILE" | tr -d '\r\n')"
+    if ! valid_name "$active"; then
+        printf '%s\n' default >"$ACTIVE_FILE"
+        active=default
+    fi
+    mkdir -p "$CONTAINER_BASE/$active"
+    update_legacy_link "$active"
+}
+
+current() {
+    bootstrap
+    head -n1 "$ACTIVE_FILE" | tr -d '\r\n'
+}
+
+container_path() {
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        name="$(current)"
+    else
+        bootstrap
+    fi
+    valid_name "$name" || {
+        echo "Invalid WinLite container name: $name" >&2
+        exit 2
+    }
+    printf '%s\n' "$CONTAINER_BASE/$name"
+}
+
+usage() {
+    cat >&2 <<'EOF'
+用法:
+  wincontainer current                 # 当前容器
+  wincontainer list                    # 列出容器
+  wincontainer create <名称>           # 新建空容器（Wine Prefix 首次运行时生成）
+  wincontainer use <名称>              # 切换下次 WinLite 图形会话使用的容器
+  wincontainer path [名称]             # 输出容器目录
+  wincontainer prefix [名称]           # 输出 Wine Prefix 目录
+  wincontainer delete <名称>            # 删除非当前容器
+
+容器数据位于 ~/.winlite/containers/<名称>/，共享 Windows 文件位于 ~/Windows/。
+切换当前容器后，重启 WinLite/Droidspaces 图形会话即可进入新的 Wine 桌面。
+EOF
+}
+
+command="${1:-}"
+case "$command" in
+    current)
+        current
+        ;;
+    path)
+        container_path "${2:-}"
+        ;;
+    prefix)
+        printf '%s/.wine\n' "$(container_path "${2:-}")"
+        ;;
+    list)
+        bootstrap
+        active="$(current)"
+        shopt -s nullglob
+        for path in "$CONTAINER_BASE"/*; do
+            [[ -d "$path" ]] || continue
+            name="${path##*/}"
+            if [[ "$name" == "$active" ]]; then
+                printf '* %s\n' "$name"
+            else
+                printf '  %s\n' "$name"
+            fi
+        done
+        ;;
+    create)
+        name="${2:-}"
+        valid_name "$name" || {
+            echo 'Container name must use letters, digits, dot, underscore or dash.' >&2
+            exit 2
+        }
+        bootstrap
+        path="$CONTAINER_BASE/$name"
+        [[ ! -e "$path" ]] || {
+            echo "Container already exists: $name" >&2
+            exit 1
+        }
+        mkdir -p "$path"
+        printf 'Created: %s\n' "$name"
+        ;;
+    use)
+        name="${2:-}"
+        valid_name "$name" || {
+            echo 'Container name must use letters, digits, dot, underscore or dash.' >&2
+            exit 2
+        }
+        bootstrap
+        [[ -d "$CONTAINER_BASE/$name" ]] || {
+            echo "Container does not exist: $name" >&2
+            exit 1
+        }
+        printf '%s\n' "$name" >"$ACTIVE_FILE"
+        update_legacy_link "$name"
+        printf 'Active container: %s (restart WinLite session to enter it)\n' "$name"
+        ;;
+    delete)
+        name="${2:-}"
+        valid_name "$name" || {
+            echo 'Container name must use letters, digits, dot, underscore or dash.' >&2
+            exit 2
+        }
+        bootstrap
+        active="$(current)"
+        [[ "$name" != "$active" ]] || {
+            echo 'Refusing to delete the active container.' >&2
+            exit 1
+        }
+        [[ -d "$CONTAINER_BASE/$name" ]] || {
+            echo "Container does not exist: $name" >&2
+            exit 1
+        }
+        rm -rf -- "$CONTAINER_BASE/$name"
+        printf 'Deleted: %s\n' "$name"
+        ;;
+    -h|--help|help|'')
+        usage
+        ;;
+    *)
+        echo "Unknown command: $command" >&2
+        usage
+        exit 2
+        ;;
+esac
