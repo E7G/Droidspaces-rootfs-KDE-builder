@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly REPO_ARCHIVE_URL="https://github.com/Goldzxcbug/Droidspaces-rootfs-KDE-builder/archive/refs/heads/main.tar.gz"
+readonly DEFAULT_REPO_ARCHIVE_URL="https://github.com/E7G/Droidspaces-rootfs-KDE-builder/archive/refs/heads/main.tar.gz"
+readonly REPO_ARCHIVE_URL="${ANLAND_BUILD_REPO_ARCHIVE_URL:-$DEFAULT_REPO_ARCHIVE_URL}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || true)"
 WORK_DIR=""
 UI_LANG="en"
