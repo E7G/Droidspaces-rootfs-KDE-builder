@@ -157,7 +157,7 @@ jobs:
 
           mkdir -p release_assets
           out="release_assets/Arch-min-Anland-V2-MiPad4-aarch64-v${GITHUB_RUN_NUMBER}.tar.xz"
-          sudo tar --numeric-owner -C rootfs -cJf "$out" .
+          sudo tar --numeric-owner -C rootfs -cf - . | xz -T0 -6 -c > "$out"
           sudo chown "$(id -u):$(id -g)" "$out"
           sha256sum "$out" > "$out.sha256"
           ls -lh "$out" "$out.sha256"
