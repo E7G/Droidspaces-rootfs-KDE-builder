@@ -7,7 +7,13 @@ on:
       - '.github/workflows/build-arch-mi-pad4-kwin-test.yml'
       - 'scripts/mi-pad4/build-arch-anland-kwin.sh'
       - 'scripts/mi-pad4/anland-kwin/kwin.patch'
+      - 'scripts/mi-pad4/anland-kwin/backend/**'
+      - 'scripts/mi-pad4/droidspaces-wslg-*'
   workflow_dispatch:
+
+concurrency:
+  group: arch-anland-v2-kwin-test
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -40,8 +46,6 @@ jobs:
               # and cannot affect an Anland backend-only change.
               install -d /usr/share/droidspaces
               : > /usr/share/droidspaces/kio-runtime-named-socket
-              ANLAND_ARCH_REPO=https://github.com/E7G/anland.git \
-              ANLAND_ARCH_REF=main \
               BUILD_KDE=min \
               BUILD_KIO=false \
               BUILD_KWIN=true \
@@ -56,6 +60,28 @@ jobs:
               mv -v "$package" "$safe_name"
             fi
           done
+          cp -v scripts/mi-pad4/droidspaces-wslg-kwin kwin-mi-pad4-test/
+          cp -v scripts/mi-pad4/droidspaces-wslg-prepare kwin-mi-pad4-test/
+          cp -v scripts/mi-pad4/droidspaces-wslg-cleanup kwin-mi-pad4-test/
+          chmod 755 kwin-mi-pad4-test/droidspaces-wslg-*
+          cat > kwin-mi-pad4-test/README-ARCH-WSLG-V2.txt <<'EOF'
+          Arch WSLg V2 test bundle
+          ========================
+
+          1. Install the patched KWin package:
+             sudo pacman -U ./kwin-*.pkg.tar.*
+
+          2. Install the Arch WSLg runtime hooks:
+             sudo install -Dm755 droidspaces-wslg-kwin /usr/local/bin/droidspaces-wslg-kwin
+             sudo install -Dm755 droidspaces-wslg-prepare /usr/local/sbin/droidspaces-wslg-prepare
+             sudo install -Dm755 droidspaces-wslg-cleanup /usr/local/sbin/droidspaces-wslg-cleanup
+
+          3. Use the current E7G Droidspaces + Anland builds.
+             In Droidspaces container details -> Linux Apps, enable WSLg V2 shared compositor.
+
+          The prepare/cleanup hooks temporarily stop the full Plasma desktop while
+          WSLg V2 owns KWin, then restore it after the shared session exits.
+          EOF
           sha256sum kwin-mi-pad4-test/*.pkg.tar.* > kwin-mi-pad4-test/SHA256SUMS
 
       - name: Upload test package
