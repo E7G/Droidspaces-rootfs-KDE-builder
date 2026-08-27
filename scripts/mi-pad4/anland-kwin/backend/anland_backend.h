@@ -15,9 +15,13 @@
 #include "core/renderdevice.h"
 
 #include <QByteArray>
+#include <QHash>
+#include <QPointer>
 #include <QPointF>
 #include <QVector>
+#include <cstdint>
 #include <memory>
+#include <sys/types.h>
 
 extern "C" {
 #include "display_producer.h"
@@ -29,6 +33,8 @@ class QTimer;
 
 namespace KWin
 {
+
+class Window;
 
 class AnlandOutput;
 class AnlandInputDevice;
@@ -102,6 +108,20 @@ private:
     // Inject UTF-8 text from the consumer's IME into the focused KWin client.
     void sendTextInputToKWin(const QByteArray &text);
 
+    // WSLg V2: real KWin top-level window metadata/control sideband.
+    void setupWindowBridge();
+    void trackWindow(Window *window);
+    void untrackWindow(Window *window);
+    void sendWindowEvent(Window *window, uint16_t action);
+    void sendWindowFocus(Window *window);
+    void resendWindowSnapshot();
+    void handleWindowCommand(uint32_t windowId, uint32_t command);
+
+    // Android top-app foreground scheduling.
+    void setupSchedulingTracking();
+    void updateActiveScheduling(bool force = false);
+    void sendSchedulingEvent(pid_t pid, uint8_t flags);
+
     // Direct Android IME bridge. Exact Wayland/internal text-input enable state is
     // mirrored to the consumer and resent after every daemon reconnect.
     void setupAndroidImeTracking();
@@ -130,6 +150,13 @@ private:
     QByteArray m_clipboardText;
     bool m_androidImeTrackingReady = false;
     bool m_androidImeActive = false;
+
+    bool m_windowBridgeEnabled = false;
+    uint32_t m_nextWindowId = 1;
+    uint32_t m_windowEventSerial = 1;
+    QHash<Window *, uint32_t> m_windowIds;
+    QHash<uint32_t, QPointer<Window>> m_windowsById;
+    pid_t m_activeSchedulingPid = -1;
 };
 
 } // namespace KWin
