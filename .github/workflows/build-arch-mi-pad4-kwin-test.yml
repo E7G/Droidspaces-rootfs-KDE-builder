@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: bash -n anland-build/install.sh
 
-      - name: Build patched KWin package
+      - name: Build patched KWin/XWayland packages
         shell: bash
         run: |
           set -euo pipefail
@@ -48,6 +48,7 @@ jobs:
               # and cannot affect an Anland backend-only change.
               install -d /usr/share/droidspaces
               : > /usr/share/droidspaces/kio-runtime-named-socket
+              ANLAND_ARCH_SOURCE=local \
               BUILD_KDE=min \
               BUILD_KIO=false \
               BUILD_KWIN=true \
@@ -94,6 +95,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git fetch --quiet origin main
+          if ! git diff --quiet HEAD..origin/main -- \
+            .github/workflows/build-arch-mi-pad4-kwin-test.yml \
+            scripts/mi-pad4/build-arch-anland-kwin.sh \
+            scripts/mi-pad4/anland-kwin; then
+            echo "This run is stale for Arch backend sources; skip package publish"
+            exit 0
+          fi
+
           dest=anland-build/Arch
           mkdir -p "$dest"
           find "$dest" -maxdepth 1 -type f \
