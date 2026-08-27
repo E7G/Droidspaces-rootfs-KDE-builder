@@ -146,6 +146,8 @@ jobs:
           rm -rf "$OUTPUT_DIR"
           mkdir -p "$OUTPUT_DIR"
 
+          build_log="$OUTPUT_DIR/build.log"
+          set +e
           docker run --rm \
             -e ANLAND_REPO \
             -e ANLAND_REF \
@@ -193,7 +195,24 @@ jobs:
               cd "/tmp/anland/$(dirname "$BUILD_SCRIPT")"
 
               WORKDIR=/root/anland-build sudo -E "./$(basename "$BUILD_SCRIPT")"
-            '
+            ' >"$build_log" 2>&1
+          rc=$?
+          set -e
+
+          if [ "$rc" -ne 0 ]; then
+            echo "::group::关键编译错误"
+            grep -E -i '(^|[[:space:]])(error:|fatal error:|undefined reference|failed:|ninja: build stopped|dpkg-buildpackage: error|rpmbuild:.*error|patch .*failed|does not apply)' "$build_log" \
+              | tail -n 220 || true
+            echo "::endgroup::"
+            echo "::group::构建日志末尾"
+            tail -n 260 "$build_log" || true
+            echo "::endgroup::"
+            exit "$rc"
+          fi
+
+          echo "::group::构建日志摘要"
+          tail -n 100 "$build_log" || true
+          echo "::endgroup::"
 
       - name: 更新本仓库预编译包目录
         env:
