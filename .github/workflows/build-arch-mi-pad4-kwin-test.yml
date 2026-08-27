@@ -9,6 +9,10 @@ on:
       - 'scripts/mi-pad4/anland-kwin/**'
   workflow_dispatch:
 
+concurrency:
+  group: arch-anland-v2-kwin-test
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -44,8 +48,6 @@ jobs:
               # and cannot affect an Anland backend-only change.
               install -d /usr/share/droidspaces
               : > /usr/share/droidspaces/kio-runtime-named-socket
-              ANLAND_ARCH_REPO=https://github.com/E7G/anland.git \
-              ANLAND_ARCH_REF=main \
               BUILD_KDE=min \
               BUILD_KIO=false \
               BUILD_KWIN=true \
@@ -60,6 +62,22 @@ jobs:
               mv -v "$package" "$safe_name"
             fi
           done
+          cp -v scripts/mi-pad4/droidspaces-wslg-kwin kwin-mi-pad4-test/
+          cp -v scripts/mi-pad4/droidspaces-wslg-prepare kwin-mi-pad4-test/
+          cp -v scripts/mi-pad4/droidspaces-wslg-cleanup kwin-mi-pad4-test/
+          chmod 755 kwin-mi-pad4-test/droidspaces-wslg-*
+          cat > kwin-mi-pad4-test/README-ARCH-WSLG-V2.txt <<'EOF'
+          Arch WSLg V2 test bundle
+          ========================
+
+          Install the generated KWin/XWayland packages with pacman -U, then:
+            sudo install -Dm755 droidspaces-wslg-kwin /usr/local/bin/droidspaces-wslg-kwin
+            sudo install -Dm755 droidspaces-wslg-prepare /usr/local/sbin/droidspaces-wslg-prepare
+            sudo install -Dm755 droidspaces-wslg-cleanup /usr/local/sbin/droidspaces-wslg-cleanup
+
+          Use current E7G Droidspaces and Anland. In Linux Apps enable the
+          WSLg V2 shared compositor switch.
+          EOF
           sha256sum kwin-mi-pad4-test/*.pkg.tar.* > kwin-mi-pad4-test/SHA256SUMS
 
       - name: Upload test package
