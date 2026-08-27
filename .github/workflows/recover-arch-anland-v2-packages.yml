@@ -1,0 +1,72 @@
+name: Recover Arch Anland V2 Packages
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/recover-arch-anland-v2-packages.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Download validated Mi Pad 4 package artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf recovered
+          mkdir recovered
+          gh run download 33097412422 \
+            --repo "$GITHUB_REPOSITORY" \
+            --name arch-anland-v2-packages \
+            --dir recovered
+          find recovered -maxdepth 2 -type f -print
+
+          shopt -s nullglob
+          pkgs=(recovered/*.pkg.tar.* recovered/*/*.pkg.tar.*)
+          if (("${#pkgs[@]}" < 2)); then
+            echo "Expected KWin and XWayland packages in recovered artifact" >&2
+            exit 1
+          fi
+          printf '%s\n' "${pkgs[@]}" | grep -q '/kwin-'
+          printf '%s\n' "${pkgs[@]}" | grep -q '/xorg-xwayland-'
+
+          publish_src="$RUNNER_TEMP/arch-anland-v2-recovered"
+          rm -rf "$publish_src"
+          mkdir -p "$publish_src"
+          cp -v "${pkgs[@]}" "$publish_src/"
+
+          git fetch --quiet origin main
+          git reset --hard origin/main
+
+          dest=anland-build/Arch
+          mkdir -p "$dest"
+          find "$dest" -maxdepth 1 -type f \
+            \( -name '*.pkg.tar.*' -o -name 'SHA256SUMS' \) -delete
+          cp -v "$publish_src"/*.pkg.tar.* "$dest/"
+          (
+            cd "$dest"
+            sha256sum *.pkg.tar.* > SHA256SUMS
+          )
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A "$dest"
+          if git diff --cached --quiet; then
+            echo "Recovered packages already match main"
+            exit 0
+          fi
+          git commit -m "Recover validated Mi Pad 4 Anland V2 packages"
+          git push origin HEAD:main
