@@ -1,0 +1,58 @@
+name: Debug Debian13 Anland KWin
+
+on:
+  push:
+    branches:
+      - debug/debian13-anland-v2
+    paths:
+      - '.github/workflows/debug-debian13-anland.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  debian13:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build Debian 13 Anland packages with compact failure output
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .debug-debian13
+          log="$PWD/.debug-debian13/build.log"
+
+          set +e
+          docker run --rm \
+            -v "$PWD/.debug-debian13:/root/anland-build" \
+            debian:trixie bash -lc '
+              set -euo pipefail
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                git ca-certificates sudo build-essential devscripts dpkg-dev fakeroot patch
+              if [ -f /etc/apt/sources.list.d/debian.sources ]; then
+                sed -i "s/^Types: deb$/Types: deb deb-src/" /etc/apt/sources.list.d/debian.sources
+              fi
+              apt-get update
+              git clone --depth=1 https://github.com/E7G/anland.git /tmp/anland
+              chmod +x /tmp/anland/producers/kde/Debian13_v5/build.sh
+              cd /tmp/anland/producers/kde/Debian13_v5
+              WORKDIR=/root/anland-build sudo -E ./build.sh
+            ' >"$log" 2>&1
+          rc=$?
+          set -e
+
+          if [ "$rc" -ne 0 ]; then
+            echo "::group::Debian13 key errors"
+            grep -E -i '(^|[[:space:]])(error:|fatal error:|undefined reference|failed:|ninja: build stopped|dpkg-buildpackage: error|patch .*failed|does not apply|No such file)' "$log" \
+              | tail -n 260 || true
+            echo "::endgroup::"
+            echo "::group::Debian13 log tail"
+            tail -n 320 "$log" || true
+            echo "::endgroup::"
+            exit "$rc"
+          fi
+
+          tail -n 120 "$log"
