@@ -6,3 +6,7 @@ release_assets
 /*-Droidspaces-rootfs-*.tar.xz
 /custom-*-rootfs.tar
 rootfs-files*.txt
+
+# clean waits for Anland v6; do not package the retired shared-compositor helpers.
+scripts/mi-pad4/droidspaces-wslg-*
+scripts/mi-pad4/mi-pad4-desktop.service
