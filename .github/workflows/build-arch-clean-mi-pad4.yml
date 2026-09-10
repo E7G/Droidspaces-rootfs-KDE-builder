@@ -116,8 +116,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf rootfs release_assets
+          rm -rf rootfs rootfs.tar release_assets
           mkdir -p rootfs release_assets
+          # BuildKit's local exporter creates symlinks directly in the Actions
+          # workspace and can hit EPERM on CA certificate link farms. Export a
+          # tar stream instead, then extract it as root so links and ownership
+          # are reproduced without depending on workspace symlink permissions.
           docker buildx build \
             --platform linux/arm64 \
             --file Arch.Dockerfile \
@@ -131,8 +135,10 @@ jobs:
             --build-arg ENABLE_systemd257_ARG=true \
             --build-arg ENABLE_MI_PAD4_FIREFOX_ARG=false \
             --build-arg BUILD_CLOVER_KWIN=true \
-            --output type=local,dest=rootfs \
+            --output type=tar,dest=rootfs.tar \
             .
+          sudo tar --numeric-owner -xf rootfs.tar -C rootfs
+          rm -f rootfs.tar
 
       - name: Validate clean Clover profile
         shell: bash
