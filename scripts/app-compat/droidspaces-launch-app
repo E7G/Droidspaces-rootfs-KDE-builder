@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+usage() {
+    echo "usage: droidspaces-launch-app --shell <command>" >&2
+    exit 2
+}
+
+[[ "${1:-}" == "--shell" && $# -ge 2 ]] || usage
+shift
+command_line="$1"
+[[ -n "$command_line" ]] || usage
+
+# Linux Apps must be able to run without a working systemd --user instance on
+# legacy Android kernels. Prefer an existing runtime directory, otherwise use a
+# private directory in HOME that the unprivileged container user can create.
+runtime_default="${HOME:-/tmp}/.local/run/droidspaces-$(id -u)"
+if [[ -z "${XDG_RUNTIME_DIR:-}" || ! -d "${XDG_RUNTIME_DIR:-/nonexistent}" || ! -w "${XDG_RUNTIME_DIR:-/nonexistent}" ]]; then
+    export XDG_RUNTIME_DIR="$runtime_default"
+fi
+mkdir -p "$XDG_RUNTIME_DIR" 2>/dev/null || true
+chmod 0700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+
+# Device/compositor shims must never leak into arbitrary applications. Clover's
+# legacy ION shim intercepts ioctl(), so it is injected only by the KWin device
+# wrapper and explicitly removed here before the app starts.
+unset LD_PRELOAD
+
+# Do not force Qt onto Wayland. When both WAYLAND_DISPLAY and DISPLAY exist,
+# modern Qt can use Wayland while old/unsupported Qt applications remain free to
+# use XCB/XWayland. GTK keeps a safe Wayland -> X11 fallback order.
+unset QT_QPA_PLATFORM
+export GDK_BACKEND="${GDK_BACKEND:-wayland,x11}"
+
+# KWin normally exports DISPLAY before --exit-with-session starts us. Some old
+# XWayland builds race that update, so recover DISPLAY from the socket if needed.
+if [[ -z "${DISPLAY:-}" ]]; then
+    for _ in $(seq 1 40); do
+        for xsock in /tmp/.X11-unix/X*; do
+            [[ -S "$xsock" ]] || continue
+            export DISPLAY=":${xsock##*X}"
+            break 2
+        done
+        sleep 0.05
+    done
+fi
+
+# Propagate the final display/session environment to DBus-activated helpers when
+# a normal dbus session is available. Failure is harmless on minimal images.
+if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+    dbus-update-activation-environment \
+        XDG_RUNTIME_DIR WAYLAND_DISPLAY DISPLAY DBUS_SESSION_BUS_ADDRESS \
+        XDG_CURRENT_DESKTOP 2>/dev/null || true
+fi
+
+# Keep Chromium/Electron sandbox behaviour unchanged. On kernels without usable
+# user namespaces users may opt in per launch instead of silently weakening every
+# Chromium application: DROIDSPACES_CHROMIUM_NO_SANDBOX=1.
+if [[ "${DROIDSPACES_CHROMIUM_NO_SANDBOX:-0}" == "1" ]]; then
+    first_word="${command_line%%[[:space:]]*}"
+    case "${first_word##*/}" in
+        chromium|chromium-browser|google-chrome|google-chrome-stable|electron|code|code-oss)
+            command_line="$command_line --no-sandbox"
+            ;;
+    esac
+fi
+
+exec /bin/bash -lc "$command_line"
