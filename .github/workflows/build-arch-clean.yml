@@ -1,0 +1,99 @@
+name: Build Arch Clean
+
+on:
+  push:
+    branches: [ clean ]
+    paths:
+      - 'Arch.Dockerfile'
+      - 'scripts/**'
+      - 'local-packages-mi-pad4/**'
+      - '.github/workflows/build-arch-clean.yml'
+  workflow_dispatch:
+    inputs:
+      full_kde:
+        description: Build the generic KDE/Anland image as well as the fast smoke image
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arch-clean-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate clean shell scripts
+        run: |
+          set -euo pipefail
+          bash -n scripts/install-desktop.sh
+          bash -n scripts/configure-desktop.sh
+          bash -n scripts/start-desktop-session.sh
+          bash -n scripts/install-device-profile.sh
+          bash -n scripts/desktops/kde.sh
+          bash -n scripts/desktops/kde-mobile.sh
+          bash -n scripts/device-profiles/generic.sh
+          bash -n scripts/device-profiles/mi-pad4-clover.sh
+          bash -n scripts/app-compat/droidspaces-launch-app
+
+  smoke:
+    runs-on: ubuntu-24.04
+    needs: scripts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+      - name: Build generic ARM64 smoke RootFS
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Arch.Dockerfile
+          platforms: linux/arm64
+          push: false
+          cache-from: type=gha,scope=arch-clean-smoke
+          cache-to: type=gha,mode=max,scope=arch-clean-smoke
+          build-args: |
+            DESKTOP=none
+            DESKTOP_AUTOSTART=false
+            DISPLAY_BACKEND=x11
+            DEVICE_PROFILE=generic
+            USERNAME=droidspaces
+            ENABLE_mesa_ARG=false
+            ENABLE_srf_ARG=false
+            ENABLE_zip_ARG=false
+            ENABLE_systemd257_ARG=false
+
+  generic-kde:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.full_kde }}
+    runs-on: ubuntu-24.04
+    needs: scripts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+      - name: Build generic KDE + Anland RootFS
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Arch.Dockerfile
+          platforms: linux/arm64
+          push: false
+          cache-from: type=gha,scope=arch-clean-kde
+          cache-to: type=gha,mode=max,scope=arch-clean-kde
+          build-args: |
+            DESKTOP=kde
+            DESKTOP_AUTOSTART=false
+            DISPLAY_BACKEND=anland-wayland
+            DEVICE_PROFILE=generic
+            USERNAME=droidspaces
+            ENABLE_mesa_ARG=true
+            ENABLE_srf_ARG=true
