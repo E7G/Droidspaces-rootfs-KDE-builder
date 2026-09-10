@@ -44,8 +44,28 @@ jobs:
             -v "$PWD/.ci/archlinuxarm-PKGBUILDs:/src" \
             lfdevs/archlinuxarm:base-devel bash -lc '
               set -euo pipefail
-              pacman -Syyu --noconfirm
-              pacman -S --needed --noconfirm sudo base-devel git ccache
+
+              # Arch Linux ARM mirrors occasionally become extremely slow.
+              # Keep libalpm from aborting a valid transfer merely because it
+              # drops below the default low-speed threshold, and retry explicit
+              # package transactions so a transient mirror failure does not
+              # waste the entire long-running Mi Pad 4 build.
+              grep -q "^DisableDownloadTimeout$" /etc/pacman.conf || \
+                sed -i "/^\[options\]$/a DisableDownloadTimeout" /etc/pacman.conf
+              pacman_retry() {
+                local attempt
+                for attempt in 1 2 3 4 5; do
+                  if pacman "$@"; then
+                    return 0
+                  fi
+                  echo "pacman attempt ${attempt}/5 failed; retrying..." >&2
+                  sleep "$((attempt * 10))"
+                done
+                return 1
+              }
+
+              pacman_retry -Syyu --noconfirm
+              pacman_retry -S --needed --noconfirm sudo base-devel git ccache
               useradd -m -s /bin/bash builder
               echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
               chmod 0440 /etc/sudoers.d/builder
@@ -83,8 +103,23 @@ jobs:
             -v "$PWD/.ci/pango:/src" \
             lfdevs/archlinuxarm:base-devel bash -lc '
               set -euo pipefail
-              pacman -Syyu --noconfirm
-              pacman -S --needed --noconfirm sudo base-devel git ccache
+
+              grep -q "^DisableDownloadTimeout$" /etc/pacman.conf || \
+                sed -i "/^\[options\]$/a DisableDownloadTimeout" /etc/pacman.conf
+              pacman_retry() {
+                local attempt
+                for attempt in 1 2 3 4 5; do
+                  if pacman "$@"; then
+                    return 0
+                  fi
+                  echo "pacman attempt ${attempt}/5 failed; retrying..." >&2
+                  sleep "$((attempt * 10))"
+                done
+                return 1
+              }
+
+              pacman_retry -Syyu --noconfirm
+              pacman_retry -S --needed --noconfirm sudo base-devel git ccache
               useradd -m -s /bin/bash builder
               echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
               chmod 0440 /etc/sudoers.d/builder
