@@ -1,0 +1,185 @@
+name: Build Arch Clean Mi Pad 4
+
+on:
+  push:
+    branches: [ clean ]
+    paths:
+      - 'Arch.Dockerfile'
+      - 'scripts/device-profiles/**'
+      - 'scripts/app-compat/**'
+      - 'scripts/desktops/**'
+      - 'scripts/mi-pad4/**'
+      - '.github/workflows/build-arch-clean-mi-pad4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arch-clean-mi-pad4-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MESA_KGSL_REV: e6250622794358a186afe3e00271f744728dbbb7
+  PANGO_PKG_COMMIT: 92547f34a91108b16e6dd2ea08317e0bd1be7487
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Clover Mesa packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .ci/archlinuxarm-PKGBUILDs mesa-mi-pad4-test
+          git clone --depth 1 --branch freedreno \
+            https://github.com/E7G/archlinuxarm-PKGBUILDs.git \
+            .ci/archlinuxarm-PKGBUILDs
+          grep -Fq "$MESA_KGSL_REV" .ci/archlinuxarm-PKGBUILDs/extra/mesa/PKGBUILD
+          docker run --privileged --rm \
+            -v "$PWD/.ci/archlinuxarm-PKGBUILDs:/src" \
+            lfdevs/archlinuxarm:base-devel bash -lc '
+              set -euo pipefail
+              pacman -Syyu --noconfirm
+              pacman -S --needed --noconfirm sudo base-devel git ccache
+              useradd -m -s /bin/bash builder
+              echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
+              chmod 0440 /etc/sudoers.d/builder
+              chown -R builder:builder /src
+              sudo -u builder bash -lc "
+                set -euo pipefail
+                export CCACHE_DIR=/home/builder/.ccache
+                ccache --max-size=2G
+                cd /src/extra/mesa
+                makepkg -s --noconfirm --needed
+              "
+            '
+          mkdir -p local-packages-mi-pad4
+          for pattern in \
+            'mesa-[0-9]*.pkg.tar.*' \
+            'vulkan-freedreno-*.pkg.tar.*' \
+            'vulkan-mesa-implicit-layers-*.pkg.tar.*'; do
+            cp -v .ci/archlinuxarm-PKGBUILDs/extra/mesa/$pattern local-packages-mi-pad4/
+          done
+          for package in local-packages-mi-pad4/*.pkg.tar.*; do
+            safe_name="${package//:/_}"
+            [[ "$safe_name" == "$package" ]] || mv -v "$package" "$safe_name"
+          done
+
+      - name: Build kernel-4.4-compatible Pango package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .ci/pango
+          git clone --filter=blob:none --no-checkout \
+            https://gitlab.archlinux.org/archlinux/packaging/packages/pango.git .ci/pango
+          git -C .ci/pango fetch --depth 1 origin "$PANGO_PKG_COMMIT"
+          git -C .ci/pango checkout --detach FETCH_HEAD
+          docker run --privileged --rm \
+            -v "$PWD/.ci/pango:/src" \
+            lfdevs/archlinuxarm:base-devel bash -lc '
+              set -euo pipefail
+              pacman -Syyu --noconfirm
+              pacman -S --needed --noconfirm sudo base-devel git ccache
+              useradd -m -s /bin/bash builder
+              echo "builder ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/builder
+              chmod 0440 /etc/sudoers.d/builder
+              chown -R builder:builder /src
+              sudo -u builder bash -lc "
+                set -euo pipefail
+                cd /src
+                makepkg -sA --noconfirm --needed
+              "
+            '
+          cp -v .ci/pango/pango-[0-9]*.pkg.tar.* local-packages-mi-pad4/
+          for package in local-packages-mi-pad4/pango-*.pkg.tar.*; do
+            safe_name="${package//:/_}"
+            [[ "$safe_name" == "$package" ]] || mv -v "$package" "$safe_name"
+          done
+
+      - name: Validate staged device packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          compgen -G 'local-packages-mi-pad4/mesa-[0-9]*.pkg.tar.*' >/dev/null
+          compgen -G 'local-packages-mi-pad4/vulkan-freedreno-*.pkg.tar.*' >/dev/null
+          compgen -G 'local-packages-mi-pad4/pango-*.pkg.tar.*' >/dev/null
+          sha256sum local-packages-mi-pad4/*.pkg.tar.* > local-packages-mi-pad4/SHA256SUMS
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build clean Mi Pad 4 RootFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf rootfs release_assets
+          mkdir -p rootfs release_assets
+          docker buildx build \
+            --platform linux/arm64 \
+            --file Arch.Dockerfile \
+            --build-arg DESKTOP=kde \
+            --build-arg DESKTOP_AUTOSTART=false \
+            --build-arg DISPLAY_BACKEND=anland-wayland \
+            --build-arg DEVICE_PROFILE=mi-pad4-clover \
+            --build-arg USERNAME=droidspaces \
+            --build-arg ENABLE_mesa_ARG=true \
+            --build-arg ENABLE_srf_ARG=true \
+            --build-arg ENABLE_systemd257_ARG=true \
+            --build-arg ENABLE_MI_PAD4_FIREFOX_ARG=false \
+            --build-arg BUILD_CLOVER_KWIN=true \
+            --output type=local,dest=rootfs \
+            .
+
+      - name: Validate clean Clover profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x rootfs/usr/bin/kwin_wayland
+          test -x rootfs/usr/bin/Xwayland
+          test -x rootfs/usr/local/bin/droidspaces-anland-kwin
+          test -x rootfs/usr/local/bin/droidspaces-launch-app
+          test -s rootfs/usr/local/lib/libion-legacy-shim.so
+          test -f rootfs/etc/droidspaces-device.conf
+          grep -Fxq 'DEVICE_PROFILE=mi-pad4-clover' rootfs/etc/droidspaces-device.conf
+          grep -Fxq 'profile=mi-pad4-clover' rootfs/usr/share/droidspaces/device-profile
+          grep -Fxq 'wslg=disabled-waiting-for-anland-v6' rootfs/usr/share/droidspaces/device-profile
+          grep -Fxq 'app-env=device-neutral' rootfs/usr/share/droidspaces/device-profile 2>/dev/null && {
+            echo 'Mi Pad profile was replaced by generic profile' >&2
+            exit 1
+          } || true
+
+          # App environment must stay toolkit-neutral and must not globally
+          # preload the Clover ioctl shim.
+          ! grep -q '^LD_PRELOAD=' rootfs/etc/environment
+          ! grep -q '^QT_QPA_PLATFORM=' rootfs/etc/environment
+
+          # Retired shared-compositor helpers/services must not enter clean.
+          test ! -e rootfs/usr/local/bin/droidspaces-wslg-kwin
+          test ! -e rootfs/usr/local/sbin/droidspaces-wslg-prepare
+          test ! -e rootfs/usr/local/sbin/droidspaces-wslg-cleanup
+          test ! -e rootfs/etc/systemd/system/mi-pad4-desktop.service
+
+          grep -q 'MESA_LOADER_DRIVER_OVERRIDE=kgsl' rootfs/usr/local/bin/droidspaces-anland-kwin
+          grep -q 'LD_PRELOAD=/usr/local/lib/libion-legacy-shim.so' rootfs/usr/local/bin/droidspaces-anland-kwin
+          grep -q 'unset LD_PRELOAD' rootfs/usr/local/bin/droidspaces-launch-app
+
+      - name: Pack RootFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="release_assets/Arch-clean-MiPad4-Clover-aarch64-${GITHUB_RUN_NUMBER}.tar.xz"
+          sudo tar --numeric-owner -C rootfs -cf - . | xz -T0 -6 -c > "$out"
+          sha256sum "$out" > "$out.sha256"
+          ls -lh "$out" "$out.sha256"
+
+      - name: Upload RootFS
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-clean-mi-pad4-clover
+          path: release_assets/
+          if-no-files-found: error
+          retention-days: 14
