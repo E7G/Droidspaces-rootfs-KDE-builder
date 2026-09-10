@@ -90,7 +90,7 @@ if [[ "${DROIDSPACES_BUILD_CLOVER_KWIN:-true}" == true ]]; then
     BUILD_KIO="$build_kio" \
     BUILD_PLASMA_WORKSPACE=false \
     ANLAND_ARCH_SOURCE=local \
-        "$assets/build-arch-anland-kwin.sh"
+        bash "$assets/build-arch-anland-kwin.sh"
 fi
 
 # Compositor-only hardware environment. Linux applications launched by
